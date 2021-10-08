@@ -14,7 +14,7 @@ import jsonlines
 from pathlib import Path
 from tqdm.auto import tqdm
 from dataclasses import asdict
-from typing import Iterable, Union, List, Optional
+from typing import Iterable, Union, List, Optional, Dict
 
 from config import LOCATIONS as LOC
 from utils.data import CorefDocument
@@ -23,7 +23,7 @@ from utils.misc import to_toks, AnnotationBlockStack
 
 class CoNLLOntoNotesParser:
 
-    def __init__(self, ontonotes_dir: Path, splits: Iterable[str] = ('train',), ignore_empty_documents: bool = False):
+    def __init__(self, ontonotes_dir: Path, splits: Iterable[str] = [], ignore_empty_documents: bool = False):
         """
             :param ontonotes_dir: Path to the folder containing `development`, `train`, `test` subfolders.
             :param splits: a tuple of which subfolders should we process
@@ -51,7 +51,7 @@ class CoNLLOntoNotesParser:
             with jsonlines.Writer(f) as writer:
                 writer.write_all([asdict(instance) for instance in instances])
 
-
+        print(f"Successfully written {len(instances)} at {write_dir}.")
 
     def run(self):
 
@@ -59,6 +59,7 @@ class CoNLLOntoNotesParser:
             outputs = self.parse(split)
 
             # Dump them to disk
+            self.write_to_disk(split, outputs)
 
     def parse(self, split_nm: Union[Path, str]):
         """ Where the actual parsing happens. One split at a time. """
@@ -70,51 +71,61 @@ class CoNLLOntoNotesParser:
 
         folder_dir: Path = folder_dir / 'data' / 'english' / 'annotations'
 
-        for docid, fname in enumerate(tqdm(folder_dir.glob('*/*/*/*gold_conll'))):
+        for doc_id, fname in enumerate(tqdm(folder_dir.glob('*/*/*/*gold_conll'))):
             # Iterate through all the files in this dir
             genre: str = str(fname).split('/')[-4]
-            documents, clusters, speakers, docnames, docparts, docpos = self._parse_document_(path=fname)
+            documents, clusters, speakers, doc_names, doc_parts, doc_pos = self._parse_document_(path=fname)
+
+            documents = self._preproc_document_text_(documents)
 
             # Check if we want to ignore empty documents
             if self.flag_ignore_empty_documents:
                 ne_documents, ne_clusters, ne_speakers, ne_docnames, ne_docparts = [], [], [], [], []
 
                 for i, cluster in enumerate(clusters):
-                    try:
-                        if max(to_toks(cluster)) == -1:
-                            continue
-                    except TypeError:
-                        # The cluster is not empty
-                        ...
+                    if not cluster:
+                        continue
 
                     ne_documents += documents[i]
                     ne_clusters += clusters[i]
                     ne_speakers += speakers[i]
-                    ne_docnames += docnames[i]
-                    ne_docparts += docparts[i]
+                    ne_docnames += doc_names[i]
+                    ne_docparts += doc_parts[i]
 
                 documents = ne_documents
                 clusters = ne_clusters
                 speakers = ne_speakers
-                docnames = ne_docnames
-                docparts = ne_docparts
+                doc_names = ne_docnames
+                doc_parts = ne_docparts
 
             # The remaining documents are to be converted into nice objects.
             for i in range(len(documents)):
 
                 # Convert cluster info to spans and text sequences
-                cluster_spans, cluster_text = self.convert_clusters(documents[i], clusters[i])
+                # cluster_spans, cluster_text = self.convert_clusters(documents[i], clusters[i])
+
+                if len(to_toks(clusters)) == 0: continue
+
+                # Convert cluster spans to text
+                flat_doc = to_toks(documents[i])
+                clusters_ = []
+                for cluster_id, cluster in enumerate(clusters[i]):
+                    clusters_.append([])
+                    for span in cluster:
+                        clusters_[cluster_id].append(flat_doc[span[0]:span[1]+1])
 
                 doc = CorefDocument(
                     document=documents[i],
-                    pos=docpos[i],
-                    docname=docnames[i],
+                    pos=doc_pos[i],
+                    docname=doc_names[i],
                     split=split_nm,
-                    docpart=docparts[i],
-                    clusters=cluster_spans.values(),
-                    clusters_=cluster_text.values()
+                    docpart=doc_parts[i],
+                    clusters=list(clusters[i]),
+                    clusters_=list(clusters_)
                 )
                 outputs.append(doc)
+
+            print(doc_id)
 
         return outputs
 
@@ -142,10 +153,11 @@ class CoNLLOntoNotesParser:
         """
         doc_keys = []
         doc_sents = []
-        doc_cluster_ids = []
+        doc_clusters = []
         doc_speaker_ids = []
         doc_pos = []
         sentences = []
+        clusters = {}
         sentence_cluster_ids = []
         sentence_speaker_ids = []
         sentence_pos_tags = []
@@ -161,6 +173,7 @@ class CoNLLOntoNotesParser:
                 if line.startswith("#begin document"):
                     doc_key = line.split()[2][:-1]
                     doc_keys.append(doc_key[1:-1])
+                    num_words = 0
                     assert line.split()[-1].isdigit()
                     parts.append(int(line.split()[-1]))
                     docs += 1
@@ -168,13 +181,30 @@ class CoNLLOntoNotesParser:
                     assert len(sentences) == len(sentence_cluster_ids) == len(sentence_speaker_ids)
                     assert cur_sentence_words == []
                     doc_sents.append(sentences)
-                    doc_cluster_ids.append(sentence_cluster_ids)
+                    merged_clusters = []
+                    for c1 in clusters.values():
+                        existing = None
+                        for m in c1:
+                            for c2 in merged_clusters:
+                                if tuple(m) in c2:
+                                    existing = c2
+                                    break
+                            if existing is not None:
+                                break
+                        if existing is not None:
+                            print("Merging clusters (shouldn't happen very often.)")
+                            existing.update([tuple(x) for x in c1])
+                        else:
+                            merged_clusters.append(set([tuple(x) for x in c1]))
+                    merged_clusters = [list(c) for c in merged_clusters]
+                    doc_clusters.append(merged_clusters)
                     doc_speaker_ids.append(sentence_speaker_ids)
                     doc_pos.append(sentence_pos_tags)
                     sentences = []
                     sentence_cluster_ids = []
                     sentence_speaker_ids = []
                     sentence_pos_tags = []
+                    clusters = {}
                 else:
                     data = line.split()
                     sentence_end = len(data) == 0
@@ -192,32 +222,27 @@ class CoNLLOntoNotesParser:
                         cur_sentence_pos_tags.append(data[4])
                         cur_sentence_speaker_ids.append(data[9])
                         raw_cluster_id = data[-1]
-                        if raw_cluster_id == "-":
-                            if len(current_clusters) == 0:
-                                cluster_id = -1
-                            elif len(current_clusters) == 1:
-                                cluster_id = int(list(current_clusters)[0])
-                            else:
-                                cluster_id = tuple(int(item) for item in current_clusters)
-                        else:
-                            for part in raw_cluster_id.split("|"):
-                                if "(" in part:
-                                    current_clusters.append(part[1:-1] if ")" in part else part[1:])
-                            if len(current_clusters) == 1:
-                                cluster_id = int(list(current_clusters)[0])
-                            else:
-                                cluster_id = tuple(int(item) for item in current_clusters)
-                            for part in raw_cluster_id.split("|"):
-                                if ")" in part:
-                                    current_clusters.remove(part[1:-1] if "(" in part else part[:-1])
-                        cur_sentence_cluster_ids.append(cluster_id)
+                        for part in raw_cluster_id.split("|"):
+                            if "(" in part:
+                                clus_id = part[1:-1] if ")" in part else part[1:]
+                                if clus_id not in clusters:
+                                    clusters[clus_id] = []
+                                clusters[clus_id].append([num_words])
+                        for part in raw_cluster_id.split("|"):
+                            if ")" in part:
+                                clus_id = part[1:-1] if "(" in part else part[:-1]
+                                for i in range(len(clusters[clus_id])-1, -1, -1):
+                                    if len(clusters[clus_id][i]) == 1:
+                                        clusters[clus_id][i].append(num_words)
+                                        break
+                        num_words += 1
             assert len(doc_sents) == docs
             for i in range(docs):
                 doc_keys[i] += f"_{i}"
-            return doc_sents, doc_cluster_ids, doc_speaker_ids, doc_keys, parts, doc_pos
+            return doc_sents, doc_clusters, doc_speaker_ids, doc_keys, parts, doc_pos
 
     @staticmethod
-    def convert_clusters(document: List[List[str]], cluster: List[List[int]]) -> (dict, dict):
+    def convert_clusters(document: List[List[str]], cluster: List[List[int]]) -> (Dict[int, list], Dict[int, list]):
         """ based on the cluster info, get the span IDs and tokens """
 
         # If the clusters are empty, return empty lists
@@ -253,5 +278,5 @@ class CoNLLOntoNotesParser:
 
 if __name__ == '__main__':
 
-    parser = CoNLLOntoNotesParser(LOC.ontonotes_conll, ignore_empty_documents=False)
+    parser = CoNLLOntoNotesParser(LOC.ontonotes_conll, splits=['train'], ignore_empty_documents=False)
     parser.run()
