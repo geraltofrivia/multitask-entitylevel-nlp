@@ -76,8 +76,6 @@ class CoNLLOntoNotesParser:
             genre: str = str(fname).split('/')[-4]
             documents, clusters, speakers, doc_names, doc_parts, doc_pos = self._parse_document_(path=fname)
 
-            documents = self._preproc_document_text_(documents)
-
             # Check if we want to ignore empty documents
             if self.flag_ignore_empty_documents:
                 ne_documents, ne_clusters, ne_speakers, ne_docnames, ne_docparts = [], [], [], [], []
@@ -135,6 +133,10 @@ class CoNLLOntoNotesParser:
             word = word[:word.find("#")]
         if word == "/." or word == "/?" or word == "/-":
             return word[1:]
+        if word == '-LRB-':
+            return '('
+        if word == '-RRB-':
+            return ')'
         else:
             return word
 
@@ -240,41 +242,6 @@ class CoNLLOntoNotesParser:
             for i in range(docs):
                 doc_keys[i] += f"_{i}"
             return doc_sents, doc_clusters, doc_speaker_ids, doc_keys, parts, doc_pos
-
-    @staticmethod
-    def convert_clusters(document: List[List[str]], cluster: List[List[int]]) -> (Dict[int, list], Dict[int, list]):
-        """ based on the cluster info, get the span IDs and tokens """
-
-        # If the clusters are empty, return empty lists
-        try:
-            if max(to_toks(cluster)) == -1:
-                return {}, {}
-        except TypeError:
-            # The cluster is not empty
-            ...
-
-        cluster_spans, cluster_tokens = {}, {}
-
-        # If the clusters are not empty,
-        #   1. Flatten the document and cluster info from a list of list of tokens to a list of tokens
-        #   2. Use a stack based mechanism to sort through the nested annotations - class AnnotationBlockStack
-        #       ( btw which may be a int or a tuple for a token)
-
-        flat_cluster = to_toks(cluster)
-        flat_document = to_toks(document)
-
-        stack = AnnotationBlockStack()
-        for i, (token_cluster, token_text) in enumerate(zip(flat_cluster, flat_document)):
-
-            completed_annotations: Optional[List] = stack.process(token=token_text, cluster=token_cluster, span_id=i)
-
-            # All these completed annotations are to be noted in cluster_spans, cluster_tokens
-            for block in completed_annotations:
-                cluster_spans.setdefault(block.tag, []).append((block.start, block.end))
-                cluster_tokens.setdefault(block.tag, []).append(block.words)
-
-        return cluster_spans, cluster_tokens
-
 
 if __name__ == '__main__':
 
