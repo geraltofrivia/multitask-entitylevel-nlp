@@ -18,7 +18,7 @@ from dataclasses import asdict
 from typing import Iterable, Union, List, Optional, Dict
 
 from config import LOCATIONS as LOC
-from utils.data import CorefDocument
+from utils.data import Document
 from utils.misc import to_toks, NERAnnotationBlockStack
 
 
@@ -36,11 +36,11 @@ class CoNLLOntoNotesParser:
         self.splits = ['train', 'development', 'test', 'conll-2012-test'] if not splits else splits
 
         self.flag_ignore_empty_documents: bool = ignore_empty_documents
-        self.write_dir = LOC.parsed / 'ontonotes' / 'conll-2012'
+        self.write_dir = LOC.parsed / 'ontonotes'
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
 
-    def write_to_disk(self, split: Union[str, Path], instances: List[CorefDocument]):
+    def write_to_disk(self, split: Union[str, Path], instances: List[Document]):
         """ Write a (large) list of documents to disk """
 
         # Assert that folder exists
@@ -67,14 +67,14 @@ class CoNLLOntoNotesParser:
     def parse(self, split_nm: Union[Path, str]):
         """ Where the actual parsing happens. One split at a time. """
 
-        outputs: List[CorefDocument] = []
+        outputs: List[Document] = []
 
         folder_dir: Path = self.dir / split_nm
         assert folder_dir.exists(), f"The split {split_nm} does not exist in {self.dir}."
 
         folder_dir: Path = folder_dir / 'data' / 'english' / 'annotations'
 
-        for doc_id, fname in enumerate(tqdm(folder_dir.glob('*/*/*/*gold_conll'))):
+        for doc_id, fname in enumerate(tqdm(folder_dir.rglob('*.gold_conll'))):
             # Iterate through all the files in this dir
             genre: str = str(fname).split('/')[-4]
             documents, clusters, speakers, doc_names, doc_parts, doc_pos, doc_ner_raw = self._parse_document_(
@@ -117,7 +117,7 @@ class CoNLLOntoNotesParser:
                 # Convert NER tags into cluster-like things
                 named_entities_gold, named_entities_gold_ = self.convert_ner_tags(doc_ner_raw[i], documents[i])
 
-                doc = CorefDocument(
+                doc = Document(
                     document=documents[i],
                     pos=doc_pos[i],
                     docname=doc_names[i],

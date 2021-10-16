@@ -3,7 +3,7 @@ from typing import List, Iterable
 
 
 @dataclass
-class CorefDocument:
+class Document:
 
     # The text of the document, broken down as list of sentence. Each sentence is a list of words
     document: List[List[str]]
@@ -17,7 +17,6 @@ class CorefDocument:
 
     # Split (ontonotes split: train;test;development; conll-2012-test
     split: str
-
 
     # Actual coreference information: gold stuff
     clusters: List[List[Iterable[int]]]

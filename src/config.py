@@ -2,6 +2,12 @@ import os
 from pathlib import Path
 from mytorch.utils.goodies import FancyDict
 
+# Random seeds
+_SEED_ = 42
+NPRSEED: int = _SEED_
+PYTSEED: int = _SEED_
+
+
 ROOT_LOC: Path = Path('..') if str(Path().cwd()).split('/')[-1] == 'src' else Path('.')
 LOCATIONS: dict = FancyDict(**{
     'root': ROOT_LOC,
