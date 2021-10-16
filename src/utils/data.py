@@ -18,14 +18,17 @@ class CorefDocument:
     # Split (ontonotes split: train;test;development; conll-2012-test
     split: str
 
+
+    # Actual coreference information: gold stuff
+    clusters: List[List[Iterable[int]]]
+    clusters_: List[List[List[str]]]
+    # cluster_ids: List[List[int]] = field(default_factory=list)
+
+    # TODO: also add entity linking stuff here
+    named_entities_gold: List[list]     # Looks like [['PERSON', 112, 113] ... ]
+    named_entities_gold_: List[list]    # Looks like [['PERSON', 'Michael', 'Jackson'] ... ]
+
     # Entity mentions: all spans that could be coreferent
     # TODO: how do I find them?
     mentions: List[Iterable[int]] = field(default_factory=list)
     mentions_: List[List[str]] = field(default_factory=list)
-
-    # Actual coreference information: gold stuff
-    clusters: List[List[Iterable[int]]] = field(default_factory=list)
-    clusters_: List[List[List[str]]] = field(default_factory=list)
-    # cluster_ids: List[List[int]] = field(default_factory=list)
-
-    # TODO: also add entity linking stuff here

@@ -9,6 +9,7 @@ Specifically, we want
 
 The dataclass is going to be document based. That is, one instance is one document.
 """
+import re
 import pickle
 import jsonlines
 from pathlib import Path
@@ -18,12 +19,12 @@ from typing import Iterable, Union, List, Optional, Dict
 
 from config import LOCATIONS as LOC
 from utils.data import CorefDocument
-from utils.misc import to_toks, AnnotationBlockStack
+from utils.misc import to_toks, NERAnnotationBlockStack
 
 
 class CoNLLOntoNotesParser:
 
-    def __init__(self, ontonotes_dir: Path, splits: Iterable[str] = [], ignore_empty_documents: bool = False):
+    def __init__(self, ontonotes_dir: Path, splits: Iterable[str] = (), ignore_empty_documents: bool = False):
         """
             :param ontonotes_dir: Path to the folder containing `development`, `train`, `test` subfolders.
             :param splits: a tuple of which subfolders should we process
@@ -36,6 +37,8 @@ class CoNLLOntoNotesParser:
 
         self.flag_ignore_empty_documents: bool = ignore_empty_documents
         self.write_dir = LOC.parsed / 'ontonotes' / 'conll-2012'
+
+        self.re_ner_tags = r"\([a-zA-Z]*|\)"
 
     def write_to_disk(self, split: Union[str, Path], instances: List[CorefDocument]):
         """ Write a (large) list of documents to disk """
@@ -74,7 +77,8 @@ class CoNLLOntoNotesParser:
         for doc_id, fname in enumerate(tqdm(folder_dir.glob('*/*/*/*gold_conll'))):
             # Iterate through all the files in this dir
             genre: str = str(fname).split('/')[-4]
-            documents, clusters, speakers, doc_names, doc_parts, doc_pos = self._parse_document_(path=fname)
+            documents, clusters, speakers, doc_names, doc_parts, doc_pos, doc_ner_raw = self._parse_document_(
+                path=fname)
 
             # Check if we want to ignore empty documents
             if self.flag_ignore_empty_documents:
@@ -102,15 +106,16 @@ class CoNLLOntoNotesParser:
                 # Convert cluster info to spans and text sequences
                 # cluster_spans, cluster_text = self.convert_clusters(documents[i], clusters[i])
 
-                if len(to_toks(clusters)) == 0: continue
-
                 # Convert cluster spans to text
                 flat_doc = to_toks(documents[i])
                 clusters_ = []
                 for cluster_id, cluster in enumerate(clusters[i]):
                     clusters_.append([])
                     for span in cluster:
-                        clusters_[cluster_id].append(flat_doc[span[0]:span[1]+1])
+                        clusters_[cluster_id].append(flat_doc[span[0]:span[1] + 1])
+
+                # Convert NER tags into cluster-like things
+                named_entities_gold, named_entities_gold_ = self.convert_ner_tags(doc_ner_raw[i], documents[i])
 
                 doc = CorefDocument(
                     document=documents[i],
@@ -119,11 +124,11 @@ class CoNLLOntoNotesParser:
                     split=split_nm,
                     docpart=doc_parts[i],
                     clusters=list(clusters[i]),
-                    clusters_=list(clusters_)
+                    clusters_=list(clusters_),
+                    named_entities_gold=named_entities_gold,
+                    named_entities_gold_=named_entities_gold_
                 )
                 outputs.append(doc)
-
-            print(doc_id)
 
         return outputs
 
@@ -158,15 +163,18 @@ class CoNLLOntoNotesParser:
         doc_clusters = []
         doc_speaker_ids = []
         doc_pos = []
+        doc_ner_raw = []
         sentences = []
         clusters = {}
         sentence_cluster_ids = []
         sentence_speaker_ids = []
         sentence_pos_tags = []
+        sentence_ner_tags = []
         cur_sentence_words = []
         cur_sentence_cluster_ids = []
         cur_sentence_speaker_ids = []
         cur_sentence_pos_tags = []
+        cur_sentence_ner_tags = []
         current_clusters = []
         docs = 0
         parts: List[int] = []
@@ -202,10 +210,12 @@ class CoNLLOntoNotesParser:
                     doc_clusters.append(merged_clusters)
                     doc_speaker_ids.append(sentence_speaker_ids)
                     doc_pos.append(sentence_pos_tags)
+                    doc_ner_raw.append(sentence_ner_tags)
                     sentences = []
                     sentence_cluster_ids = []
                     sentence_speaker_ids = []
                     sentence_pos_tags = []
+                    sentence_ner_tags = []
                     clusters = {}
                 else:
                     data = line.split()
@@ -215,13 +225,16 @@ class CoNLLOntoNotesParser:
                         sentence_cluster_ids.append(cur_sentence_cluster_ids)
                         sentence_speaker_ids.append(cur_sentence_speaker_ids)
                         sentence_pos_tags.append(cur_sentence_pos_tags)
+                        sentence_ner_tags.append(cur_sentence_ner_tags)
                         cur_sentence_words = []
                         cur_sentence_cluster_ids = []
                         cur_sentence_speaker_ids = []
                         cur_sentence_pos_tags = []
+                        cur_sentence_ner_tags = []
                     else:
                         cur_sentence_words.append(self._normalize_word_(data[3], language))
                         cur_sentence_pos_tags.append(data[4])
+                        cur_sentence_ner_tags.append(data[10])
                         cur_sentence_speaker_ids.append(data[9])
                         raw_cluster_id = data[-1]
                         for part in raw_cluster_id.split("|"):
@@ -233,7 +246,7 @@ class CoNLLOntoNotesParser:
                         for part in raw_cluster_id.split("|"):
                             if ")" in part:
                                 clus_id = part[1:-1] if "(" in part else part[:-1]
-                                for i in range(len(clusters[clus_id])-1, -1, -1):
+                                for i in range(len(clusters[clus_id]) - 1, -1, -1):
                                     if len(clusters[clus_id][i]) == 1:
                                         clusters[clus_id][i].append(num_words)
                                         break
@@ -241,9 +254,47 @@ class CoNLLOntoNotesParser:
             assert len(doc_sents) == docs
             for i in range(docs):
                 doc_keys[i] += f"_{i}"
-            return doc_sents, doc_clusters, doc_speaker_ids, doc_keys, parts, doc_pos
+            return doc_sents, doc_clusters, doc_speaker_ids, doc_keys, parts, doc_pos, doc_ner_raw
+
+    def convert_ner_tags(self, tags: list, document: list) -> (list, list):
+        """ Convert raw columns of annotations into proper tags. Expect nested tags, use a stack. """
+        finalised_annotations_span = []
+        finalised_annotations_text = []
+        stack = NERAnnotationBlockStack()
+
+        # Flatten the sentence structure
+        tags_f = to_toks(tags)
+        document_f = to_toks(document)
+        assert len(tags_f) == len(document_f), f"There are {len(document_f)} words but only {tags_f} tags."
+
+        # iterate over the tags, and handle the annotations using a AnnotationBlockStack
+        # For every token, if it begins with bracket open (can be nested)
+        # Note the tag inside the bracket open and make a new block on the stack
+        # For every bracket close, pop the last entry in the stack
+        # For every other annotation, just register the word inside the tag's words list
+        for word_id, (tag, token) in enumerate(zip(tags_f, document_f)):
+
+            # Begin condition
+            for match in re.findall(self.re_ner_tags, tag):
+                if not '(' in match:
+                    continue
+                match_ = match[:].replace('(', '')
+                stack.add(word_id, match_.strip())
+
+            # Just register the word, regardless of whatever happens
+            stack.register_word(token)
+
+            # End condition
+            for match in re.findall(self.re_ner_tags, tag):
+                if not ')' in match:
+                    continue
+                ner_span, ner_text = stack.pop(word_id + 1)
+                finalised_annotations_span.append(ner_span)
+                finalised_annotations_text.append(ner_text)
+
+        return finalised_annotations_span, finalised_annotations_text
+
 
 if __name__ == '__main__':
-
     parser = CoNLLOntoNotesParser(LOC.ontonotes_conll, splits=['train'], ignore_empty_documents=False)
     parser.run()

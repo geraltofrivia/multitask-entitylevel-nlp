@@ -51,7 +51,7 @@ class AnnotationBlock:
 
     start: int
     words: List[str]
-    tag: int
+    tag: str
 
     end: int = field(default=-1)
 
@@ -67,15 +67,41 @@ class AnnotationBlock:
         assert len(self.words) == self.end - self.start
 
     @property
-    def span(self) -> List[int]:
-        return [self.start, self.end]
+    def span(self) -> List[Union[str, int]]:
+        return [self.tag, self.start, self.end]
 
-    # def __repr__(self):
-    #     return f"AnnotationBlock. Span: {self.start} - {self.end}. Text: '{' '.join(self.words)}'. Cluster: {self.tag}"
+    @property
+    def text(self) -> List[str]:
+        return [self.tag] + self.words
 
 
-class AnnotationBlockStack:
+class NERAnnotationBlockStack:
+    def __init__(self):
+        self.blocks: List[AnnotationBlock] = []
+
+    def register_word(self, word: str) -> None:
+        for block in self.blocks:
+            block.words.append(word)
+
+    def __len__(self):
+        return self.blocks.__len__()
+
+    def pop(self, span: int) -> (List[Union[str, int]], List[str]):
+        assert len(self.blocks) > 0, "Cannot pop from an empty stack."
+        self.blocks[-1].end = span
+
+        block = self.blocks.pop(-1)
+        return block.span, block.text
+
+    def add(self, span: int, tag: str) -> None:
+        block = AnnotationBlock(tag=tag, start=span, words=[])
+        self.blocks.append(block)
+
+
+class ClusterAnnotationBlockStack:
     """
+        NOT USED ANYMORE
+
         A collection of aforementioned Blocks of annotation
         Designed to parse nested coref cluster information in the processed CONLL2012 format.
     """
