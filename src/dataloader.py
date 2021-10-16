@@ -59,16 +59,36 @@ class DataLoader(BaseLoader):
 
     """
 
-    def __init__(self, dataset: str, split: str, shuffle: bool = False):
+    def __init__(self, dataset: str, split: str, shuffle: bool = False, ignore_empty_coref: bool=False):
         super().__init__()
 
         self.dataset = dataset
         self.split = split
         self._shuffle_: bool = shuffle
+        self._ignore_empty_coref_: bool = ignore_empty_coref
 
         self.fnames = self.get_fnames(dataset, split)
 
         self.data: Optional[List[Document]] = None
+
+    def _count_instances_(self, fdir: Path, fnames: List[str]) -> List[int]:
+        """ Return a list of bridging instances in each file by loading each and storing its length """
+        n: List[int] = []
+        for fname in fnames:
+            n_doc = 0
+            with (fdir / fname).open('rb') as f:
+                for instance in pickle.load(f):
+
+                    if self._ignore_empty_coref_ and not instance.clusters:
+                        continue
+
+                    n_doc += 1
+
+
+
+            n.append(n_doc)
+
+        return n
 
     def all(self):
 
@@ -80,6 +100,10 @@ class DataLoader(BaseLoader):
                 np.random.shuffle(data_batch)
 
             for instance in data_batch:
+
+                if self._ignore_empty_coref_ and not instance.clusters:
+                    continue
+
                 # instance.finalise()
                 yield instance
 

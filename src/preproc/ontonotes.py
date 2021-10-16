@@ -10,6 +10,7 @@ Specifically, we want
 The dataclass is going to be document based. That is, one instance is one document.
 """
 import re
+import click
 import pickle
 import jsonlines
 from pathlib import Path
@@ -295,6 +296,15 @@ class CoNLLOntoNotesParser:
         return finalised_annotations_span, finalised_annotations_text
 
 
-if __name__ == '__main__':
-    parser = CoNLLOntoNotesParser(LOC.ontonotes_conll, splits=['train'], ignore_empty_documents=False)
+@click.command()
+@click.option('--split', '-s', type=str,
+              help="The name of the dataset SPLIT e.g. train, test, development, conll-2012-test etc")
+@click.option('--ignore-empty', '-i', is_flag=True,
+              help="If True, we ignore the documents without any coref annotation")
+def run(split: str, ignore_empty: bool):
+    parser = CoNLLOntoNotesParser(LOC.ontonotes_conll, splits=[split], ignore_empty_documents=ignore_empty)
     parser.run()
+
+
+if __name__ == '__main__':
+    run()
