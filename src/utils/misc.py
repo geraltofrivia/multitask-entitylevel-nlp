@@ -2,17 +2,7 @@ import numpy as np
 from dataclasses import dataclass, field
 from collections import Counter
 from copy import deepcopy
-from typing import List, Any, Set, Union, Tuple, Optional, Iterable
-
-
-def to_toks(doc: List[List[Any]]) -> List[Any]:
-    """ [ ['a', 'sent'], ['another' 'sent'] ] -> ['a', 'sent', 'another', 'sent'] """
-    return [word for sent in doc for word in sent]
-
-
-def to_str(raw: List[List[str]]) -> str:
-    sents = [' '.join(sent) for sent in raw]
-    return ' '.join(sents)
+from typing import List, Union, Tuple, Optional, Iterable
 
 
 def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
@@ -51,7 +41,7 @@ class AnnotationBlock:
 
     start: int
     words: List[str]
-    tag: str
+    tag: Union[str, int]
 
     end: int = field(default=-1)
 
@@ -110,7 +100,7 @@ class ClusterAnnotationBlockStack:
         self.blocks: List[AnnotationBlock] = []
 
     @property
-    def expected(self) -> List[int]:
+    def expected(self) -> List[Union[int, str]]:
         """ If no open annotation were to close, what would be the cluster info of this token. """
         return [block.tag for block in self.blocks]
 
@@ -125,7 +115,7 @@ class ClusterAnnotationBlockStack:
         for cluster in ids:
 
             # Find all blocks of this cluster (which we haven't already selected)
-            block_indices_this_cluster = [i for i, block in enumerate(self.blocks) \
+            block_indices_this_cluster = [i for i, block in enumerate(self.blocks)
                                           if block.tag == cluster and i not in block_indices]
 
             # Find the oldest amongst them all
@@ -179,7 +169,7 @@ class ClusterAnnotationBlockStack:
 
         if type(cluster) is int:
             cluster = [cluster]
-        elif type(cluster) in [tuple, list] :
+        elif type(cluster) in [tuple, list]:
             cluster = list(cluster)
         else:
             raise TypeError(f"Cluster {cluster} is of an unknown type")
@@ -201,7 +191,7 @@ class ClusterAnnotationBlockStack:
             block.words.append(token)
 
         to_add: List[AnnotationBlock] = []
-        to_del: List[int] = []
+        # to_del: List[int] = []
 
         # Elements in `cluster - (expected ∩ cluster)` are NEW annotations
         for new_annotation in self.subtraction(cluster, intersection):
@@ -221,11 +211,10 @@ class ClusterAnnotationBlockStack:
         # Pop them from the internal list
         popped: List[AnnotationBlock] = pop(data=self.blocks, ids=to_del)
 
-        if cluster == []:
+        if not cluster:
             assert self.blocks == [], f"There should be no more open annotations. There are {self.blocks}"
 
         # Add the new ones
         self.blocks += to_add
 
         return popped
-

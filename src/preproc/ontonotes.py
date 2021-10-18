@@ -11,16 +11,18 @@ The dataclass is going to be document based. That is, one instance is one docume
 """
 import re
 import click
+import spacy
 import pickle
 import jsonlines
 from pathlib import Path
 from tqdm.auto import tqdm
 from dataclasses import asdict
-from typing import Iterable, Union, List, Optional, Dict
+from typing import Iterable, Union, List
 
-from config import LOCATIONS as LOC
 from utils.data import Document
-from utils.misc import to_toks, NERAnnotationBlockStack
+from config import LOCATIONS as LOC
+from utils.nlp import to_toks, NullTokenizer
+from utils.misc import NERAnnotationBlockStack
 
 
 class CoNLLOntoNotesParser:
@@ -40,6 +42,11 @@ class CoNLLOntoNotesParser:
         self.write_dir = LOC.parsed / 'ontonotes'
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
+
+        self.nlp = spacy.load('en_core_web_sm')
+        # This tokenizer DOES not tokenize documents.
+        # Use this is the document is already tokenized.
+        self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
 
     def write_to_disk(self, split: Union[str, Path], instances: List[Document]):
         """ Write a (large) list of documents to disk """
@@ -118,11 +125,15 @@ class CoNLLOntoNotesParser:
                 # Convert NER tags into cluster-like things
                 named_entities_gold, named_entities_gold_ = self.convert_ner_tags(doc_ner_raw[i], documents[i])
 
+                if named_entities_gold:
+                    print('potato')
+
                 doc = Document(
                     document=documents[i],
                     pos=doc_pos[i],
                     docname=doc_names[i],
                     split=split_nm,
+                    genre=genre,
                     docpart=doc_parts[i],
                     clusters=list(clusters[i]),
                     clusters_=list(clusters_),
