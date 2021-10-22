@@ -12,3 +12,9 @@ rm -r data/raw/ontonotes/conll-formatted-ontonotes-5.0-12
 
 # Running scripts to convert .skel files to .conll files
 src/preproc/conll-2012/v3/scripts/skeleton2conll.sh -D data/raw/ontonotes/ontonotes-release-5.0/data/files/data data/raw/ontonotes/conll-2012
+
+# Installing dependencies
+pip install -r requirements.txt
+
+# Downloading the spacy model
+python -m spacy download en_core_web_sm

@@ -16,8 +16,9 @@ import pickle
 import jsonlines
 from pathlib import Path
 from tqdm.auto import tqdm
+from spacy.tokens import Token
 from dataclasses import asdict
-from typing import Iterable, Union, List
+from typing import Iterable, Union, List, Tuple, Dict
 
 from utils.data import Document
 from config import LOCATIONS as LOC
@@ -48,6 +49,38 @@ class CoNLLOntoNotesParser:
         # Use this is the document is already tokenized.
         self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
 
+    def get_span_heads(self, document: spacy.tokens.Doc, spans: List[List[int]]) -> Dict[Tuple[int], List[int]]:
+        """ Return a dict where every original span has its corresponding head found out """
+        return {tuple(span): self._spacy_get_span_heads_(span, document) for span in spans}
+
+    def _spacy_get_span_heads_(self, span: List[int], doc: spacy.tokens.Doc) -> List[int]:
+        """ Get the spacy Span, get its root and return its word index (_, _+1) """
+        root = doc[span[0]: span[1]].root
+        stop_list = ['det', 'num', 'adp', 'DET', 'NUM', 'ADP']
+        if root.pos_ in stop_list:  # det can't be a root. So a hack to make sure that det can't be a det.
+            if span[1] - span[0] == 1:
+                # return the same thing
+                assert root.i >= 0
+                return [root.i, root.i + 1]
+            elif span[1] - span[0] == 2:
+                # return the other word
+                root = doc[span[0] + 1]
+                assert root.i >= 0
+                return [root.i, root.i + 1]
+            elif doc[span[0]].pos_ in stop_list:
+                # remove the span[0] and call get_span_head
+                return self._spacy_get_span_heads_([span[0] + 1, span[1]], doc)
+            elif doc[span[1]].pos_ in stop_list:
+                # remove the last one and call get_span_head again
+                return self._spacy_get_span_heads_([span[0], span[1] - 1], doc)
+            else:
+                # root is somewhere in somewhere between span.
+                assert root.i >= 0
+
+                return [root.i, root.i + 1]
+        else:
+            return [root.i, root.i + 1]
+
     def write_to_disk(self, split: Union[str, Path], instances: List[Document]):
         """ Write a (large) list of documents to disk """
 
@@ -58,9 +91,9 @@ class CoNLLOntoNotesParser:
         with (write_dir / 'dump.pkl').open('wb+') as f:
             pickle.dump(instances, f)
 
-        with (write_dir / 'dump.jsonl').open('w+', encoding='utf8') as f:
-            with jsonlines.Writer(f) as writer:
-                writer.write_all([asdict(instance) for instance in instances])
+        # with (write_dir / 'dump.jsonl').open('w+', encoding='utf8') as f:
+        #     with jsonlines.Writer(f) as writer:
+        #         writer.write_all([asdict(instance) for instance in instances])
 
         print(f"Successfully written {len(instances)} at {write_dir}.")
 
@@ -82,7 +115,9 @@ class CoNLLOntoNotesParser:
 
         folder_dir: Path = folder_dir / 'data' / 'english' / 'annotations'
 
-        for doc_id, fname in enumerate(tqdm(folder_dir.rglob('*.gold_conll'))):
+        n_files = len([0 for _ in folder_dir.rglob('*.gold_conll')])
+        for doc_id, fname in enumerate(tqdm(folder_dir.rglob('*.gold_conll'), total=n_files)):
+
             # Iterate through all the files in this dir
             genre: str = str(fname).split('/')[-4]
             documents, clusters, speakers, doc_names, doc_parts, doc_pos, doc_ner_raw = self._parse_document_(
@@ -114,19 +149,34 @@ class CoNLLOntoNotesParser:
                 # Convert cluster info to spans and text sequences
                 # cluster_spans, cluster_text = self.convert_clusters(documents[i], clusters[i])
 
+                # Add +1 to span ends in all cluster annotations
+                for j, cluster in enumerate(clusters[i]):
+                    clusters[i][j] = [[sp[0], sp[1]+1] for sp in cluster]
+
                 # Convert cluster spans to text
                 flat_doc = to_toks(documents[i])
+                spacy_doc = self.nlp(flat_doc)
                 clusters_ = []
                 for cluster_id, cluster in enumerate(clusters[i]):
                     clusters_.append([])
                     for span in cluster:
-                        clusters_[cluster_id].append(flat_doc[span[0]:span[1] + 1])
+                        clusters_[cluster_id].append(flat_doc[span[0]:span[1]])
 
                 # Convert NER tags into cluster-like things
                 named_entities_gold, named_entities_gold_ = self.convert_ner_tags(doc_ner_raw[i], documents[i])
 
-                if named_entities_gold:
-                    print('potato')
+                # Span heads calculation
+                span_heads = self.get_span_heads(
+                    spacy_doc,
+                    [[ner[1], ner[2]] for ner in named_entities_gold] +
+                        [list(span) for cluster in clusters[i] for span in cluster]
+                )
+                span_heads_ = {span: [tok.text for tok in spacy_doc[span_heads[tuple(span)][0]:
+                                                                    span_heads[tuple(span)][1]]]
+                               for span in span_heads.keys()}
+
+                noun_chunks = [[chunk.start, chunk.end] for chunk in spacy_doc.noun_chunks]
+                noun_chunks_ = [flat_doc[span[0]: span[1]] for span in noun_chunks]
 
                 doc = Document(
                     document=documents[i],
@@ -138,7 +188,11 @@ class CoNLLOntoNotesParser:
                     clusters=list(clusters[i]),
                     clusters_=list(clusters_),
                     named_entities_gold=named_entities_gold,
-                    named_entities_gold_=named_entities_gold_
+                    named_entities_gold_=named_entities_gold_,
+                    span_heads=span_heads,
+                    span_heads_=span_heads_,
+                    noun_chunks=noun_chunks,
+                    noun_chunks_=noun_chunks_
                 )
                 outputs.append(doc)
 
@@ -300,7 +354,7 @@ class CoNLLOntoNotesParser:
             for match in re.findall(self.re_ner_tags, tag):
                 if not ')' in match:
                     continue
-                ner_span, ner_text = stack.pop(word_id + 1)
+                ner_span, ner_text = stack.pop(word_id+1)
                 finalised_annotations_span.append(ner_span)
                 finalised_annotations_text.append(ner_text)
 

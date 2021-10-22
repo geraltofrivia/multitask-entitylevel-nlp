@@ -1,3 +1,4 @@
+from copy import deepcopy
 from typing import List, Any
 from spacy.tokens import Doc
 try:
@@ -27,6 +28,10 @@ except ImportError:
             return self
 
 
+SPAN_POS_BLACKLIST_PREFIX = ('DT', 'JJ')
+SPAN_POS_BLACKLIST_SUFFIX = ('.', 'POS')
+
+
 def to_toks(doc: List[List[Any]]) -> List[Any]:
     """ [ ['a', 'sent'], ['another' 'sent'] ] -> ['a', 'sent', 'another', 'sent'] """
     return [word for sent in doc for word in sent]
@@ -35,6 +40,37 @@ def to_toks(doc: List[List[Any]]) -> List[Any]:
 def to_str(raw: List[List[str]]) -> str:
     sents = [' '.join(sent) for sent in raw]
     return ' '.join(sents)
+
+
+def remove_pos(span: List[int], pos: List[List[str]], remove_all: bool = False,
+               prefix: List[str] = SPAN_POS_BLACKLIST_PREFIX, suffix: List[str] = SPAN_POS_BLACKLIST_SUFFIX) -> List[int]:
+    """
+        We remove certain words from the given span (from the start or from the end) based on the pos tags defined.
+        We may remove everything from the span if the span contains only these pos based things based on remove_all flag
+    """
+
+    pos = to_toks(pos)[span[0]: span[1]]
+    span = deepcopy(span)
+
+    while True:
+        if (span[0] == span[1] and remove_all) or (span[0] + 1 == span[1] and not remove_all):
+            """ If all words are gone or if one word remains but remove_all is turned off, return """
+            break
+
+        if pos[0] in prefix:
+            pos.pop(0)
+            span[0] = span[0] + 1
+            continue
+
+        if pos[-1] in suffix:
+            pos.pop(-1)
+            span[1] = span[1] - 1
+            continue
+
+        # If we're still here, then we changed nothing
+        break
+
+    return span
 
 
 class NullTokenizer(DummyTokenizer):
