@@ -32,10 +32,6 @@ class Document:
     named_entities_gold: List[List[Union[str, int]]]     # Looks like [['PERSON', 112, 113] ... ]
     named_entities_gold_: List[List[str]]    # Looks like [['PERSON', 'Michael', 'Jackson'] ... ]
 
-    # Store noun chunks as well. Why not?
-    noun_chunks: List[List[int]]
-    noun_chunks_: List[List[str]]
-
     span_heads: Dict[Tuple[int], List[int]] = field(default_factory=dict)
     span_heads_: Dict[Tuple[int], List[str]] = field(default_factory=dict)
 

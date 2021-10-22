@@ -30,6 +30,7 @@ except ImportError:
 
 SPAN_POS_BLACKLIST_PREFIX = ('DT', 'JJ')
 SPAN_POS_BLACKLIST_SUFFIX = ('.', 'POS')
+NCHUNK_POS_WHITELIST = ('NN', 'NNS', 'NNP', 'NNPS')
 
 
 def to_toks(doc: List[List[Any]]) -> List[Any]:
@@ -40,6 +41,16 @@ def to_toks(doc: List[List[Any]]) -> List[Any]:
 def to_str(raw: List[List[str]]) -> str:
     sents = [' '.join(sent) for sent in raw]
     return ' '.join(sents)
+
+
+def is_nchunk(span: List[int], pos: List[List[str]]) -> bool:
+    """ Check if every element in the span belongs to whitelist of noun pos tags. """
+    span_pos = to_toks(pos)[span[0]: span[1]]
+    for pos_tag in span_pos:
+        if not pos_tag in NCHUNK_POS_WHITELIST:
+            return False
+
+    return True
 
 
 def remove_pos(span: List[int], pos: List[List[str]], remove_all: bool = False,

@@ -175,9 +175,6 @@ class CoNLLOntoNotesParser:
                                                                     span_heads[tuple(span)][1]]]
                                for span in span_heads.keys()}
 
-                noun_chunks = [[chunk.start, chunk.end] for chunk in spacy_doc.noun_chunks]
-                noun_chunks_ = [flat_doc[span[0]: span[1]] for span in noun_chunks]
-
                 doc = Document(
                     document=documents[i],
                     pos=doc_pos[i],
@@ -191,8 +188,6 @@ class CoNLLOntoNotesParser:
                     named_entities_gold_=named_entities_gold_,
                     span_heads=span_heads,
                     span_heads_=span_heads_,
-                    noun_chunks=noun_chunks,
-                    noun_chunks_=noun_chunks_
                 )
                 outputs.append(doc)
 
