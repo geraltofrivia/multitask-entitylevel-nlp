@@ -26,6 +26,8 @@ from utils.data import Document
 from dataloader import DataLoader
 from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
 
+DEBUG = False
+
 
 def _get_textual_exact_match_ners_(key: List[str], ners: List[List[str]]) -> List[int]:
     """ If an element in spans is completely subsumed by the span in key, we return it."""
@@ -131,14 +133,16 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
     clustered_spans = {i: [] for i, _ in enumerate(doc.clusters)}
     clustered_spans_ = {i: [] for i, _ in enumerate(doc.clusters)}
 
-    noun_chunks = [[chunk.start, chunk.end] for chunk in spacy_doc]
-    lemmas = [token.lemma for token in spacy_doc]
-    def lemmatize(span, lemmas): return lemmas[span[0]: span[1]]
+    noun_chunks = [[chunk.start, chunk.end] for chunk in spacy_doc.noun_chunks]
+    lemmas = [token.lemma_ for token in spacy_doc]
+
+    def lemmatize(span, lemmas):
+        return lemmas[span[0]: span[1]]
 
     # Make a copy of named entities
     ners = deepcopy(doc.named_entities_gold)
     ners_ = deepcopy(doc.named_entities_gold_)
-    print("Unresolved entities: ", len(ners))
+    if DEBUG: print("Unresolved entities: ", len(ners))
 
     # In the first run, find exact matches
 
@@ -154,7 +158,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             clustered_spans[i] += matched_spans
             clustered_spans_[i] += matched_spans_
 
-    print("Unresolved entities: ", len(ners))
+    if DEBUG: print("Unresolved entities: ", len(ners))
 
     """ 
         In the second run, find overlaps
@@ -181,7 +185,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             clustered_spans[i] += matched_spans
             clustered_spans_[i] += matched_spans_
 
-    print("Unresolved entities: ", len(ners))
+    if DEBUG: print("Unresolved entities: ", len(ners))
 
     """
         In the third run, find noun chunks with the same things.
@@ -193,7 +197,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
     ners_chunks = [span if span[1:] in noun_chunks or is_nchunk(span[1:], doc.pos) else ['FAKE', -2, -1]
                    for span in ners]
     ners_chunks_ = [ners_[i] if ners_chunks[i][0] != 'FAKE' else ['FAKE', 'alpha'] for i in range(len(ners))]
-    ners_chunks_lemmatized = [[span[0]]+lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else span
+    ners_chunks_lemmatized = [[span[0]]+lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else [span[0]] + ['alpha']
                               for span in ners_chunks]
     for cluster_id, cluster in enumerate(doc.clusters):
         for span_id, span in enumerate(cluster):
@@ -216,7 +220,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             clustered_spans[cluster_id] += matched_spans
             clustered_spans_[cluster_id] += matched_spans_
 
-            span_ = lemmatize(doc.clusters_[cluster_id][span_id], lemmas)
+            span_ = lemmatize(doc.clusters[cluster_id][span_id], lemmas)
 
             # Repeated for lemmatized version of the text
             matched = _get_textual_exact_match_ners_(span_, ners_chunks_lemmatized)
@@ -230,7 +234,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             clustered_spans[cluster_id] += matched_spans
             clustered_spans_[cluster_id] += matched_spans_
 
-    print("Unresolved entities: ", len(ners))
+    if DEBUG: print("Unresolved entities: ", len(ners))
 
     """
         In the fourth run, do the same 
@@ -267,7 +271,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             clustered_spans[cluster_id] += matched_spans
             clustered_spans_[cluster_id] += matched_spans_
 
-    print("Unresolved entities: ", len(ners))
+    if DEBUG: print("Unresolved entities: ", len(ners))
 
     """
         In the fifth run, target fuzzy noun chunks.
@@ -279,10 +283,6 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
     """
     for cluster_id, cluster in enumerate(doc.clusters):
         for span_id, span in enumerate(cluster):
-
-            # Check if the span is a noun chunk
-            # if doc.docname == 'wb/eng/00/eng_0005_0' and span == [104, 108]:
-            #     print('potato')
 
             if not (span in noun_chunks or is_nchunk(span, doc.pos)):
                 # Get overlapped stuff
@@ -316,8 +316,9 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             clustered_spans[cluster_id] += matched_spans
             clustered_spans_[cluster_id] += matched_spans_
 
-    print("Unresolved entities: ", len(ners))
-    review(clustered_spans, clustered_spans_, ners, ners_, doc)
+    if DEBUG:
+        print("Unresolved entities: ", len(ners))
+        review(clustered_spans, clustered_spans_, ners, ners_, doc)
 
 
 def count_cluster_cardinality(doc: Document) -> Dict[int, int]:
@@ -344,8 +345,9 @@ def run():
     for i, doc in enumerate(dl):
 
         # Get the spacy doc object for this one. It will be needed. Trust me.
-        spacy_doc = nlp(doc.document)
+        spacy_doc = nlp(to_toks(doc.document))
 
+        # Find statistics on the number of clusters per document
         for num_elem, num_clus in count_cluster_cardinality(doc).items():
             cardinalities[num_elem] = cardinalities.get(num_elem, 0) + num_clus
 
