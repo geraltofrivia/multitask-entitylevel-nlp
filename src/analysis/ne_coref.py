@@ -17,6 +17,7 @@ import spacy
 from thefuzz import fuzz
 from pprint import pprint
 from copy import deepcopy
+from tqdm.auto import tqdm
 from spacy.tokens import Doc
 from collections import Counter
 from typing import List, Tuple, Dict, Union
@@ -75,7 +76,6 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
             - entities which have been assigned to clusters
             - entities which have not (and to which they may still belong)
     """
-    global nlp
 
     n_clustered = sum(len(x) for x in clustered_spans.values())
     n_total = len(doc.named_entities_gold)
@@ -109,7 +109,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
                 key=lambda x: -x[0])[:4]
 
         # Choose the three best clusters
-        matches = dict(sorted(matches.items(), key=lambda kv: -max(tupl[0] for tupl in kv[1]))[:3])
+        matches = dict(sorted(matches.items(), key=lambda kv: -max(tuple_[0] for tuple_ in kv[1]))[:3])
 
         print(ent, ent_[1:])
         pprint(matches)
@@ -118,7 +118,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
     print("-------Done-------")
 
 
-def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
+def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int, List[int]], int):
     """
         1. Find exact matches between coref and entity spans.
         2. If entities are left over, consider the ones which resemble a coref span
@@ -308,10 +308,12 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
             matched = _get_overlaps_ners_(span, ners_filtered_chunks)
             matched_spans = pop(ners, matched)
             _ = pop(ners_filtered, matched)
+            _ = pop(ners_filtered_, matched)
             _ = pop(ners_chunks, matched)
             _ = pop(ners_chunks_, matched)
             _ = pop(ners_filtered_chunks, matched)
             _ = pop(ners_filtered_chunks_, matched)
+            _ = pop(ners_chunks_lemmatized, matched)
             matched_spans_ = pop(ners_, matched)
             clustered_spans[cluster_id] += matched_spans
             clustered_spans_[cluster_id] += matched_spans_
@@ -320,10 +322,46 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc):
         print("Unresolved entities: ", len(ners))
         review(clustered_spans, clustered_spans_, ners, ners_, doc)
 
+    """
+        Returning information
+            - which entities were unclustered
+            - which entities went to which cluster
+            
+        In both information, we provide the index of the NER tag in doc.named_entities_gold ...
+    """
+    if not (len(ners) == len(ners_) == len(ners_filtered) == len(ners_filtered_) == len(ners_filtered_chunks)
+            == len(ners_filtered_chunks_) == len(ners_chunks) == len(ners_chunks_) == len(ners_chunks_lemmatized)):
+        print(f"ners: {len(ners)}, {len(ners_)}")
+        print(f"ners filtered: {len(ners_filtered)}, {len(ners_filtered_)}")
+        print(f"ners chunks: {len(ners_chunks)}, {len(ners_chunks_)}")
+        print(f"ners chunks filtered: {len(ners_filtered_chunks)}, {len(ners_filtered_chunks_)}")
+        print(f"ners chunks lemmatized: {len(ners_chunks_lemmatized)}")
+        raise AssertionError("We are not counting the leftover entities correctly somewhere. ")
 
-def count_cluster_cardinality(doc: Document) -> Dict[int, int]:
-    cardinalities = [len(cluster) for cluster in doc.clusters]
-    return dict(Counter(cardinalities))
+
+    clustered_span_indices = {_id: [doc.named_entities_gold.index(span) for span in _ents]
+                              for _id, _ents in clustered_spans.items()}
+    return clustered_span_indices, len(ners)
+
+
+def count_cluster_cardinality(doc: Document) -> List[int]:
+    """ Returns a dict where k: num of elements in one cluster; v: num of such clusters"""
+    return [len(cluster) for cluster in doc.clusters]
+
+
+def count_doc_n_clusters(doc: Document) -> int:
+    """ Returns an int: num of clusters in this document """
+    return len(doc.clusters)
+
+
+def count_doc_n_entities(doc: Document) -> int:
+    """ Returns an int: num of named entities (gold) in this document """
+    return len(doc.named_entities_gold)
+
+
+def count_tag_n_entities(doc: Document) -> List[str]:
+    """ Returns a dict where k: ner tag, e: num of elements in the doc with this tag"""
+    return [tuple_[0] for tuple_ in doc.named_entities_gold]
 
 
 def run():
@@ -339,23 +377,48 @@ def run():
     nlp.tokenizer = NullTokenizer(nlp.vocab)
     dl = DataLoader('ontonotes', 'train', ignore_empty_coref=True)
 
+    summary['ignored_instances'] = 0
     summary['num_instances'] = len(dl)
-    cardinalities = {}
+    summary['clusters_per_doc'] = []
+    summary['elements_per_cluster'] = []
+    summary['named_entities_per_doc'] = []
+    summary['named_entities_per_tag'] = []
+
+    summary['named_entities_unmatched_per_doc'] = []
+    summary['clusters_unmatched_per_doc'] = []
+    summary['clusters_matched_per_doc'] = []
     ignored = 0
-    for i, doc in enumerate(dl):
+
+    for i, doc in enumerate(tqdm(dl)):
+
+        if not doc.named_entities_gold:
+            summary['ignored_instances'] += 1
+            continue
 
         # Get the spacy doc object for this one. It will be needed. Trust me.
+        # noinspection PyTypeChecker
         spacy_doc = nlp(to_toks(doc.document))
 
-        # Find statistics on the number of clusters per document
-        for num_elem, num_clus in count_cluster_cardinality(doc).items():
-            cardinalities[num_elem] = cardinalities.get(num_elem, 0) + num_clus
+        # Find statistics on the number of elements per cluster
+        cardinalities = count_cluster_cardinality(doc)
+        summary['elements_per_cluster'] += cardinalities
 
-        if doc.clusters != [] and doc.named_entities_gold != []:
-            match_entities_to_coref_clusters(doc, spacy_doc)
-        else:
-            ignored += 1
-            continue
+        # Find statistics on the number of coref clusters in one document
+        summary['clusters_per_doc'].append(count_doc_n_clusters(doc))
+
+        # Find statistics on the number of named entities in a document
+        summary['named_entities_per_doc'].append(count_doc_n_entities(doc))
+
+        # Find statistics on the number of named entities per named entity tags
+        summary['named_entities_per_tag'] += count_tag_n_entities(doc)
+
+        matches, n_unmatched = match_entities_to_coref_clusters(doc, spacy_doc)
+        unmatched_clusters = [k for k, v in matches.items() if not v]
+        matched_clusters = [k for k, v in matches.items() if v]
+        summary['named_entities_unmatched_per_doc'].append(n_unmatched)
+
+        summary['clusters_unmatched_per_doc'].append(len(unmatched_clusters))
+        summary['clusters_matched_per_doc'].append(len(matched_clusters))
 
 
 if __name__ == "__main__":

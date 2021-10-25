@@ -5,7 +5,6 @@ from utils.warnings import SpanHeadNotFoundError
 from utils.nlp import to_toks
 
 
-
 @dataclass
 class Document:
 
@@ -40,13 +39,12 @@ class Document:
     mentions: List[Iterable[int]] = field(default_factory=list)
     mentions_: List[List[str]] = field(default_factory=list)
 
-
     # TODO: also add entity linking stuff
 
     def head(self, span: Union[List[int], Tuple[int]]) -> List[int]:
 
         if len(span) == 3:
-            span = span[1: ]
+            span = span[1:]
 
         try:
             return self.span_heads[tuple(span)]
