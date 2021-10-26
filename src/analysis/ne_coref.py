@@ -387,8 +387,11 @@ def run():
 
     summary['named_entities_unmatched_per_doc'] = []
     summary['named_entities_unmatched_per_tag'] = []
+    summary['named_entities_matched_per_cluster'] = []
     summary['clusters_unmatched_per_doc'] = []
     summary['clusters_matched_per_doc'] = []
+    summary['clusters_matched_different_tags_per_doc'] = []
+
     ignored = 0
 
     for i, doc in enumerate(tqdm(dl)):
@@ -420,11 +423,15 @@ def run():
         matches, unmatched = match_entities_to_coref_clusters(doc, spacy_doc)
         unmatched_clusters = [k for k, v in matches.items() if not v]
         matched_clusters = [k for k, v in matches.items() if v]
+        matched_entities = {k: [doc.named_entities_gold_[i] for i in v] for k,v in matches.items()}
+        clusters_matched_different_tags_per_doc = len([1 for matched in matches.values() if len(set(tupl[0] for tupl in matched))>1])
+
         summary['named_entities_unmatched_per_doc'].append(len(unmatched))
         summary['named_entities_unmatched_per_tag'] += [tupl[0] for tupl in unmatched]
-
+        summary['named_entities_matched_per_cluster'] += [len(v) for k, v in matches.items()]
         summary['clusters_unmatched_per_doc'].append(len(unmatched_clusters))
         summary['clusters_matched_per_doc'].append(len(matched_clusters))
+        summary['clusters_matched_different_tags_per_doc'].append(clusters_matched_different_tags_per_doc)
 
 
 if __name__ == "__main__":
