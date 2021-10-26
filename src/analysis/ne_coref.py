@@ -118,7 +118,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
     print("-------Done-------")
 
 
-def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int, List[int]], int):
+def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int, List[int]], List[Union[str, int]]):
     """
         1. Find exact matches between coref and entity spans.
         2. If entities are left over, consider the ones which resemble a coref span
@@ -341,7 +341,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
 
     clustered_span_indices = {_id: [doc.named_entities_gold.index(span) for span in _ents]
                               for _id, _ents in clustered_spans.items()}
-    return clustered_span_indices, len(ners)
+    return clustered_span_indices, ners
 
 
 def count_cluster_cardinality(doc: Document) -> List[int]:
@@ -379,12 +379,14 @@ def run():
 
     summary['ignored_instances'] = 0
     summary['num_instances'] = len(dl)
+    summary['tokens_per_doc'] = []
     summary['clusters_per_doc'] = []
     summary['elements_per_cluster'] = []
     summary['named_entities_per_doc'] = []
     summary['named_entities_per_tag'] = []
 
     summary['named_entities_unmatched_per_doc'] = []
+    summary['named_entities_unmatched_per_tag'] = []
     summary['clusters_unmatched_per_doc'] = []
     summary['clusters_matched_per_doc'] = []
     ignored = 0
@@ -399,6 +401,9 @@ def run():
         # noinspection PyTypeChecker
         spacy_doc = nlp(to_toks(doc.document))
 
+        # Find the number of tokens in a document
+        summary['tokens_per_doc'].append(len(to_toks(doc.document)))
+
         # Find statistics on the number of elements per cluster
         cardinalities = count_cluster_cardinality(doc)
         summary['elements_per_cluster'] += cardinalities
@@ -412,10 +417,11 @@ def run():
         # Find statistics on the number of named entities per named entity tags
         summary['named_entities_per_tag'] += count_tag_n_entities(doc)
 
-        matches, n_unmatched = match_entities_to_coref_clusters(doc, spacy_doc)
+        matches, unmatched = match_entities_to_coref_clusters(doc, spacy_doc)
         unmatched_clusters = [k for k, v in matches.items() if not v]
         matched_clusters = [k for k, v in matches.items() if v]
-        summary['named_entities_unmatched_per_doc'].append(n_unmatched)
+        summary['named_entities_unmatched_per_doc'].append(len(unmatched))
+        summary['named_entities_unmatched_per_tag'] += [tupl[0] for tupl in unmatched]
 
         summary['clusters_unmatched_per_doc'].append(len(unmatched_clusters))
         summary['clusters_matched_per_doc'].append(len(matched_clusters))
