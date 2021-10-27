@@ -31,6 +31,9 @@ class Document:
     named_entities_gold: List[List[Union[str, int]]]     # Looks like [['PERSON', 112, 113] ... ]
     named_entities_gold_: List[List[str]]    # Looks like [['PERSON', 'Michael', 'Jackson'] ... ]
 
+    named_entities_pred: List[List[Union[str, int]]] = field(default_factory=list)
+    named_entities_pred_: List[List[str]] = field(default_factory=list)
+
     span_heads: Dict[Tuple[int], List[int]] = field(default_factory=dict)
     span_heads_: Dict[Tuple[int], List[str]] = field(default_factory=dict)
 

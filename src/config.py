@@ -14,5 +14,6 @@ LOCATIONS: dict = FancyDict(**{
     'ontonotes_raw': ROOT_LOC / 'data' / 'raw' / 'ontonotes' / 'ontonotes-release-5.0',
     'ontonotes_conll': ROOT_LOC / 'data' / 'raw' / 'ontonotes' / 'conll-2012' / 'v5' / 'data',
     'raw': ROOT_LOC / 'data' / 'raw',
+    'runs': ROOT_LOC / 'data' / 'runs',
     'parsed': ROOT_LOC / 'data' / 'parsed'
 })

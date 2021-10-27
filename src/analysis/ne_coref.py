@@ -13,6 +13,8 @@ Specifically can finding NER directly lead to an estimation of num of clusters, 
 """
 
 # Imports
+import json
+import click
 import spacy
 from thefuzz import fuzz
 from pprint import pprint
@@ -25,6 +27,7 @@ from typing import List, Tuple, Dict, Union
 from utils.misc import pop
 from utils.data import Document
 from dataloader import DataLoader
+from config import LOCATIONS as LOC
 from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
 
 DEBUG = False
@@ -70,7 +73,7 @@ def _get_exact_match_ners_(key: List[int], ners: List[List[Union[str, int]]]) ->
 
 # noinspection PyTypeChecker
 def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], ners, ners_, doc: Document,
-           skip_unclustered: bool = False):
+           entity_source: str, skip_unclustered: bool = False):
     """
         At a glance, take a gander at
             - entities which have been assigned to clusters
@@ -101,11 +104,10 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
         matches = {}
         # Calculate fuzzy distance to all spans in all clusters
         for cluster_id, (cluster_spans, cluster_texts) in enumerate(zip(doc.clusters, doc.clusters_)):
-
             # Calculate fuzzy string sim
             matches[cluster_id] = sorted(
                 [(fuzz.token_set_ratio(' '.join(ent_[1:]), ' '.join(text)), ' '.join(text), span)
-                    for span, text in zip(cluster_spans, cluster_texts)],
+                 for span, text in zip(cluster_spans, cluster_texts)],
                 key=lambda x: -x[0])[:4]
 
         # Choose the three best clusters
@@ -118,7 +120,8 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
     print("-------Done-------")
 
 
-def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int, List[int]], List[Union[str, int]]):
+def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, entity_source: str) \
+        -> (Dict[int, List[int]], List[Union[str, int]]):
     """
         1. Find exact matches between coref and entity spans.
         2. If entities are left over, consider the ones which resemble a coref span
@@ -150,7 +153,6 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
     #   and pull out the 'span' which is completely overlapped
     for i, cluster in enumerate(doc.clusters):
         for span in cluster:
-
             # Get overlapped stuff
             matched = _get_exact_match_ners_(span, ners)
             matched_spans = pop(ners, matched)
@@ -168,11 +170,10 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
         Implementation:
             create a copy of NER spans, where this filtering has been done and use this list to find NER ids
     """
-    ners_filtered = [[ner[0]]+remove_pos(ner[1:], doc.pos) for ner in ners]
-    ners_filtered_ = [[ner[0]]+to_toks(doc.document)[ner[1]: ner[2]] for ner in ners_filtered]
+    ners_filtered = [[ner[0]] + remove_pos(ner[1:], doc.pos) for ner in ners]
+    ners_filtered_ = [[ner[0]] + to_toks(doc.document)[ner[1]: ner[2]] for ner in ners_filtered]
     for i, cluster in enumerate(doc.clusters):
         for span in cluster:
-
             # Do the pos based filtering on the coref span
             span = remove_pos(span, doc.pos)
 
@@ -197,7 +198,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
     ners_chunks = [span if span[1:] in noun_chunks or is_nchunk(span[1:], doc.pos) else ['FAKE', -2, -1]
                    for span in ners]
     ners_chunks_ = [ners_[i] if ners_chunks[i][0] != 'FAKE' else ['FAKE', 'alpha'] for i in range(len(ners))]
-    ners_chunks_lemmatized = [[span[0]]+lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else [span[0]] + ['alpha']
+    ners_chunks_lemmatized = [[span[0]] + lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else [span[0]] + ['alpha']
                               for span in ners_chunks]
     for cluster_id, cluster in enumerate(doc.clusters):
         for span_id, span in enumerate(cluster):
@@ -244,7 +245,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
                             for span in ners_filtered]
     ners_filtered_chunks_ = [ners_[i] if ners_filtered_chunks[i][0] != 'FAKE' else ['FAKE', 'alpha']
                              for i in range(len(ners))]
-    ners_chunks_lemmatized = [[span[0]]+lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else span
+    ners_chunks_lemmatized = [[span[0]] + lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else span
                               for span in ners_chunks]
 
     for cluster_id, cluster in enumerate(doc.clusters):
@@ -320,7 +321,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
 
     if DEBUG:
         print("Unresolved entities: ", len(ners))
-        review(clustered_spans, clustered_spans_, ners, ners_, doc)
+        review(clustered_spans, clustered_spans_, ners, ners_, doc, entity_source=entity_source)
 
     """
         Returning information
@@ -337,7 +338,6 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc) -> (Dict[int
         print(f"ners chunks filtered: {len(ners_filtered_chunks)}, {len(ners_filtered_chunks_)}")
         print(f"ners chunks lemmatized: {len(ners_chunks_lemmatized)}")
         raise AssertionError("We are not counting the leftover entities correctly somewhere. ")
-
 
     clustered_span_indices = {_id: [doc.named_entities_gold.index(span) for span in _ents]
                               for _id, _ents in clustered_spans.items()}
@@ -364,7 +364,14 @@ def count_tag_n_entities(doc: Document) -> List[str]:
     return [tuple_[0] for tuple_ in doc.named_entities_gold]
 
 
-def run():
+@click.command()
+@click.option('--split', '-s', type=str, default='train',
+              help="The name of the ontonotes (CoNLL) SPLIT e.g. train, test, development, conll-2012-test etc")
+@click.option('--entity-source', '-es', type=str, default='gold',
+              help="`gold` would use Gold NER annotaitons in Ontonotes. `spacy` would use Spacy's annotations.")
+@click.option('--name', '-n', type=str,
+              help="The name of the summary object to be written to disk")
+def run(split: str, name: str, entity_source: str):
     """
         Iterate over all documents and try to
             - match entities to coref clusters
@@ -375,7 +382,7 @@ def run():
     # This tokenizer DOES not tokenize documents.
     # Use this is the document is already tokenized.
     nlp.tokenizer = NullTokenizer(nlp.vocab)
-    dl = DataLoader('ontonotes', 'train', ignore_empty_coref=True)
+    dl = DataLoader('ontonotes', split, ignore_empty_coref=True)
 
     summary['ignored_instances'] = 0
     summary['num_instances'] = len(dl)
@@ -420,18 +427,25 @@ def run():
         # Find statistics on the number of named entities per named entity tags
         summary['named_entities_per_tag'] += count_tag_n_entities(doc)
 
-        matches, unmatched = match_entities_to_coref_clusters(doc, spacy_doc)
+        matches, unmatched = match_entities_to_coref_clusters(doc, spacy_doc, entity_source=entity_source)
         unmatched_clusters = [k for k, v in matches.items() if not v]
         matched_clusters = [k for k, v in matches.items() if v]
-        matched_entities = {k: [doc.named_entities_gold_[i] for i in v] for k,v in matches.items()}
-        clusters_matched_different_tags_per_doc = len([1 for matched in matches.values() if len(set(tupl[0] for tupl in matched))>1])
+        matched_entities = {k: [doc.named_entities_gold_[i] for i in v] for k, v in matches.items()}
+        clus_matched_diff_tags_per_doc = len([1 for matched in matches.values()
+                                              if len(set(doc.named_entities_gold[epos][0] for epos in matched)) > 1])
 
         summary['named_entities_unmatched_per_doc'].append(len(unmatched))
         summary['named_entities_unmatched_per_tag'] += [tupl[0] for tupl in unmatched]
         summary['named_entities_matched_per_cluster'] += [len(v) for k, v in matches.items()]
         summary['clusters_unmatched_per_doc'].append(len(unmatched_clusters))
         summary['clusters_matched_per_doc'].append(len(matched_clusters))
-        summary['clusters_matched_different_tags_per_doc'].append(clusters_matched_different_tags_per_doc)
+        summary['clusters_matched_different_tags_per_doc'].append(clus_matched_diff_tags_per_doc)
+
+        if i > 20: break
+
+    # Write this summary to disk using whatever name we chose to provide here.
+    with (LOC.runs / 'ne_coref' / (name + '.json')).open('w+', encoding='utf8') as f:
+        json.dump(summary, f)
 
 
 if __name__ == "__main__":
