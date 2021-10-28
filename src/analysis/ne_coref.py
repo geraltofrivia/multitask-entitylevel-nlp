@@ -376,6 +376,16 @@ def count_tag_n_entities(doc: Document, ent_src: str) -> List[str]:
     return [tuple_[0] for tuple_ in getattr(doc, ent_src)]
 
 
+def count_coref_span_length(doc: Document) -> List[int]:
+    """ Returns a list containing the length of all coref spans """
+    return [span[1] - span[0] for cluster in doc.clusters for span in cluster]
+
+
+def count_ner_span_length(doc: Document, ent_src: str) -> List[int]:
+    """ Returns a list containing the length of all named entity spans (based on the entity source) """
+    return [span[2] - span[1] for span in getattr(doc, ent_src)]
+
+
 @click.command()
 @click.option('--split', '-s', type=str, default='train',
               help="The name of the ontonotes (CoNLL) SPLIT e.g. train, test, development, conll-2012-test etc")
@@ -411,6 +421,8 @@ def run(split: str, entity_source: str, filter_named_entities: bool):
     summary['elements_per_cluster'] = []
     summary['named_entities_per_doc'] = []
     summary['named_entities_per_tag'] = []
+    summary['length_coref_per_span'] = []
+    summary['length_ner_per_span'] = []
 
     summary['named_entities_unmatched_per_doc'] = []
     summary['named_entities_unmatched_per_tag'] = []
@@ -459,6 +471,15 @@ def run(split: str, entity_source: str, filter_named_entities: bool):
         summary['clusters_unmatched_per_doc'].append(len(unmatched_clusters))
         summary['clusters_matched_per_doc'].append(len(matched_clusters))
         summary['clusters_matched_different_tags_per_doc'].append(clus_matched_diff_tags_per_doc)
+
+        # Lets also calculate the length of coref and entity spans
+        summary['length_coref_per_span'] += count_coref_span_length(doc)
+        summary['length_ner_per_span'] += count_ner_span_length(doc, ent_src=ent_src)
+
+        # Let's look at some clusters to which no entities have been matched
+        # if i % 10 == 0:
+        #     for cluster_id in unmatched_clusters:
+        #         print(doc.clusters_[cluster_id])
 
     # Write this summary to disk using whatever name we chose to provide here.
     with (LOC.runs / 'ne_coref' / name).open('w+', encoding='utf8') as f:
