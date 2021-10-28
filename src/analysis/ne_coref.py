@@ -21,7 +21,6 @@ from pprint import pprint
 from copy import deepcopy
 from tqdm.auto import tqdm
 from spacy.tokens import Doc
-from collections import Counter
 from typing import List, Tuple, Dict, Union
 
 from utils.misc import pop
@@ -31,6 +30,10 @@ from config import LOCATIONS as LOC
 from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
 
 DEBUG = False
+ENTITY_TAG_BLACKLIST = {
+    'named_entities_gold': ['CARDINAL', 'MONEY', 'PERCENT', 'ORDINAL', 'TIME', 'QUANTITY'],
+    'named_entities_spacy': ['CARDINAL', 'MONEY', 'PERCENT', 'ORDINAL', 'TIME', 'QUANTITY']
+}
 
 
 def _get_textual_exact_match_ners_(key: List[str], ners: List[List[str]]) -> List[int]:
@@ -73,7 +76,7 @@ def _get_exact_match_ners_(key: List[int], ners: List[List[Union[str, int]]]) ->
 
 # noinspection PyTypeChecker
 def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], ners, ners_, doc: Document,
-           entity_source: str, skip_unclustered: bool = False):
+           ent_src: str, skip_unclustered: bool = False):
     """
         At a glance, take a gander at
             - entities which have been assigned to clusters
@@ -81,7 +84,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
     """
 
     n_clustered = sum(len(x) for x in clustered_spans.values())
-    n_total = len(doc.named_entities_gold)
+    n_total = len(getattr(doc, ent_src))
 
     print(doc.docname, doc.genre)
     print(f"Amongst {n_total} entities, {n_clustered} have been assigned to a coref cluster.")
@@ -120,7 +123,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
     print("-------Done-------")
 
 
-def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, entity_source: str) \
+def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str, filter_named_entities: bool) \
         -> (Dict[int, List[int]], List[Union[str, int]]):
     """
         1. Find exact matches between coref and entity spans.
@@ -143,8 +146,17 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, entity_sourc
         return lemmas[span[0]: span[1]]
 
     # Make a copy of named entities
-    ners = deepcopy(doc.named_entities_gold)
-    ners_ = deepcopy(doc.named_entities_gold_)
+    ners = deepcopy(getattr(doc, ent_src))
+    ners_ = deepcopy(getattr(doc, ent_src+'_'))
+    if filter_named_entities:
+        popids = []
+        for i, ner in enumerate(ners):
+            if ner[0] in ENTITY_TAG_BLACKLIST[ent_src]:
+                popids.append(i)
+
+        _ = pop(ners, popids)
+        _ = pop(ners_, popids)
+
     if DEBUG: print("Unresolved entities: ", len(ners))
 
     # In the first run, find exact matches
@@ -321,14 +333,14 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, entity_sourc
 
     if DEBUG:
         print("Unresolved entities: ", len(ners))
-        review(clustered_spans, clustered_spans_, ners, ners_, doc, entity_source=entity_source)
+        review(clustered_spans, clustered_spans_, ners, ners_, doc, ent_src=ent_src)
 
     """
         Returning information
             - which entities were unclustered
             - which entities went to which cluster
             
-        In both information, we provide the index of the NER tag in doc.named_entities_gold ...
+        In both information, we provide the index of the NER tag in getattr(doc, ent_src) ...
     """
     if not (len(ners) == len(ners_) == len(ners_filtered) == len(ners_filtered_) == len(ners_filtered_chunks)
             == len(ners_filtered_chunks_) == len(ners_chunks) == len(ners_chunks_) == len(ners_chunks_lemmatized)):
@@ -339,7 +351,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, entity_sourc
         print(f"ners chunks lemmatized: {len(ners_chunks_lemmatized)}")
         raise AssertionError("We are not counting the leftover entities correctly somewhere. ")
 
-    clustered_span_indices = {_id: [doc.named_entities_gold.index(span) for span in _ents]
+    clustered_span_indices = {_id: [getattr(doc, ent_src).index(span) for span in _ents]
                               for _id, _ents in clustered_spans.items()}
     return clustered_span_indices, ners
 
@@ -354,14 +366,14 @@ def count_doc_n_clusters(doc: Document) -> int:
     return len(doc.clusters)
 
 
-def count_doc_n_entities(doc: Document) -> int:
+def count_doc_n_entities(doc: Document, ent_src: str) -> int:
     """ Returns an int: num of named entities (gold) in this document """
-    return len(doc.named_entities_gold)
+    return len(getattr(doc, ent_src))
 
 
-def count_tag_n_entities(doc: Document) -> List[str]:
+def count_tag_n_entities(doc: Document, ent_src: str) -> List[str]:
     """ Returns a dict where k: ner tag, e: num of elements in the doc with this tag"""
-    return [tuple_[0] for tuple_ in doc.named_entities_gold]
+    return [tuple_[0] for tuple_ in getattr(doc, ent_src)]
 
 
 @click.command()
@@ -369,9 +381,11 @@ def count_tag_n_entities(doc: Document) -> List[str]:
               help="The name of the ontonotes (CoNLL) SPLIT e.g. train, test, development, conll-2012-test etc")
 @click.option('--entity-source', '-es', type=str, default='gold',
               help="`gold` would use Gold NER annotaitons in Ontonotes. `spacy` would use Spacy's annotations.")
-@click.option('--name', '-n', type=str,
-              help="The name of the summary object to be written to disk")
-def run(split: str, name: str, entity_source: str):
+# @click.option('--name', '-n', type=str,
+#               help="The name of the summary object to be written to disk")
+@click.option('--filter-named-entities', '-fner', is_flag=True,
+              help="If enabled, we consider all named entities. If not we consider a subset ignoring cardinals etc.")
+def run(split: str, entity_source: str, filter_named_entities: bool):
     """
         Iterate over all documents and try to
             - match entities to coref clusters
@@ -383,6 +397,12 @@ def run(split: str, name: str, entity_source: str):
     # Use this is the document is already tokenized.
     nlp.tokenizer = NullTokenizer(nlp.vocab)
     dl = DataLoader('ontonotes', split, ignore_empty_coref=True)
+
+    assert entity_source in ['spacy', 'gold'], f"Unknown entity source: {entity_source}"
+    ent_src = f'named_entities_{entity_source}'
+
+    # Create experiment name
+    name = f"{entity_source}ner_{'all' if not filter_named_entities else 'some'}.json"
 
     summary['ignored_instances'] = 0
     summary['num_instances'] = len(dl)
@@ -399,11 +419,9 @@ def run(split: str, name: str, entity_source: str):
     summary['clusters_matched_per_doc'] = []
     summary['clusters_matched_different_tags_per_doc'] = []
 
-    ignored = 0
-
     for i, doc in enumerate(tqdm(dl)):
 
-        if not doc.named_entities_gold:
+        if not getattr(doc, ent_src):
             summary['ignored_instances'] += 1
             continue
 
@@ -422,17 +440,18 @@ def run(split: str, name: str, entity_source: str):
         summary['clusters_per_doc'].append(count_doc_n_clusters(doc))
 
         # Find statistics on the number of named entities in a document
-        summary['named_entities_per_doc'].append(count_doc_n_entities(doc))
+        summary['named_entities_per_doc'].append(count_doc_n_entities(doc, ent_src=ent_src))
 
         # Find statistics on the number of named entities per named entity tags
-        summary['named_entities_per_tag'] += count_tag_n_entities(doc)
+        summary['named_entities_per_tag'] += count_tag_n_entities(doc, ent_src=ent_src)
 
-        matches, unmatched = match_entities_to_coref_clusters(doc, spacy_doc, entity_source=entity_source)
+        matches, unmatched = match_entities_to_coref_clusters(doc, spacy_doc, ent_src=ent_src,
+                                                              filter_named_entities=filter_named_entities)
         unmatched_clusters = [k for k, v in matches.items() if not v]
         matched_clusters = [k for k, v in matches.items() if v]
-        matched_entities = {k: [doc.named_entities_gold_[i] for i in v] for k, v in matches.items()}
+        matched_entities = {k: [getattr(doc, ent_src+'_')[i] for i in v] for k, v in matches.items()}
         clus_matched_diff_tags_per_doc = len([1 for matched in matches.values()
-                                              if len(set(doc.named_entities_gold[epos][0] for epos in matched)) > 1])
+                                              if len(set(getattr(doc, ent_src)[epos][0] for epos in matched)) > 1])
 
         summary['named_entities_unmatched_per_doc'].append(len(unmatched))
         summary['named_entities_unmatched_per_tag'] += [tupl[0] for tupl in unmatched]
@@ -441,10 +460,8 @@ def run(split: str, name: str, entity_source: str):
         summary['clusters_matched_per_doc'].append(len(matched_clusters))
         summary['clusters_matched_different_tags_per_doc'].append(clus_matched_diff_tags_per_doc)
 
-        if i > 20: break
-
     # Write this summary to disk using whatever name we chose to provide here.
-    with (LOC.runs / 'ne_coref' / (name + '.json')).open('w+', encoding='utf8') as f:
+    with (LOC.runs / 'ne_coref' / name).open('w+', encoding='utf8') as f:
         json.dump(summary, f)
 
 

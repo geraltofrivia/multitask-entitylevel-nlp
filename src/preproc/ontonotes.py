@@ -163,7 +163,8 @@ class CoNLLOntoNotesParser:
                         clusters_[cluster_id].append(flat_doc[span[0]:span[1]])
 
                 # Convert NER tags into cluster-like things
-                named_entities_gold, named_entities_gold_ = self.convert_ner_tags(doc_ner_raw[i], documents[i])
+                named_entities_gold, named_entities_gold_ = self._onto_process_ner_tags_(doc_ner_raw[i], documents[i])
+                named_entities_spacy, named_entities_spacy_ = self._spacy_process_ner_tags_(spacy_doc)
 
                 # Span heads calculation
                 span_heads = self.get_span_heads(
@@ -186,6 +187,8 @@ class CoNLLOntoNotesParser:
                     clusters_=list(clusters_),
                     named_entities_gold=named_entities_gold,
                     named_entities_gold_=named_entities_gold_,
+                    named_entities_spacy=named_entities_spacy,
+                    named_entities_spacy_=named_entities_spacy_,
                     span_heads=span_heads,
                     span_heads_=span_heads_,
                 )
@@ -317,7 +320,12 @@ class CoNLLOntoNotesParser:
                 doc_keys[i] += f"_{i}"
             return doc_sents, doc_clusters, doc_speaker_ids, doc_keys, parts, doc_pos, doc_ner_raw
 
-    def convert_ner_tags(self, tags: list, document: list) -> (list, list):
+    def _spacy_process_ner_tags_(self, doc: spacy.tokens.Doc) -> (List[str], List[Union[str, int]]):
+        ents_ = [[ent.label_]+[tok.text for tok in ent] for ent in doc.ents]
+        ents = [[ent.label_, ent.start, ent.end] for ent in doc.ents]
+        return ents, ents_
+
+    def _onto_process_ner_tags_(self, tags: list, document: list) -> (list, list):
         """ Convert raw columns of annotations into proper tags. Expect nested tags, use a stack. """
         finalised_annotations_span = []
         finalised_annotations_text = []
