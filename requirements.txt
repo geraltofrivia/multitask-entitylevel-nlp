@@ -5,4 +5,5 @@ tqdm
 zlib
 configparser
 python-Levenshtein
-thefuzz[speedup]
+thefuzz
+click

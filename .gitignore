@@ -147,3 +147,4 @@ cython_debug/
 /data/raw/ontonotes/ontonotes-release-5.0_LDC2013T19.tgz
 /data/raw/ontonotes/v12.tar.gz
 /src/.ipynb_checkpoints/
+/data/runs/ne_coref/
