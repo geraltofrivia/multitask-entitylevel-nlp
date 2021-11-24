@@ -20,7 +20,7 @@ from spacy.tokens import Token
 from dataclasses import asdict
 from typing import Iterable, Union, List, Tuple, Dict
 
-from utils.data import Document
+from utils.data import Document, Clusters, NamedEntities
 from config import LOCATIONS as LOC
 from utils.nlp import to_toks, NullTokenizer
 from utils.misc import NERAnnotationBlockStack
@@ -151,7 +151,7 @@ class CoNLLOntoNotesParser:
 
                 # Add +1 to span ends in all cluster annotations
                 for j, cluster in enumerate(clusters[i]):
-                    clusters[i][j] = [[sp[0], sp[1]+1] for sp in cluster]
+                    clusters[i][j] = [[sp[0], sp[1] + 1] for sp in cluster]
 
                 # Convert cluster spans to text
                 flat_doc = to_toks(documents[i])
@@ -162,19 +162,34 @@ class CoNLLOntoNotesParser:
                     for span in cluster:
                         clusters_[cluster_id].append(flat_doc[span[0]:span[1]])
 
+                # Make a coref clusters object
+                coref = Clusters(spans=list(clusters[i]))
+
                 # Convert NER tags into cluster-like things
-                named_entities_gold, named_entities_gold_ = self._onto_process_ner_tags_(doc_ner_raw[i], documents[i])
-                named_entities_spacy, named_entities_spacy_ = self._spacy_process_ner_tags_(spacy_doc)
+                ner_gold_spans, ner_gold_words, ner_gold_tags = self._onto_process_ner_tags_(doc_ner_raw[i],
+                                                                                             documents[i])
+                ner_spacy_spans, ner_spacy_words, ner_spacy_tags = self._spacy_process_ner_tags_(spacy_doc)
+
+                # Make NER objects
+                ner_gold = NamedEntities(spans=ner_gold_spans, tags=ner_gold_tags, words=ner_gold_words)
+                ner_spacy = NamedEntities(spans=ner_spacy_spans, tags=ner_spacy_tags, words=ner_spacy_words)
 
                 # Span heads calculation
-                span_heads = self.get_span_heads(
-                    spacy_doc,
-                    [[ner[1], ner[2]] for ner in named_entities_gold] +
-                        [list(span) for cluster in clusters[i] for span in cluster]
-                )
-                span_heads_ = {span: [tok.text for tok in spacy_doc[span_heads[tuple(span)][0]:
-                                                                    span_heads[tuple(span)][1]]]
-                               for span in span_heads.keys()}
+                span_heads = self.get_span_heads(spacy_doc, ner_gold_spans + ner_spacy_spans + coref.get_all_spans())
+
+                # Add span heads, words, and pos in NER and Coref objects
+                coref.allocate_span_heads(span_heads=span_heads)
+                coref.add_words(documents[i])
+                coref.add_pos(doc_pos[i])
+
+                ner_gold.allocate_span_heads(span_heads=span_heads)
+                ner_gold.add_words(documents[i])
+                ner_gold.add_pos(doc_pos[i])
+
+                ner_spacy.allocate_span_heads(span_heads=span_heads)
+                ner_spacy.add_words(documents[i])
+                ner_spacy.add_pos(doc_pos[i])
+
 
                 doc = Document(
                     document=documents[i],
@@ -183,14 +198,9 @@ class CoNLLOntoNotesParser:
                     split=split_nm,
                     genre=genre,
                     docpart=doc_parts[i],
-                    clusters=list(clusters[i]),
-                    clusters_=list(clusters_),
-                    named_entities_gold=named_entities_gold,
-                    named_entities_gold_=named_entities_gold_,
-                    named_entities_spacy=named_entities_spacy,
-                    named_entities_spacy_=named_entities_spacy_,
-                    span_heads=span_heads,
-                    span_heads_=span_heads_,
+                    ner_gold=ner_gold,
+                    ner_spacy=ner_spacy,
+                    coref=coref
                 )
                 outputs.append(doc)
 
@@ -320,15 +330,18 @@ class CoNLLOntoNotesParser:
                 doc_keys[i] += f"_{i}"
             return doc_sents, doc_clusters, doc_speaker_ids, doc_keys, parts, doc_pos, doc_ner_raw
 
-    def _spacy_process_ner_tags_(self, doc: spacy.tokens.Doc) -> (List[str], List[Union[str, int]]):
-        ents_ = [[ent.label_]+[tok.text for tok in ent] for ent in doc.ents]
-        ents = [[ent.label_, ent.start, ent.end] for ent in doc.ents]
-        return ents, ents_
+    @staticmethod
+    def _spacy_process_ner_tags_(doc: spacy.tokens.Doc) -> (List[str], List[Union[int]], List[str]):
+        ents = [[ent.start, ent.end] for ent in doc.ents]
+        ents_ = [[tok.text for tok in ent] for ent in doc.ents]
+        ents_tags = [ent.label_ for ent in doc.ents]
+        return ents, ents_, ents_tags
 
-    def _onto_process_ner_tags_(self, tags: list, document: list) -> (list, list):
+    def _onto_process_ner_tags_(self, tags: list, document: list) -> (list, list, list):
         """ Convert raw columns of annotations into proper tags. Expect nested tags, use a stack. """
         finalised_annotations_span = []
         finalised_annotations_text = []
+        finalised_annotation_tag = []
         stack = NERAnnotationBlockStack()
 
         # Flatten the sentence structure
@@ -345,7 +358,7 @@ class CoNLLOntoNotesParser:
 
             # Begin condition
             for match in re.findall(self.re_ner_tags, tag):
-                if not '(' in match:
+                if '(' not in match:
                     continue
                 match_ = match[:].replace('(', '')
                 stack.add(word_id, match_.strip())
@@ -357,11 +370,12 @@ class CoNLLOntoNotesParser:
             for match in re.findall(self.re_ner_tags, tag):
                 if not ')' in match:
                     continue
-                ner_span, ner_text = stack.pop(word_id+1)
+                ner_span, ner_text, ner_tag = stack.pop(word_id + 1)
                 finalised_annotations_span.append(ner_span)
                 finalised_annotations_text.append(ner_text)
+                finalised_annotation_tag.append(ner_tag)
 
-        return finalised_annotations_span, finalised_annotations_text
+        return finalised_annotations_span, finalised_annotations_text, finalised_annotation_tag
 
 
 @click.command()

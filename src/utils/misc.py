@@ -58,11 +58,7 @@ class AnnotationBlock:
 
     @property
     def span(self) -> List[Union[str, int]]:
-        return [self.tag, self.start, self.end]
-
-    @property
-    def text(self) -> List[str]:
-        return [self.tag] + self.words
+        return [self.start, self.end]
 
 
 class NERAnnotationBlockStack:
@@ -81,7 +77,7 @@ class NERAnnotationBlockStack:
         self.blocks[-1].end = span
 
         block = self.blocks.pop(-1)
-        return block.span, block.text
+        return block.span, block.words, block.tag
 
     def add(self, span: int, tag: str) -> None:
         block = AnnotationBlock(tag=tag, start=span, words=[])

@@ -97,7 +97,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
         print(f"{cluster_id:2d}: ")
         for ent in cluster_entities:
             print(' '.join(ent))
-        print(doc.clusters_[cluster_id])
+        print(doc.coref.words[cluster_id])
 
     if skip_unclustered:
         return
@@ -106,7 +106,7 @@ def review(clustered_spans: Dict[int, list], clustered_spans_: Dict[int, list], 
     for ent, ent_ in zip(ners, ners_):
         matches = {}
         # Calculate fuzzy distance to all spans in all clusters
-        for cluster_id, (cluster_spans, cluster_texts) in enumerate(zip(doc.clusters, doc.clusters_)):
+        for cluster_id, (cluster_spans, cluster_texts) in enumerate(zip(doc.coref.spans, doc.coref.words)):
             # Calculate fuzzy string sim
             matches[cluster_id] = sorted(
                 [(fuzz.token_set_ratio(' '.join(ent_[1:]), ' '.join(text)), ' '.join(text), span)
@@ -134,8 +134,8 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
     """
 
     # Declare the dict which stores clustered spans (entities)
-    clustered_spans = {i: [] for i, _ in enumerate(doc.clusters)}
-    clustered_spans_ = {i: [] for i, _ in enumerate(doc.clusters)}
+    clustered_spans = {i: [] for i, _ in enumerate(doc.coref.spans)}
+    clustered_spans_ = {i: [] for i, _ in enumerate(doc.coref.spans)}
 
     noun_chunks = [[chunk.start, chunk.end] for chunk in spacy_doc.noun_chunks]
     lemmas = [token.lemma_ for token in spacy_doc]
@@ -161,7 +161,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
 
     # Iterate through every cluster, Iterate through every span in it
     #   and pull out the 'span' which is completely overlapped
-    for i, cluster in enumerate(doc.clusters):
+    for i, cluster in enumerate(doc.coref.spans):
         for span in cluster:
             # Get overlapped stuff
             matched = _get_exact_match_ners_(span, ners)
@@ -182,7 +182,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
     """
     ners_filtered = [[ner[0]] + remove_pos(ner[1:], doc.pos) for ner in ners]
     ners_filtered_ = [[ner[0]] + to_toks(doc.document)[ner[1]: ner[2]] for ner in ners_filtered]
-    for i, cluster in enumerate(doc.clusters):
+    for i, cluster in enumerate(doc.coref.spans):
         for span in cluster:
             # Do the pos based filtering on the coref span
             span = remove_pos(span, doc.pos)
@@ -210,14 +210,14 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
     ners_chunks_ = [ners_[i] if ners_chunks[i][0] != 'FAKE' else ['FAKE', 'alpha'] for i in range(len(ners))]
     ners_chunks_lemmatized = [[span[0]] + lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else [span[0]] + ['alpha']
                               for span in ners_chunks]
-    for cluster_id, cluster in enumerate(doc.clusters):
+    for cluster_id, cluster in enumerate(doc.coref.spans):
         for span_id, span in enumerate(cluster):
 
             # Check if the span is a noun chunk
             if not (span in noun_chunks or is_nchunk(span, doc.pos)):
                 continue
 
-            span_ = doc.clusters_[cluster_id][span_id]
+            span_ = doc.coref.words[cluster_id][span_id]
 
             # Get overlapped stuff
             matched = _get_textual_exact_match_ners_(span_, ners_chunks_)
@@ -231,7 +231,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             clustered_spans[cluster_id] += matched_spans
             clustered_spans_[cluster_id] += matched_spans_
 
-            span_ = lemmatize(doc.clusters[cluster_id][span_id], lemmas)
+            span_ = lemmatize(doc.coref.spans[cluster_id][span_id], lemmas)
 
             # Repeated for lemmatized version of the text
             matched = _get_textual_exact_match_ners_(span_, ners_chunks_lemmatized)
@@ -258,7 +258,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
     ners_chunks_lemmatized = [[span[0]] + lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else span
                               for span in ners_chunks]
 
-    for cluster_id, cluster in enumerate(doc.clusters):
+    for cluster_id, cluster in enumerate(doc.coref.spans):
         for span_id, span in enumerate(cluster):
 
             # Check if the span is a noun chunk
@@ -292,7 +292,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             
         Repeat for both, filtered and unfiltered ones.        
     """
-    for cluster_id, cluster in enumerate(doc.clusters):
+    for cluster_id, cluster in enumerate(doc.coref.spans):
         for span_id, span in enumerate(cluster):
 
             if not (span in noun_chunks or is_nchunk(span, doc.pos)):
@@ -356,12 +356,12 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
 
 def count_cluster_cardinality(doc: Document) -> List[int]:
     """ Returns a dict where k: num of elements in one cluster; v: num of such clusters"""
-    return [len(cluster) for cluster in doc.clusters]
+    return [len(cluster) for cluster in doc.coref.spans]
 
 
 def count_doc_n_clusters(doc: Document) -> int:
     """ Returns an int: num of clusters in this document """
-    return len(doc.clusters)
+    return len(doc.coref.spans)
 
 
 def count_doc_n_entities(doc: Document, ent_src: str) -> int:
@@ -371,17 +371,17 @@ def count_doc_n_entities(doc: Document, ent_src: str) -> int:
 
 def count_doc_n_coref_entities(doc: Document) -> int:
     """ Returns an int: num of all spans in all clusters in this document """
-    return sum(len(cluster) for cluster in doc.clusters)
+    return sum(len(cluster) for cluster in doc.coref.spans)
 
 
 def count_tag_n_entities(doc: Document, ent_src: str) -> List[str]:
-    """ Returns a dict where k: ner tag, e: num of elements in the doc with this tag"""
+    """ Returns a dict where k: ner tag, v: num of elements in the doc with this tag"""
     return [tuple_[0] for tuple_ in getattr(doc, ent_src)]
 
 
 def count_coref_span_length(doc: Document) -> List[int]:
     """ Returns a list containing the length of all coref spans """
-    return [span[1] - span[0] for cluster in doc.clusters for span in cluster]
+    return [span[1] - span[0] for cluster in doc.coref.spans for span in cluster]
 
 
 def count_ner_span_length(doc: Document, ent_src: str) -> List[int]:
@@ -392,11 +392,11 @@ def count_ner_span_length(doc: Document, ent_src: str) -> List[int]:
 def get_ungrounded_clusters(doc: Document) -> List[int]:
     """ Returns the index of ungrounded clusters in the document. Done based on POS tags"""
     clusters_pos = []
-    for i, cluster in enumerate(doc.clusters):
+    for i, cluster in enumerate(doc.coref.spans):
         clusters_pos.append([])
         for span in cluster:
             clusters_pos[i] += to_toks(doc.pos)[span[0]: span[1]]
-    # clusters_pos = [[to_toks(doc.pos)[span[0]: span[1]] for span in cluster] for cluster in doc.clusters]
+    # clusters_pos = [[to_toks(doc.pos)[span[0]: span[1]] for span in cluster] for cluster in doc.coref.clusters]
     return [i for i, cluster_pos in enumerate(clusters_pos) if not ('NN' in cluster_pos or 'NNP' in cluster_pos)]
 
 
@@ -510,7 +510,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
         # # Let's look at some clusters to which no entities have been matched
         # if i % 10 == 0:
         #     for cluster_id in unmatched_clusters:
-        #         print(doc.clusters_[cluster_id])
+        #         print(doc.coref.clusters_[cluster_id])
 
     # Write this summary to disk using whatever name we chose to provide here.
     with (LOC.runs / 'ne_coref' / name).open('w+', encoding='utf8') as f:

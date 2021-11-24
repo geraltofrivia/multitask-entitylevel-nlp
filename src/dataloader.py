@@ -79,12 +79,10 @@ class DataLoader(BaseLoader):
             with (fdir / fname).open('rb') as f:
                 for instance in pickle.load(f):
 
-                    if self._ignore_empty_coref_ and not instance.clusters:
+                    if self._ignore_empty_coref_ and instance.coref.isempty:
                         continue
 
                     n_doc += 1
-
-
 
             n.append(n_doc)
 
@@ -101,7 +99,7 @@ class DataLoader(BaseLoader):
 
             for instance in data_batch:
 
-                if self._ignore_empty_coref_ and not instance.clusters:
+                if self._ignore_empty_coref_ and not instance.coref.isempty:
                     continue
 
                 # instance.finalise()
