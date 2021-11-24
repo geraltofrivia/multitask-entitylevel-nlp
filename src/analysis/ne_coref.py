@@ -369,6 +369,11 @@ def count_doc_n_entities(doc: Document, ent_src: str) -> int:
     return len(getattr(doc, ent_src))
 
 
+def count_doc_n_coref_entities(doc: Document) -> int:
+    """ Returns an int: num of all spans in all clusters in this document """
+    return sum(len(cluster) for cluster in doc.clusters)
+
+
 def count_tag_n_entities(doc: Document, ent_src: str) -> List[str]:
     """ Returns a dict where k: ner tag, e: num of elements in the doc with this tag"""
     return [tuple_[0] for tuple_ in getattr(doc, ent_src)]
@@ -382,6 +387,17 @@ def count_coref_span_length(doc: Document) -> List[int]:
 def count_ner_span_length(doc: Document, ent_src: str) -> List[int]:
     """ Returns a list containing the length of all named entity spans (based on the entity source) """
     return [span[2] - span[1] for span in getattr(doc, ent_src)]
+
+
+def get_ungrounded_clusters(doc: Document) -> List[int]:
+    """ Returns the index of ungrounded clusters in the document. Done based on POS tags"""
+    clusters_pos = []
+    for i, cluster in enumerate(doc.clusters):
+        clusters_pos.append([])
+        for span in cluster:
+            clusters_pos[i] += to_toks(doc.pos)[span[0]: span[1]]
+    # clusters_pos = [[to_toks(doc.pos)[span[0]: span[1]] for span in cluster] for cluster in doc.clusters]
+    return [i for i, cluster_pos in enumerate(clusters_pos) if not ('NN' in cluster_pos or 'NNP' in cluster_pos)]
 
 
 @click.command()
@@ -404,7 +420,6 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     """
     global DEBUG
 
-
     DEBUG = debug
     summary = {}
     nlp = spacy.load('en_core_web_sm')
@@ -424,8 +439,10 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     summary['tokens_per_doc'] = []
     summary['clusters_per_doc'] = []
     summary['elements_per_cluster'] = []
+    summary['coref_entities_per_doc'] = []
     summary['named_entities_per_doc'] = []
     summary['named_entities_per_tag'] = []
+    summary['ungrounded_clusters_per_doc'] = {}
     summary['length_coref_per_span'] = []
     summary['length_ner_per_span'] = []
 
@@ -460,11 +477,17 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
         # Find statistics on the number of named entities in a document
         summary['named_entities_per_doc'].append(count_doc_n_entities(doc, ent_src=ent_src))
 
+        # Find statistics on the number of coreferent entities in a doc
+        summary['coref_entities_per_doc'].append(count_doc_n_coref_entities(doc))
+
+        # Lets try and find ungrounded clusters in the document using simple metrics
+        summary['ungrounded_clusters_per_doc'][doc.docname] = get_ungrounded_clusters(doc)
+
         # Find statistics on the number of named entities per named entity tags
         summary['named_entities_per_tag'] += count_tag_n_entities(doc, ent_src=ent_src)
 
         matched_entity_ids, unmatched_entities = match_entities_to_coref_clusters(doc, spacy_doc, ent_src=ent_src,
-                                                                                filter_entities=filter_named_entities)
+                                                                                  filter_entities=filter_named_entities)
         unmatched_clusters = [k for k, v in matched_entity_ids.items() if not v]
         matched_clusters = [k for k, v in matched_entity_ids.items() if v]
         matched_entities = {k: [getattr(doc, ent_src + '_')[i] for i in v] for k, v in matched_entity_ids.items()}
