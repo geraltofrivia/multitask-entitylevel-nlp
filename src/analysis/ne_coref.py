@@ -41,10 +41,10 @@ def _get_textual_exact_match_ners_(key: List[str], ners: List[List[str]]) -> Lis
     popids: List[int] = []
     for i, ner in enumerate(ners):
 
-        if ner[0] == 'FAKE':
+        if ner == [-2, -1]:
             continue
 
-        if key == ner or key == ner[1:]:
+        if key == ner:
             popids.append(i)
 
     return popids
@@ -68,7 +68,7 @@ def _get_exact_match_ners_(key: List[int], ners: List[List[Union[str, int]]]) ->
     """ If an element in spans is completely subsumed by the span in key, we return it."""
     popids: List[int] = []
     for i, ner in enumerate(ners):
-        if key[0] == ner[1] and ner[2] == key[1]:
+        if key[0] == ner[0] and key[1] == ner[1]:
             popids.append(i)
 
     return popids
@@ -144,16 +144,19 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
         return lemmas[span[0]: span[1]]
 
     # Make a copy of named entities
-    ners = deepcopy(getattr(doc, ent_src))
-    ners_ = deepcopy(getattr(doc, ent_src + '_'))
+    ners = deepcopy(getattr(doc, ent_src).spans)
+    ners_ = deepcopy(getattr(doc, ent_src).words)
+    nertags = deepcopy(getattr(doc, ent_src).tags)
+
     if filter_entities:
         popids = []
         for i, ner in enumerate(ners):
-            if ner[0] in ENTITY_TAG_BLACKLIST[ent_src]:
+            if nertags[i] in ENTITY_TAG_BLACKLIST[ent_src]:
                 popids.append(i)
 
         _ = pop(ners, popids)
         _ = pop(ners_, popids)
+        _ = pop(nertags, popids)
 
     if DEBUG: print("Unresolved entities: ", len(ners))
 
@@ -167,6 +170,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             matched = _get_exact_match_ners_(span, ners)
             matched_spans = pop(ners, matched)
             matched_spans_ = pop(ners_, matched)
+            matched_spans_tags = pop(nertags, matched)
             clustered_spans[i] += matched_spans
             clustered_spans_[i] += matched_spans_
 
@@ -180,8 +184,11 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
         Implementation:
             create a copy of NER spans, where this filtering has been done and use this list to find NER ids
     """
-    ners_filtered = [[ner[0]] + remove_pos(ner[1:], doc.pos) for ner in ners]
-    ners_filtered_ = [[ner[0]] + to_toks(doc.document)[ner[1]: ner[2]] for ner in ners_filtered]
+
+    # Note: the number of actual spans in ners, ners_filtered etc etc is always the same.
+    ners_filtered = [remove_pos(ner, doc.pos) for ner in ners]
+    ners_filtered_ = [to_toks(doc.document)[ner[0]: ner[1]] for ner in ners_filtered]
+
     for i, cluster in enumerate(doc.coref.spans):
         for span in cluster:
             # Do the pos based filtering on the coref span
@@ -190,6 +197,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             # Get overlapped stuff
             matched = _get_exact_match_ners_(span, ners_filtered)
             matched_spans = pop(ners, matched)
+            _ = pop(nertags, matched)
             _ = pop(ners_filtered, matched)
             _ = pop(ners_filtered_, matched)
             matched_spans_ = pop(ners_, matched)
@@ -205,11 +213,10 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
                 
         Note: do not do any form of "POS based filtering in this step"
     """
-    ners_chunks = [span if span[1:] in noun_chunks or is_nchunk(span[1:], doc.pos) else ['FAKE', -2, -1]
+    ners_chunks = [span if span in noun_chunks or is_nchunk(span, doc.pos) else [-2, -1]
                    for span in ners]
-    ners_chunks_ = [ners_[i] if ners_chunks[i][0] != 'FAKE' else ['FAKE', 'alpha'] for i in range(len(ners))]
-    ners_chunks_lemmatized = [[span[0]] + lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else [span[0]] + ['alpha']
-                              for span in ners_chunks]
+    ners_chunks_ = [ners_[i] if ners_chunks[i] != [-2, -1] else ['alphabetagamma'] for i in range(len(ners))]
+    ners_chunks_lemmatized = [lemmatize(span, lemmas) if span != [-2, -1] else 'alphabetagamma' for span in ners_chunks]
     for cluster_id, cluster in enumerate(doc.coref.spans):
         for span_id, span in enumerate(cluster):
 
@@ -224,6 +231,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             matched_spans = pop(ners, matched)
             _ = pop(ners_filtered, matched)
             _ = pop(ners_filtered_, matched)
+            _ = pop(nertags, matched)
             _ = pop(ners_chunks, matched)
             _ = pop(ners_chunks_, matched)
             _ = pop(ners_chunks_lemmatized, matched)
@@ -239,6 +247,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             _ = pop(ners_filtered, matched)
             _ = pop(ners_filtered_, matched)
             _ = pop(ners_chunks, matched)
+            _ = pop(nertags, matched)
             _ = pop(ners_chunks_, matched)
             _ = pop(ners_chunks_lemmatized, matched)
             matched_spans_ = pop(ners_, matched)
@@ -251,11 +260,11 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
         In the fourth run, do the same 
             but when both of the things i.e. entities and coreferent phrases are POS filtered 
     """
-    ners_filtered_chunks = [span if span[1:] in noun_chunks or is_nchunk(span[1:], doc.pos) else ['FAKE', -2, -1]
+    ners_filtered_chunks = [span if span in noun_chunks or is_nchunk(span, doc.pos) else [-2, -1]
                             for span in ners_filtered]
-    ners_filtered_chunks_ = [ners_[i] if ners_filtered_chunks[i][0] != 'FAKE' else ['FAKE', 'alpha']
+    ners_filtered_chunks_ = [ners_[i] if ners_filtered_chunks[i] != [-2, -1] else ['alphabetagamma']
                              for i in range(len(ners))]
-    ners_chunks_lemmatized = [[span[0]] + lemmatize(span[1:], lemmas) if span[0] != 'FAKE' else span
+    ners_chunks_lemmatized = [ lemmatize(span, lemmas) if span != [-2, -1] else span
                               for span in ners_chunks]
 
     for cluster_id, cluster in enumerate(doc.coref.spans):
@@ -274,6 +283,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             _ = pop(ners_filtered, matched)
             _ = pop(ners_filtered_, matched)
             _ = pop(ners_chunks, matched)
+            _ = pop(nertags, matched)
             _ = pop(ners_chunks_, matched)
             _ = pop(ners_chunks_lemmatized, matched)
             _ = pop(ners_filtered_chunks, matched)
@@ -304,6 +314,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             _ = pop(ners_filtered, matched)
             _ = pop(ners_filtered_, matched)
             _ = pop(ners_chunks, matched)
+            _ = pop(nertags, matched)
             _ = pop(ners_chunks_, matched)
             _ = pop(ners_chunks_lemmatized, matched)
             _ = pop(ners_filtered_chunks, matched)
@@ -322,6 +333,7 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
             _ = pop(ners_filtered_, matched)
             _ = pop(ners_chunks, matched)
             _ = pop(ners_chunks_, matched)
+            _ = pop(nertags, matched)
             _ = pop(ners_filtered_chunks, matched)
             _ = pop(ners_filtered_chunks_, matched)
             _ = pop(ners_chunks_lemmatized, matched)
@@ -341,17 +353,19 @@ def match_entities_to_coref_clusters(doc: Document, spacy_doc: Doc, ent_src: str
         In both information, we provide the index of the NER tag in getattr(doc, ent_src) ...
     """
     if not (len(ners) == len(ners_) == len(ners_filtered) == len(ners_filtered_) == len(ners_filtered_chunks)
-            == len(ners_filtered_chunks_) == len(ners_chunks) == len(ners_chunks_) == len(ners_chunks_lemmatized)):
+            == len(ners_filtered_chunks_) == len(ners_chunks) == len(ners_chunks_)
+            == len(ners_chunks_lemmatized) == len(nertags)):
         print(f"ners: {len(ners)}, {len(ners_)}")
         print(f"ners filtered: {len(ners_filtered)}, {len(ners_filtered_)}")
         print(f"ners chunks: {len(ners_chunks)}, {len(ners_chunks_)}")
         print(f"ners chunks filtered: {len(ners_filtered_chunks)}, {len(ners_filtered_chunks_)}")
         print(f"ners chunks lemmatized: {len(ners_chunks_lemmatized)}")
+        print(f"ners tags: {len(nertags)}")
         raise AssertionError("We are not counting the leftover entities correctly somewhere. ")
 
-    clustered_span_indices = {_id: [getattr(doc, ent_src).index(span) for span in _ents]
+    clustered_span_indices = {_id: [getattr(doc, ent_src).spans.index(span) for span in _ents]
                               for _id, _ents in clustered_spans.items()}
-    return clustered_span_indices, ners
+    return clustered_span_indices, ners, nertags
 
 
 def count_cluster_cardinality(doc: Document) -> List[int]:
@@ -371,12 +385,12 @@ def count_doc_n_entities(doc: Document, ent_src: str) -> int:
 
 def count_doc_n_coref_entities(doc: Document) -> int:
     """ Returns an int: num of all spans in all clusters in this document """
-    return sum(len(cluster) for cluster in doc.coref.spans)
+    return sum(len(cluster_spans) for cluster_spans in doc.coref.spans)
 
 
 def count_tag_n_entities(doc: Document, ent_src: str) -> List[str]:
     """ Returns a dict where k: ner tag, v: num of elements in the doc with this tag"""
-    return [tuple_[0] for tuple_ in getattr(doc, ent_src)]
+    return [tag for tag in getattr(doc, ent_src).tags]
 
 
 def count_coref_span_length(doc: Document) -> List[int]:
@@ -386,18 +400,13 @@ def count_coref_span_length(doc: Document) -> List[int]:
 
 def count_ner_span_length(doc: Document, ent_src: str) -> List[int]:
     """ Returns a list containing the length of all named entity spans (based on the entity source) """
-    return [span[2] - span[1] for span in getattr(doc, ent_src)]
+    return [span[2] - span[1] for span in getattr(doc, ent_src).spans]
 
 
 def get_ungrounded_clusters(doc: Document) -> List[int]:
     """ Returns the index of ungrounded clusters in the document. Done based on POS tags"""
-    clusters_pos = []
-    for i, cluster in enumerate(doc.coref.spans):
-        clusters_pos.append([])
-        for span in cluster:
-            clusters_pos[i] += to_toks(doc.pos)[span[0]: span[1]]
     # clusters_pos = [[to_toks(doc.pos)[span[0]: span[1]] for span in cluster] for cluster in doc.coref.clusters]
-    return [i for i, cluster_pos in enumerate(clusters_pos) if not ('NN' in cluster_pos or 'NNP' in cluster_pos)]
+    return [i for i, cluster_pos in enumerate(doc.coref.pos) if not ('NN' in cluster_pos or 'NNP' in cluster_pos)]
 
 
 @click.command()
@@ -429,7 +438,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     dl = DataLoader('ontonotes', split, ignore_empty_coref=True)
 
     assert entity_source in ['spacy', 'gold'], f"Unknown entity source: {entity_source}"
-    ent_src = f'named_entities_{entity_source}'
+    ent_src = f'ner_{entity_source}'
 
     # Create experiment name
     name = f"{entity_source}ner_{'all' if not filter_named_entities else 'some'}.json"
@@ -456,7 +465,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
 
     for i, doc in enumerate(tqdm(dl)):
 
-        if not getattr(doc, ent_src):
+        if getattr(doc, ent_src).isempty:
             summary['ignored_instances'] += 1
             continue
 
@@ -486,13 +495,15 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
         # Find statistics on the number of named entities per named entity tags
         summary['named_entities_per_tag'] += count_tag_n_entities(doc, ent_src=ent_src)
 
+        raise NotImplementedError
+
         matched_entity_ids, unmatched_entities = match_entities_to_coref_clusters(doc, spacy_doc, ent_src=ent_src,
                                                                                   filter_entities=filter_named_entities)
         unmatched_clusters = [k for k, v in matched_entity_ids.items() if not v]
         matched_clusters = [k for k, v in matched_entity_ids.items() if v]
-        matched_entities = {k: [getattr(doc, ent_src + '_')[i] for i in v] for k, v in matched_entity_ids.items()}
+        matched_entities = {k: [getattr(doc, ent_src).words[i] for i in v] for k, v in matched_entity_ids.items()}
         clus_matched_diff_tags_per_doc = len([1 for matched in matched_entity_ids.values()
-                                              if len(set(getattr(doc, ent_src)[epos][0] for epos in matched)) > 1])
+                                              if len(set(getattr(doc, ent_src).spans[epos][0] for epos in matched)) > 1])
 
         summary['named_entities_unmatched_per_doc'].append(len(unmatched_entities))
         summary['named_entities_unmatched_per_tag'] += [tupl[0] for tupl in unmatched_entities]

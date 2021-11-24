@@ -100,9 +100,19 @@ class NamedEntities:
     words_head: List[List[str]] = field(default_factory=list)
     pos_head: List[List[str]] = field(default_factory=list)
 
+    def __len__(self):
+        return len(self.spans)
+
     @property
-    def empty(self):
+    def isempty(self):
         return len(self.spans) == 0
+
+    def get_tag_of(self, span, src: str = 'spans') -> str:
+        # Get span ID and based on it, fetch the tag
+        if src not in ['spans', 'words', 'pos', 'spans_head', 'words_head', 'pos_head']:
+            raise AssertionError(f"Data source {src} not understood.")
+        index = getattr(self, src).index(span)
+        return self.tags[index]
 
     def allocate_span_heads(self, span_heads: dict):
         """ Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
