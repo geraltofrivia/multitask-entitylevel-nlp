@@ -57,6 +57,13 @@ class DataLoader(BaseLoader):
             unless of course the data is stored in one giant pickle file.
             in which case, we can't help you and please contact the preprocessing department
 
+        # Usage
+
+        ### Iterating through processed ontonotes split
+        dl = DataLoader('ontonotes', split='train', ignore_empty_coref=True)
+
+        
+
     """
 
     def __init__(self, dataset: str, split: str, shuffle: bool = False, ignore_empty_coref: bool=False):
