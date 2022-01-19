@@ -56,7 +56,7 @@ class BertEmbeddings:
             TODO: make it handle UNKs
         """
         sw2w = {}
-        sw_tokens = self.tokenizer.convert_ids_to_tokens(encoded_input['input_ids'].squeeze(0).tolist(),
+        sw_tokens = self.tokenizer.convert_ids_to_tokens(encoded_input.squeeze(0).tolist(),
                                                          skip_special_tokens=True)[:]
         tokens = tokens[:]
         curr_sw_index = 0
@@ -86,20 +86,17 @@ class BertEmbeddings:
                     next_word = next_word if not next_word.startswith('##') else next_word[2:]
                     sw_phrase += next_word
 
+                    sw_selected = i
                     if sw_phrase == tokens[0]:
-                        sw_selected = i
                         break
 
-                if sw_selected < 0:
-                    raise AssertionError(f"It seems that no subwords ({sw_tokens[:3]}) can form the next token: {tokens[0]}")
-
-                for i in range(sw_selected+1):
-                    sw2w[curr_sw_index + i ] = curr_w_index
+                for i in range(sw_selected + 1):
+                    sw2w[curr_sw_index + i] = curr_w_index
 
                 curr_w_index += 1
                 curr_sw_index += sw_selected + 1
                 tokens.pop(0)
-                pop(sw_tokens, list(range(sw_selected+1)))
+                pop(sw_tokens, list(range(sw_selected + 1)))
 
         return sw2w
 
@@ -120,7 +117,7 @@ class BertEmbeddings:
                     raise AssertionError("Word to subword index is not in order. This needs to be handled explicitly")
 
         # Break down the output vectors based on each word
-        word_vectors = [output[subwords_in_this_word,:] for subwords_in_this_word in word_to_subword_index.values()]
+        word_vectors = [output[subwords_in_this_word, :] for subwords_in_this_word in word_to_subword_index.values()]
 
         # Pool each of them
         word_vectors = [self.subword_pooling(word_vector) for word_vector in word_vectors]
@@ -130,7 +127,7 @@ class BertEmbeddings:
 
         return word_vectors_t
 
-    def encode(self, tokens: List[str]) -> torch.tensor:
+    def encode(self, tokens: List[str]) -> torch.Tensor:
         """
             Works with one sequence at a time, not a batch of sequence.
             Input the text sequence, we're going to encode it
@@ -142,18 +139,55 @@ class BertEmbeddings:
         # text = ' '.join(tokens)
 
         # Use the BERT subword tokenizer on the string, and get encoded vectors corresponding to subword tokens.
-        encoded_input = self.tokenizer(tokens, return_tensors='pt', add_special_tokens=False, is_split_into_words=True)
-        output = self.model(**encoded_input)[0]                                         # (1, subword seq len, hidden dim)
+        encoded_input = self.tokenizer(tokens, return_tensors='pt', add_special_tokens=False,
+                                       is_split_into_words=True, truncation=True)
+        output = self.model(**encoded_input)[0]  # (1, subword seq len, hidden dim)
 
         # Since we are working with one batch, let's squeeze away the 0th dim out of outputs
-        output = output.squeeze(0)                                                      # (subword seq len, hidden dim)
+        output = output.squeeze(0)  # (subword seq len, hidden dim)
 
         # Figure out which subwords belong to which tokens, and do some sort of pooling, as predetermined.
-        pooled_output = self.pool_subword_vectors(tokens, encoded_input, output)        # (1, word seq len, hidden dim)
+        pooled_output = self.pool_subword_vectors(tokens, encoded_input['input_ids'], output)  # (1, word seq len, hidden dim)
 
         return pooled_output
 
+    def batch_encode(self, tokens: List[List[str]]) -> torch.Tensor:
+        """ Similar to encode but works with a batch of text sequences (tokenized) """
+        batch_encoded_input = self.tokenizer(tokens, return_tensors='pt', add_special_tokens=False,
+                                             is_split_into_words=True, padding=True, truncation=True)
+        batch_output = self.model(**batch_encoded_input)[0]     # ( bs, subword seq len, hidden dim)
+
+        pooled_output = []
+        for i, output in enumerate(batch_output):
+            encoded_input = batch_encoded_input['input_ids'][i]
+            pooled_output.append(self.pool_subword_vectors(tokens[i], encoded_input, output))
+
+        # Pad all the tensors to be able to stack them.
+        n_batch = batch_output.shape[0]
+        hiddendim = batch_output.shape[-1]
+        maxlen = max(output.shape[1] for output in pooled_output)
+        pooled_output_ = torch.zeros((n_batch, maxlen, hiddendim), dtype=batch_output.dtype)
+        for i, output in enumerate(pooled_output):
+            pooled_output_[i, :output.shape[1],:] = output
+
+        return pooled_output_
+
 
 if __name__ == '__main__':
+
+    # Testing encode
     be = BertEmbeddings()
     print(be.encode("I see a potato".split()).shape)
+
+    # Testing batch encode
+    tokens = [
+        'I see a little silhouette of a man.'.split(),
+        'Replace me with whatever text you seem to have agrowing inclinationing for.'.split(),
+        'this one is smol'.split(),
+        'grabbless'.split()
+    ]
+    print(be.batch_encode(tokens).shape)
+
+    # Testing truncations
+    tokens = tokens[0]*200
+    print(be.encode(tokens).shape)
