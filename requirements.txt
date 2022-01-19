@@ -7,4 +7,5 @@ configparser
 python-Levenshtein
 thefuzz
 click
+transformers
 torch

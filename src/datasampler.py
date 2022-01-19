@@ -17,7 +17,7 @@ class DataLoaderToHFTokenizer:
         self.dl = dataloader
 
     @staticmethod
-    def format_doc(doc: Document):
+    def format_doc(doc: Document) -> str:
         text = doc.document # is a list of list of strings
         text = to_toks(text)
         return ' '.join(text)
@@ -26,5 +26,5 @@ class DataLoaderToHFTokenizer:
         for instance in self.dl:
             yield self.format_doc(instance)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.dl.__len__()
