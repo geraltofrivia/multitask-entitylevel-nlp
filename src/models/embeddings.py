@@ -6,13 +6,16 @@
 
     So far, we have GloVe, and BERT embeddings implemented
 """
-
+import numpy as np
 import torch
+import gensim.downloader as api
+from gensim.models import KeyedVectors
 from typing import List, Dict, Callable
 from transformers import BertTokenizer, BertModel
 
 # Local imports
 from utils.misc import pop
+from config import LOCATIONS as LOC
 
 
 class BertEmbeddings:
@@ -26,6 +29,8 @@ class BertEmbeddings:
             text =  "Replace me by any text other you'd like."
             tokens =  text.split(' ')
             vectors = embeddings.encode(tokens)
+
+        TODO: padding is set to zero. Should it be?
     """
 
     def __init__(self, model_name='bert-base-uncased', subword_pooling='mean', debug: bool = True):
@@ -173,21 +178,91 @@ class BertEmbeddings:
         return pooled_output_
 
 
+class Word2VecEmbeddings:
+
+    def __init__(self):
+        self.vectors = KeyedVectors.load_word2vec_format(LOC.word2vec, binary=True)
+
+    def encode(self):
+        ...
+
+class GloVeEmbeddings:
+    """
+        Checks if the GloVe embeddings are converted to the w2v format already or not.
+        If not, it does the conversion and then loads them.
+
+        Conversion snippet:
+            from gensim.test.utils import datapath, get_tmpfile
+            from gensim.models import KeyedVectors
+            from gensim.scripts.glove2word2vec import glove2word2vec
+            glove_file = datapath('test_glove.txt')
+            tmp_file = get_tmpfile("test_word2vec.txt")
+            _ = glove2word2vec(glove_file, tmp_file)
+            model = KeyedVectors.load_word2vec_format(tmp_file)
+
+        TODO: padding is set to zero. Should it be?
+    """
+
+    def __init__(self):
+
+        glove_loc = LOC.glove / 'glove.6B.300d.w2v.txt'
+
+        # Check if the GloVe file is already converted
+        if not glove_loc.exists():
+            # Do the conversion
+            from gensim.scripts.glove2word2vec import glove2word2vec
+            glove_file_loc = str(glove_loc).replace('.w2v.txt', '.txt')
+            glove_loc.touch()
+            _ = glove2word2vec(glove_file_loc, str(glove_loc))
+
+        self.vectors = KeyedVectors.load_word2vec_format(glove_loc)
+
+    # noinspection PyTypeChecker
+    def encode(self, tokens: List[str]) -> torch.Tensor:
+
+        output: List[np.ndarray] = []
+        for token in tokens:
+            try:
+                output.append(self.vectors[token.lower()])
+            except KeyError:
+                output.append(np.zeros_like(self.vectors['the']))
+
+        return torch.Tensor(output)
+
+    def batch_encode(self, tokens: List[List[str]]) -> torch.Tensor:
+
+        n_batch = len(tokens)
+        maxlen = max(len(seq) for seq in tokens)
+        hdim = self.vectors['the'].shape[0]
+
+        outputs = torch.zeros((n_batch, maxlen, hdim), dtype=torch.float32)
+
+        # Start filling it in
+        for i, seq in enumerate(tokens):
+            encoded_seq = self.encode(seq)
+            outputs[i, :len(encoded_seq), :] = encoded_seq
+
+        return outputs
+
+
 if __name__ == '__main__':
 
     # Testing encode
-    be = BertEmbeddings()
-    print(be.encode("I see a potato".split()).shape)
+    # be = BertEmbeddings()
+    # print(be.encode("I see a potato".split()).shape)
+    #
+    # # Testing batch encode
+    # tokens = [
+    #     'I see a little silhouette of a man.'.split(),
+    #     'Replace me with whatever text you seem to have agrowing inclinationing for.'.split(),
+    #     'this one is smol'.split(),
+    #     'grabbless'.split()
+    # ]
+    # print(be.batch_encode(tokens).shape)
+    #
+    # # Testing truncations
+    # tokens = tokens[0]*200
+    # print(be.encode(tokens).shape)
 
-    # Testing batch encode
-    tokens = [
-        'I see a little silhouette of a man.'.split(),
-        'Replace me with whatever text you seem to have agrowing inclinationing for.'.split(),
-        'this one is smol'.split(),
-        'grabbless'.split()
-    ]
-    print(be.batch_encode(tokens).shape)
-
-    # Testing truncations
-    tokens = tokens[0]*200
-    print(be.encode(tokens).shape)
+    ge = GloVeEmbeddings()
+    print('potato')

@@ -1,6 +1,13 @@
 mkdir data
 mkdir data/raw
 mkdir data/raw/ontonotes
+mkdir data/parsed
+mkdir data/parsed/ontonotes
+mkdir data/runs
+mkdir data/runs/ne_coref
+mkdir models
+mkdir models/glove
+mkdir models/wordtovec
 
 # Downloading conll formatted ontonotes skeleton files
 wget https://github.com/ontonotes/conll-formatted-ontonotes-5.0/archive/refs/tags/v12.tar.gz -P data/raw/ontonotes
@@ -18,3 +25,7 @@ pip install -r requirements.txt
 
 # Downloading the spacy model
 python -m spacy download en_core_web_sm
+
+# Download word2vec and glove
+wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
+unzip models/glove/glove.6B.zip -d models/glove/
