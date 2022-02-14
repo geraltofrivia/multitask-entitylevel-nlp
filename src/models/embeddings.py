@@ -6,15 +6,15 @@
 
     So far, we have GloVe, and BERT embeddings implemented
 """
-import numpy as np
 import torch
+import numpy as np
+import transformers
 import gensim.downloader as api
 from gensim.models import KeyedVectors
 from typing import List, Dict, Callable
-from transformers import BertTokenizer, BertModel
 
 # Local imports
-from utils.misc import pop
+from utils.nlp import match_subwords_to_words
 from config import LOCATIONS as LOC
 
 
@@ -31,12 +31,14 @@ class BertEmbeddings:
             vectors = embeddings.encode(tokens)
 
         TODO: padding is set to zero. Should it be?
+        TODO: what happens when a doc is larger than the max length? We seem to be truncating it.
+            Should we idify sentence by sentence instead?
     """
 
     def __init__(self, model_name='bert-base-uncased', subword_pooling='mean', debug: bool = True):
 
-        self.tokenizer = BertTokenizer.from_pretrained(model_name)
-        self.model = BertModel.from_pretrained(model_name)
+        self.tokenizer = transformers.BertTokenizer.from_pretrained(model_name)
+        self.model = transformers.BertModel.from_pretrained(model_name)
         self.uncased = 'uncased' in model_name
         self.subword_pooling_ = subword_pooling
         self.__debug = debug
@@ -55,62 +57,12 @@ class BertEmbeddings:
         """ input is [n, hdim], output must be [1, hdim] """
         return torch.mean(subword_vectors, dim=0).unsqueeze(0)
 
-    def _match_subwords_to_words(self, tokens: List[str], encoded_input: dict) -> Dict[int, int]:
-        """
-            Create a dictionary that matches subword indices to word indices
-            TODO: make it handle UNKs
-        """
-        sw2w = {}
-        sw_tokens = self.tokenizer.convert_ids_to_tokens(encoded_input.squeeze(0).tolist(),
-                                                         skip_special_tokens=True)[:]
-        tokens = tokens[:]
-        curr_sw_index = 0
-        curr_w_index = 0
-
-        while True:
-
-            # break if sw tokens are empty
-            if not sw_tokens:
-                break
-
-            # print(sw_tokens, tokens)
-            #     input()
-
-            if sw_tokens[0] == tokens[0]:
-                # exact match
-                sw2w[curr_sw_index] = curr_w_index
-                sw_tokens.pop(0)
-                tokens.pop(0)
-                curr_sw_index += 1
-                curr_w_index += 1
-            else:
-                sw_phrase = ''
-                sw_selected = -1
-                for i, next_word in enumerate(sw_tokens):
-                    next_word = next_word[:]
-                    next_word = next_word if not next_word.startswith('##') else next_word[2:]
-                    sw_phrase += next_word
-
-                    sw_selected = i
-                    if sw_phrase == tokens[0]:
-                        break
-
-                for i in range(sw_selected + 1):
-                    sw2w[curr_sw_index + i] = curr_w_index
-
-                curr_w_index += 1
-                curr_sw_index += sw_selected + 1
-                tokens.pop(0)
-                pop(sw_tokens, list(range(sw_selected + 1)))
-
-        return sw2w
-
     def pool_subword_vectors(self, tokens: List[str], encoded_input: dict, output: torch.Tensor) -> torch.Tensor:
 
         if self.uncased:
             tokens = [tok.lower() for tok in tokens]
 
-        subword_to_word_index = self._match_subwords_to_words(tokens, encoded_input)
+        subword_to_word_index = match_subwords_to_words(tokens, encoded_input, self.tokenizer)
         word_to_subword_index = {}
         for sw_in, w_in in subword_to_word_index.items():
             word_to_subword_index[w_in] = word_to_subword_index.get(w_in, []) + [sw_in]
@@ -145,7 +97,7 @@ class BertEmbeddings:
 
         # Use the BERT subword tokenizer on the string, and get encoded vectors corresponding to subword tokens.
         encoded_input = self.tokenizer(tokens, return_tensors='pt', add_special_tokens=False,
-                                       is_split_into_words=True, truncation=True)
+                                       is_split_into_words=True, truncation=False)
         output = self.model(**encoded_input)[0]  # (1, subword seq len, hidden dim)
 
         # Since we are working with one batch, let's squeeze away the 0th dim out of outputs
@@ -159,7 +111,7 @@ class BertEmbeddings:
     def batch_encode(self, tokens: List[List[str]]) -> torch.Tensor:
         """ Similar to encode but works with a batch of text sequences (tokenized) """
         batch_encoded_input = self.tokenizer(tokens, return_tensors='pt', add_special_tokens=False,
-                                             is_split_into_words=True, padding=True, truncation=True)
+                                             is_split_into_words=True, padding=True, truncation=False)
         batch_output = self.model(**batch_encoded_input)[0]     # ( bs, subword seq len, hidden dim)
 
         pooled_output = []
@@ -185,6 +137,7 @@ class Word2VecEmbeddings:
 
     def encode(self):
         ...
+
 
 class GloVeEmbeddings:
     """
@@ -246,23 +199,22 @@ class GloVeEmbeddings:
 
 
 if __name__ == '__main__':
-
     # Testing encode
-    # be = BertEmbeddings()
-    # print(be.encode("I see a potato".split()).shape)
+    be = BertEmbeddings()
+    print(be.encode("I see a potatoatoatoato in my house. Nopessorryimeant houeses.".split()).shape)
     #
-    # # Testing batch encode
-    # tokens = [
-    #     'I see a little silhouette of a man.'.split(),
-    #     'Replace me with whatever text you seem to have agrowing inclinationing for.'.split(),
-    #     'this one is smol'.split(),
-    #     'grabbless'.split()
-    # ]
+    # Testing batch encode
+    tokens = [
+        'I see a little silhouette of a man.'.split(),
+        'Replace me with whatever text you seem to have agrowing inclinationing for.'.split(),
+        'this one is smol'.split(),
+        'grabbless'.split()
+    ]
     # print(be.batch_encode(tokens).shape)
     #
-    # # Testing truncations
-    # tokens = tokens[0]*200
-    # print(be.encode(tokens).shape)
-
-    ge = GloVeEmbeddings()
-    print('potato')
+    # Testing truncations
+    tokens = tokens[0] * 200
+    print(be.encode(tokens).shape)
+    #
+    # ge = GloVeEmbeddings()
+    # print('potato')

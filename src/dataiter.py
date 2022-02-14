@@ -11,6 +11,23 @@ from utils.nlp import to_toks
 class DataLoaderToHFTokenizer:
     """
         Wrap a dataloader in such a way that a single string is returned corresponding to a dataloader's document.
+
+        Usage snippet:
+
+        # Training a tokenizer from scratch
+        dl = DataLoader('ontonotes', split, ignore_empty_coref=True)
+        docstrings = DataLoaderToHFTokenizer(dataloader=dl)
+        tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
+        if uncased:
+            tokenizer.normalizer = normalizers.Lowercase()
+        tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+
+        # Make a BPETrainer
+        trainer = trainers.BpeTrainer(
+            special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"],
+            vocab_size=n_vocab, show_progress=True)
+
+        tokenizer.train_from_iterator(docstrings, trainer=trainer)
     """
 
     def __init__(self, dataloader: DataLoader):
