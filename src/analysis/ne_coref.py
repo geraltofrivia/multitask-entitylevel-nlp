@@ -25,7 +25,7 @@ from typing import List, Tuple, Dict, Union
 
 from utils.misc import pop
 from utils.data import Document
-from dataloader import DataLoader
+from dataiter import Dataset
 from config import LOCATIONS as LOC
 from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
 
@@ -435,7 +435,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     # This tokenizer DOES not tokenize documents.
     # Use this is the document is already tokenized.
     nlp.tokenizer = NullTokenizer(nlp.vocab)
-    dl = DataLoader('ontonotes', split, ignore_empty_coref=True)
+    ds = Dataset('ontonotes', split, ignore_empty_coref=True)
 
     assert entity_source in ['spacy', 'gold'], f"Unknown entity source: {entity_source}"
     ent_src = f'ner_{entity_source}'
@@ -444,7 +444,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     name = f"{entity_source}ner_{'all' if not filter_named_entities else 'some'}.json"
 
     summary['ignored_instances'] = 0
-    summary['num_instances'] = len(dl)
+    summary['num_instances'] = len(ds)
     summary['tokens_per_doc'] = []
     summary['clusters_per_doc'] = []
     summary['elements_per_cluster'] = []
@@ -463,7 +463,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     summary['clusters_matched_per_doc'] = []
     summary['clusters_matched_different_tags_per_doc'] = []
 
-    for i, doc in enumerate(tqdm(dl)):
+    for i, doc in enumerate(tqdm(ds)):
 
         if getattr(doc, ent_src).isempty:
             summary['ignored_instances'] += 1

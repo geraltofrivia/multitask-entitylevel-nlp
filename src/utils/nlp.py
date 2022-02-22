@@ -101,7 +101,7 @@ class NullTokenizer(DummyTokenizer):
         return Doc(self.vocab, words=words)
 
 
-def match_subwords_to_words(tokens: List[str], encoded_input: dict,
+def match_subwords_to_words(tokens: List[str], input_ids: dict,
                             tokenizer: transformers.BertTokenizer) -> Dict[int, int]:
     """
     Create a dictionary that matches subword indices to word indices
@@ -110,7 +110,7 @@ def match_subwords_to_words(tokens: List[str], encoded_input: dict,
         TODO: make it handle UNKs
     """
     sw2w = {}
-    sw_tokens = tokenizer.convert_ids_to_tokens(encoded_input.squeeze(0).tolist(),
+    sw_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze(0).tolist(),
                                                 skip_special_tokens=True)[:]
     tokens = tokens[:]
     curr_sw_index = 0

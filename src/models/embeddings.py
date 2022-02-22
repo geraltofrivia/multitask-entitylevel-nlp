@@ -57,12 +57,12 @@ class BertEmbeddings:
         """ input is [n, hdim], output must be [1, hdim] """
         return torch.mean(subword_vectors, dim=0).unsqueeze(0)
 
-    def pool_subword_vectors(self, tokens: List[str], encoded_input: dict, output: torch.Tensor) -> torch.Tensor:
+    def pool_subword_vectors(self, tokens: List[str], input_ids: dict, output: torch.Tensor) -> torch.Tensor:
 
         if self.uncased:
             tokens = [tok.lower() for tok in tokens]
 
-        subword_to_word_index = match_subwords_to_words(tokens, encoded_input, self.tokenizer)
+        subword_to_word_index = match_subwords_to_words(tokens, input_ids, self.tokenizer)
         word_to_subword_index = {}
         for sw_in, w_in in subword_to_word_index.items():
             word_to_subword_index[w_in] = word_to_subword_index.get(w_in, []) + [sw_in]

@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import List, Iterable, Tuple, Dict, Union
 
 from utils.warnings import SpanHeadNotFoundError
@@ -191,3 +192,17 @@ class Document:
 
         if not (len(self.document) == len(self.pos) and len(to_toks(self.document)) == len(to_toks(self.pos))):
             raise AssertionError("Length mismatch between doc words and doc pos tags")
+
+    @cached_property
+    def sentence_map(self) -> List[int]:
+        """
+            A list of sentence ID corresponding to every token in to_toks(document).
+            In other words, for any word index (in a flattened document),
+                this can tell you the sentence ID of that word by:
+
+                `sent_id = instance.sentence_id[4]` # prob 0 th sentence for 4th word
+        """
+        sentence_lengths = [len(sent) for sent in self.document]
+        sentence_map = [[sentence_id] * sentence_length for sentence_id, sentence_length in enumerate(sentence_lengths)]
+        sentence_map = to_toks(sentence_map)  # len(to_toks(self.document)) == len(sentence_map)
+        return sentence_map
