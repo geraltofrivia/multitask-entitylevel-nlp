@@ -101,6 +101,7 @@ class Dataset:
 
 class DataLoaderToHFTokenizer:
     """
+        IGNORE; Legacy uses
         Wrap a dataloader in such a way that a single string is returned corresponding to a dataloader's document.
 
         Usage snippet:
@@ -138,11 +139,6 @@ class DataLoaderToHFTokenizer:
         return self.ds.__len__()
 
 
-"""
-    TODO: move this function to a sampler class down the road
-"""
-
-
 def process_document(instance: Document, tokenizer: tf.BertTokenizer, config: tf.BertConfig) -> dict:
     """
         PS: TODO: move it somewhere saner, in a iter or something.
@@ -170,7 +166,7 @@ def process_document(instance: Document, tokenizer: tf.BertTokenizer, config: tf
                           pad_to_multiple_of=n_mlen, is_split_into_words=True, return_tensors='pt',
                           return_length=True)
 
-    n_subwords = tokenized.lengths
+    n_subwords = tokenized.attention_mask.sum().item()
 
     '''
         Find the word and sentence corresponding to each subword in the tokenized document
@@ -178,8 +174,8 @@ def process_document(instance: Document, tokenizer: tf.BertTokenizer, config: tf
     # Create a subword id to word id dictionary
     # TODO: conv to tensor
     subword2word = match_subwords_to_words(tokens, tokenized.input_ids, tokenizer)
-    wordmap_subword = [subword2word[subwordid] for subwordid in range(n_subwords)]
-    sentmap_subword = [instance.sentence_map[wordid] for wordid in wordmap_subword]
+    wordmap_subword = [subword2word[subword_id] for subword_id in range(n_subwords)]
+    sentmap_subword = [instance.sentence_map[word_id] for word_id in wordmap_subword]
 
     # Resize these tokens as outlined in docstrings
     input_ids = tokenized.input_ids.reshape((-1, n_mlen))  # n_seq, m_len

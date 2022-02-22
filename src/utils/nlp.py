@@ -101,18 +101,18 @@ class NullTokenizer(DummyTokenizer):
         return Doc(self.vocab, words=words)
 
 
-def match_subwords_to_words(tokens: List[str], input_ids: dict,
-                            tokenizer: transformers.BertTokenizer) -> Dict[int, int]:
+def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: transformers.BertTokenizer,
+                            ignore_cases: bool = True, ) -> Dict[int, int]:
     """
     Create a dictionary that matches subword indices to word indices
-    Expects the subwords to be done by a BertTokenizer
+    Expects the subwords to be done by a BertTokenizer.
 
         TODO: make it handle UNKs
     """
     sw2w = {}
     sw_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze(0).tolist(),
                                                 skip_special_tokens=True)[:]
-    tokens = tokens[:]
+    tokens = [token.lower() for token in tokens[:]] if ignore_cases else tokens[:]
     curr_sw_index = 0
     curr_w_index = 0
 
