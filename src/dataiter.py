@@ -17,7 +17,7 @@ from utils.data import Document
 np.random.seed(NPRSEED)
 
 
-class CorefDataset(Dataset):
+class RawCorefDataset(Dataset):
 
     def __init__(self, src: str, split: str, shuffle: bool = False, ignore_empty_coref: bool = False):
 
@@ -70,7 +70,7 @@ class DataLoaderToHFTokenizer:
         Usage snippet:
 
         # Training a tokenizer from scratch
-        ds = CorefDataset('ontonotes', split, ignore_empty_coref=True)
+        ds = RawCorefDataset('ontonotes', split, ignore_empty_coref=True)
         docstrings = DataLoaderToHFTokenizer(dataloader=ds)
         tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
         if uncased:
@@ -85,7 +85,7 @@ class DataLoaderToHFTokenizer:
         tokenizer.train_from_iterator(docstrings, trainer=trainer)
     """
 
-    def __init__(self, dataset: CorefDataset):
+    def __init__(self, dataset: RawCorefDataset):
         self.ds = dataset
 
     @staticmethod
@@ -173,7 +173,7 @@ if __name__ == '__main__':
 
     tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
     config = tf.BertConfig('bert-base-uncased')
-    ds = CorefDataset('ontonotes', 'train')
+    ds = RawCorefDataset('ontonotes', 'train')
 
     for x in ds:
         process_document(x, tokenizer, config)

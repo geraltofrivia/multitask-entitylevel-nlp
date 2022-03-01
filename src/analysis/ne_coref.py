@@ -25,7 +25,7 @@ from typing import List, Tuple, Dict, Union
 
 from utils.misc import pop
 from utils.data import Document
-from dataiter import CorefDataset
+from dataiter import RawCorefDataset
 from config import LOCATIONS as LOC
 from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
 
@@ -435,7 +435,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     # This tokenizer DOES not tokenize documents.
     # Use this is the document is already tokenized.
     nlp.tokenizer = NullTokenizer(nlp.vocab)
-    ds = CorefDataset('ontonotes', split, ignore_empty_coref=True)
+    ds = RawCorefDataset('ontonotes', split, ignore_empty_coref=True)
 
     assert entity_source in ['spacy', 'gold'], f"Unknown entity source: {entity_source}"
     ent_src = f'ner_{entity_source}'
