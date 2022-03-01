@@ -65,13 +65,13 @@ class BasicMTL(nn.Module):
 
 if __name__ == '__main__':
 
-    from dataiter import Dataset
+    from dataiter import CorefDataset
     from utils.nlp import to_toks
 
     model = BasicMTL('bert-base-uncased')
     config = tf.BertConfig('bert-base-uncased')
     tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
-    for x in Dataset("ontonotes", "train"):
+    for x in CorefDataset("ontonotes", "train"):
         # op = tokenizer(to_toks(x.document), add_special_tokens=False, padding=True, pad_to_multiple_of=
 
         preprocced = process_document(x, tokenizer, config)

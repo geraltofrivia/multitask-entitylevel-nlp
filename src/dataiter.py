@@ -8,6 +8,7 @@ import numpy as np
 from pathlib import Path
 import transformers as tf
 from typing import List, Optional
+from torch.utils.data import Dataset
 
 from utils.nlp import to_toks, match_subwords_to_words
 from config import LOCATIONS as LOC, NPRSEED
@@ -16,87 +17,49 @@ from utils.data import Document
 np.random.seed(NPRSEED)
 
 
-class Dataset:
-    """
-        Provide a dataset name, and split, and we load it for you.
-        We do lazy loading so you never have to worry about overwhelming the mem
-            unless of course the data is stored in one giant pickle file.
-            in which case, we can't help you and please contact the preprocessing department
+class CorefDataset(Dataset):
 
-        # Usage
+    def __init__(self, src: str, split: str, shuffle: bool = False, ignore_empty_coref: bool = False):
 
-        ### Iterating through processed ontonotes split
-        ds = Dataset('ontonotes', split='train', ignore_empty_coref=True)
-        for doc in ds:
-            ...
-    """
+        self._src_ = src
+        self._split_ = split
+        self._shuffle_ = shuffle
+        self._ignore_empty_coref_ = ignore_empty_coref
+        self.data: List[Document] = []
 
-    def __init__(self, data: str, split: str, shuffle: bool = False, ignore_empty_coref: bool = False):
-        super().__init__()
+        self.pull_from_disk()
 
-        self.dir: Path = Path()
-        self._n_: int = -1
-        self.data = data
-        self.split = split
-        self._shuffle_: bool = shuffle
-        self._ignore_empty_coref_: bool = ignore_empty_coref
+    @staticmethod
+    def get_fnames(dataset: str, split: str):
+        return [fnm for fnm in (LOC.parsed / dataset / split).glob('*.pkl')]
 
-        self.fnames = self.get_fnames(data, split)
+    def pull_from_disk(self):
+        """ RIP ur mem """
 
-        self.data: Optional[List[Document]] = None
+        filenames = self.get_fnames(self._src_, self._split_)
+        if self._shuffle_: np.random.shuffle(filenames)
 
-    def _count_instances_(self, fdir: Path, fnames: List[str]) -> List[int]:
-        """ Return a list of bridging instances in each file by loading each and storing its length """
-        n: List[int] = []
-        for fname in fnames:
-            n_doc = 0
-            with (fdir / fname).open('rb') as f:
-                for instance in pickle.load(f):
-
-                    if self._ignore_empty_coref_ and instance.coref.isempty:
-                        continue
-
-                    n_doc += 1
-
-            n.append(n_doc)
-
-        return n
-
-    def all(self):
-
-        for fname in self.fnames:
+        for fname in filenames:
             with fname.open('rb') as f:
                 data_batch: List[Document] = pickle.load(f)
 
-            if self._shuffle_:
-                np.random.shuffle(data_batch)
+            if self._shuffle_: np.random.shuffle(data_batch)
 
             for instance in data_batch:
 
                 if self._ignore_empty_coref_ and not instance.coref.isempty:
                     continue
 
-                # instance.finalise()
-                yield instance
+                self.data.append(instance)
 
-    def __len__(self) -> int:
-        """
-            Go through all the files and count the number of instances.
-            If you did do this before. don't reopen all files
-        """
+    def __len__(self):
+        return self.data.__len__()
 
-        if self._n_ < 0:
-            self._n_ = sum(self._count_instances_(self.dir, self.fnames))
-
-        return self._n_
-
-    @staticmethod
-    def get_fnames(dataset: str, split: str):
-        return [fnm for fnm in (LOC.parsed / dataset / split).glob('*.pkl')]
+    def __getitem__(self, item):
+        return self.data[item]
 
     def __iter__(self):
-        """ This function enables simply calling ds() instead of ds.all(). """
-        return self.all()
+        return iter(self.data)
 
 
 class DataLoaderToHFTokenizer:
@@ -107,7 +70,7 @@ class DataLoaderToHFTokenizer:
         Usage snippet:
 
         # Training a tokenizer from scratch
-        ds = Dataset('ontonotes', split, ignore_empty_coref=True)
+        ds = CorefDataset('ontonotes', split, ignore_empty_coref=True)
         docstrings = DataLoaderToHFTokenizer(dataloader=ds)
         tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
         if uncased:
@@ -122,7 +85,7 @@ class DataLoaderToHFTokenizer:
         tokenizer.train_from_iterator(docstrings, trainer=trainer)
     """
 
-    def __init__(self, dataset: Dataset):
+    def __init__(self, dataset: CorefDataset):
         self.ds = dataset
 
     @staticmethod
@@ -210,7 +173,7 @@ if __name__ == '__main__':
 
     tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
     config = tf.BertConfig('bert-base-uncased')
-    ds = Dataset('ontonotes', 'train')
+    ds = CorefDataset('ontonotes', 'train')
 
     for x in ds:
         process_document(x, tokenizer, config)
