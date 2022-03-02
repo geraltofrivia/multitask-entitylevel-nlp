@@ -1,7 +1,9 @@
+import torch
 import transformers
 from copy import deepcopy
 from typing import List, Any, Dict
 from spacy.tokens import Doc
+
 try:
     from spacy.util import DummyTokenizer
 except ImportError:
@@ -50,15 +52,15 @@ def is_nchunk(span: List[int], pos: List[List[str]]) -> bool:
     """ Check if every element in the span belongs to whitelist of noun pos tags. """
     span_pos = to_toks(pos)[span[0]: span[1]]
     for pos_tag in span_pos:
-        if not pos_tag in NCHUNK_POS_WHITELIST:
+        if pos_tag not in NCHUNK_POS_WHITELIST:
             return False
 
     return True
 
 
 def remove_pos(span: List[int], pos: List[List[str]], remove_all: bool = False,
-               prefix: List[str] = SPAN_POS_BLACKLIST_PREFIX, suffix: List[str] = SPAN_POS_BLACKLIST_SUFFIX) -> List[
-    int]:
+               prefix: List[str] = SPAN_POS_BLACKLIST_PREFIX,
+               suffix: List[str] = SPAN_POS_BLACKLIST_SUFFIX) -> List[int]:
     """
         We remove certain words from the given span (from the start or from the end) based on the pos tags defined.
         We may remove everything from the span if the span contains only these pos based things based on remove_all flag
@@ -106,12 +108,14 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
     """
     Create a dictionary that matches subword indices to word indices
     Expects the subwords to be done by a BertTokenizer.
-
-        TODO: make it handle UNKs
     """
     sw2w = {}
-    sw_tokens = tokenizer.convert_ids_to_tokens(input_ids.squeeze(0).tolist(),
-                                                skip_special_tokens=True)[:]
+    input_ids = torch.masked_select(input_ids.squeeze(0), input_ids.squeeze(0) != 0)
+    sw_tokens = tokenizer.convert_ids_to_tokens(input_ids.tolist(),
+                                                skip_special_tokens=False)[:]
+
+    # We do have to remove the PAD tokens however
+
     tokens = [token.lower() for token in tokens[:]] if ignore_cases else tokens[:]
     curr_sw_index = 0
     curr_w_index = 0
@@ -122,11 +126,7 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
         if not sw_tokens:
             break
 
-        # print(sw_tokens, tokens)
-        #     input()
-
         if sw_tokens[0] == tokens[0]:
-            # exact match
             sw2w[curr_sw_index] = curr_w_index
             sw_tokens.pop(0)
             tokens.pop(0)

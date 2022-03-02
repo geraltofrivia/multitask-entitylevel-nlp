@@ -18,5 +18,6 @@ LOCATIONS: Dict[str, Path] = FancyDict(**{
     'runs': ROOT_LOC / 'data' / 'runs',
     'parsed': ROOT_LOC / 'data' / 'parsed',
     'word2vec': ROOT_LOC / 'models' / 'word2vec',
-    'glove': ROOT_LOC / 'models' / 'glove'
+    'glove': ROOT_LOC / 'models' / 'glove',
+    'manual': ROOT_LOC / 'data' / 'manual'
 })

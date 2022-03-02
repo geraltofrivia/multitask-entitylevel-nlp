@@ -65,12 +65,16 @@ class BasicMTL(nn.Module):
 
 if __name__ == '__main__':
 
-    from dataiter import RawCorefDataset
+    from dataiter import MultiTaskDataset
     from utils.nlp import to_toks
 
     model = BasicMTL('bert-base-uncased')
     config = tf.BertConfig('bert-base-uncased')
+    config.max_span_width = 8
+
     tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
+
+    # Try to wrap it in a dataloader
     for x in RawCorefDataset("ontonotes", "train"):
         # op = tokenizer(to_toks(x.document), add_special_tokens=False, padding=True, pad_to_multiple_of=
 
