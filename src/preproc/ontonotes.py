@@ -13,11 +13,9 @@ import re
 import click
 import spacy
 import pickle
-import jsonlines
 from pathlib import Path
 from tqdm.auto import tqdm
 from spacy.tokens import Token
-from dataclasses import asdict
 from typing import Iterable, Union, List, Tuple, Dict
 
 from utils.data import Document, Clusters, NamedEntities
@@ -81,6 +79,18 @@ class CoNLLOntoNotesParser:
         else:
             return [root.i, root.i + 1]
 
+    def delete_preprocessed_files(self, split: Union[str, Path]):
+        """ Since we are going to write things to the disk,
+        it makes sense to delete all the processed gunk from this dir """
+
+        write_dir = self.write_dir / split
+
+        if not write_dir.exists():
+            return
+
+        for fname in write_dir.glob('*.pkl'):
+            fname.unlink()
+
     def write_to_disk(self, split: Union[str, Path], instances: List[Document]):
         """ Write a (large) list of documents to disk """
 
@@ -100,6 +110,8 @@ class CoNLLOntoNotesParser:
     def run(self):
 
         for split in self.splits:
+            # First, clear out all the previously processed things from the disk
+            self.delete_preprocessed_files(split)
             outputs = self.parse(split)
 
             # Dump them to disk

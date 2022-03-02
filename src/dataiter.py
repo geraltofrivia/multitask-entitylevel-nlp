@@ -5,6 +5,7 @@
 import json
 import torch
 import pickle
+import warnings
 import numpy as np
 from typing import List
 import transformers as tf
@@ -33,8 +34,30 @@ class MultiTaskDataset(Dataset):
         with (LOC.manual / 'replacements.json').open('r') as f:
             self.replacements = json.load(f)
 
-        self.data = RawCorefDataset(src=src, split=split, ignore_empty_coref=ignore_empty_coref, shuffle=shuffle)
-        self.process()
+        loaded_from_disk = False
+
+        # Check if the processed data is already stored in disk
+        dump_fname = LOC.parsed / self._src_ / self._split_ / 'MultiTaskDatasetDump.pkl'
+        if dump_fname.exists():
+            with dump_fname.open('rb') as f:
+                self.data, old_config = pickle.load(f)
+
+            # Verify config
+            if config.vocab_size == old_config.vocab_size and \
+                    config.hidden_size == old_config.hidden_size and \
+                    config.max_span_width == old_config.max_span_width:
+                loaded_from_disk = True
+            else:
+                ...
+
+        if not loaded_from_disk:
+            warnings.warn("Processed (training ready) data not found on disk. This will take some time. Approx. 5 min.")
+            self.data = RawCorefDataset(src=src, split=split, ignore_empty_coref=ignore_empty_coref, shuffle=shuffle)
+            self.process()
+
+            # Try and dump it to disk
+            with dump_fname.open('wb+') as f:
+                pickle.dump((self.data, self.config), f)
 
     def __len__(self):
         return self.data.__len__()
@@ -146,6 +169,10 @@ class MultiTaskDataset(Dataset):
         #  you will have to figure out 'how to interpret' a span like [2: 3] or even [2: 2] etc
         #  the way this done when making span vectors during the forward pass would dictate how these labels are done
 
+        # DEBUG
+        if n_subwords > 512 and input_ids.shape != attention_mask.shape:
+            print('potato')
+
         return_dict = {
             'input_ids': input_ids,
             'attention_mask': attention_mask,
@@ -155,8 +182,8 @@ class MultiTaskDataset(Dataset):
             'n_words': n_words,
             'n_subwords': n_subwords,
             'candidate_starts': candidate_starts,
-            'candidate_ends': candidate_ends,
-            'instance': instance
+            'candidate_ends': candidate_ends
+            # 'instance': instance
         }
 
         return return_dict
@@ -178,7 +205,7 @@ class RawCorefDataset(Dataset):
 
     @staticmethod
     def get_fnames(dataset: str, split: str):
-        return [fnm for fnm in (LOC.parsed / dataset / split).glob('*.pkl')]
+        return [fnm for fnm in (LOC.parsed / dataset / split).glob('dump*.pkl')]
 
     def pull_from_disk(self):
         """ RIP ur mem """
@@ -187,6 +214,7 @@ class RawCorefDataset(Dataset):
         if self._shuffle_: np.random.shuffle(filenames)
 
         for fname in filenames:
+
             with fname.open('rb') as f:
                 data_batch: List[Document] = pickle.load(f)
 

@@ -10,7 +10,7 @@ from typing import List
 import transformers as tf
 
 # Local imports
-from dataiter import process_document
+from dataiter import MultiTaskDataset
 
 
 class BasicMTL(nn.Module):
@@ -30,7 +30,9 @@ class BasicMTL(nn.Module):
                 sentence_map: List[int],
                 word_map: List[int],
                 n_words: int,
-                n_subwords: int
+                n_subwords: int,
+                candidate_starts: torch.tensor,
+                candidate_ends: torch.tensor
                 ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -40,6 +42,8 @@ class BasicMTL(nn.Module):
         :param word_map: list of word ID for each subword (excluding padded stuff)
         :param n_words: number of words (not subwords) in the original doc
         :param n_subwords: number of subwords
+        :param candidate_starts: subword ID for candidate span starts
+        :param candidate_ends: subword ID for candidate span ends
 
         """
 
@@ -57,16 +61,13 @@ class BasicMTL(nn.Module):
         # Remove all the padded tokens, using info from attention masks
         encoded = torch.masked_select(encoded, attention_mask.bool().view(-1, 1)) \
             .view(-1, self.n_hid_dim)  # n_words, h_dim
-        input_ids = torch.masked_select(input_ids, attention_mask.bool().view(-1, 1)) \
+        input_ids = torch.masked_select(input_ids, attention_mask.bool()) \
             .view(-1, 1)  # n_words, h_dim
 
         print('oh well')
 
 
 if __name__ == '__main__':
-
-    from dataiter import MultiTaskDataset
-    from utils.nlp import to_toks
 
     model = BasicMTL('bert-base-uncased')
     config = tf.BertConfig('bert-base-uncased')
@@ -75,10 +76,10 @@ if __name__ == '__main__':
     tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
 
     # Try to wrap it in a dataloader
-    for x in RawCorefDataset("ontonotes", "train"):
+    for x in MultiTaskDataset("ontonotes", "train", tokenizer=tokenizer, config=config, ignore_empty_coref=True):
         # op = tokenizer(to_toks(x.document), add_special_tokens=False, padding=True, pad_to_multiple_of=
 
-        preprocced = process_document(x, tokenizer, config)
-        model(**preprocced)
+        # preprocced = process_document(x, tokenizer, config)
+        model(**x)
         print("haha")
         ...
