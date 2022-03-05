@@ -340,6 +340,7 @@ class BasicMTL(nn.Module):
         antecedent_scores = torch.cat([antecedent_scores, dummy_scores], dim=1)  # [n_ana, n_ante + 1]
 
         # Now we just return them.
+        print('here')
 
 
 if __name__ == '__main__':
@@ -358,6 +359,6 @@ if __name__ == '__main__':
 
     # Try to wrap it in a dataloader
     for x in MultiTaskDataset("ontonotes", "train", tokenizer=tokenizer, config=config, ignore_empty_coref=True):
-        model(**x)
+        model(**x['inputs'])
         print("haha")
         ...
