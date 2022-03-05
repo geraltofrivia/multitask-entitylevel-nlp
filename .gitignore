@@ -148,3 +148,6 @@ cython_debug/
 /data/raw/ontonotes/v12.tar.gz
 /src/.ipynb_checkpoints/
 /data/runs/ne_coref/
+/models/huggingface/
+/models/word2vec/
+/models/glove/
