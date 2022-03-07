@@ -72,7 +72,7 @@ class MultiTaskDataset(Dataset):
         return [self.replacements.get(tok, tok) for tok in tokens]
 
     @staticmethod
-    def get_candidate_labels(candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels):
+    def get_candidate_labels_mangoes(candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels):
         """
         CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L470
         get labels of candidates from gold ground truth
@@ -97,6 +97,87 @@ class MultiTaskDataset(Dataset):
         # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
         candidate_labels = torch.mm(labels.unsqueeze(0).float(), same_span.float()).long()  # [1, num_candidates]
         return candidate_labels.squeeze(0)  # [num_candidates]
+
+    @staticmethod
+    def get_candidate_labels(candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels):
+        """
+        Based on a cluster ID, make a #can, #can matrix where each row represents a distribution (multi-hot, discrete)
+            over the antecedents. I.e.
+            <i, j> = 1 => span i (anaphor) and span j (antecedent) are coreferent
+            <i, j> = 0 => span i and span j are not coreferent
+
+        Limitations
+        -----------
+
+        1. No way to distinguish spans which are invalid in the candidates
+        1. No way to penalize for gold spans not even being a candidate
+        1. Very sparse matrix?
+        1. Down the line, we trim this matrix based on the span pruner.
+            Pruned away spans have no way to backprop from these.
+
+        Parameters
+        ----------
+        candidate_starts, candidate_ends: tensor of size (candidates)
+            start and end token indices (in flattened document) of candidate spans
+        labeled_starts, labeled_ends: tensor of size (labeled)
+            start and end token indices (in flattened document) of labeled spans
+        labels: tensor of size (labeled)
+            cluster ids
+        instance:  the entire instance thrown. Used to get a better repr of cluster IDs
+
+
+        Returns
+        -------
+        candidate_labels: tensor of size (candidates)
+        """
+
+        same_start = torch.eq(labeled_starts.unsqueeze(1),
+                              candidate_starts.unsqueeze(0))  # [num_labeled, num_candidates]
+        same_end = torch.eq(labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0))  # [num_labeled, num_candidates]
+        same_span = torch.logical_and(same_start, same_end)
+
+        # # Making a labeled span -> candidate span dictionary. Easier to work with lists.
+        #  candidate_starts_ = candidate_starts.tolist()
+        #  candidate_ends_ = candidate_ends.tolist()
+        #  labeled_starts_ = labeled_starts.tolist()
+        #  labeled_ends_ = labeled_ends.tolist()
+        #
+        #  labeled_spans_to_candidate_spans: dict = {}
+        #
+        #  for labeled_start_, labeled_end_ in zip(labeled_starts_, labeled_ends_):
+        #
+        #      try:
+        #          i = candidate_starts_.index(labeled_start_)
+        #          j = candidate_ends_.index(labeled_end_)
+        #      except ValueError:
+        #          continue
+        #
+        #      labeled_spans_to_candidate_spans[(labeled_start_, labeled_end_)] = (i, j)
+
+        # Now, we use this nxn mat to repr where spans are coreferent
+        # if a row i is [0,1,1,0,0,0] that implies that span i is coreferent to span 1 and 2.
+        truth = torch.zeros((candidate_starts.shape[0], candidate_starts.shape[0]),
+                            dtype=torch.long, device=candidate_starts.device)
+
+        for cluster_id in range(1, 1 + torch.max(labels).item()):
+            # Get indices corresponding to these labels in the candidate space
+            indices = same_span[labels == cluster_id].nonzero()[:, 1]  # [n_spans,]
+
+            # x: Repeat it like (a, b, c, a, b, c, a, b, c)
+            # y: Repeat it like (a, a, a, b, b, b, c, c, c)
+            ind_x = indices.repeat(indices.shape[0], )  # [n_spans^^2,]
+            ind_y = indices.repeat(indices.shape[0], 1).transpose(1, 0).reshape(-1)  # [n_spans^^2,]
+
+            # Using the x and y as coordinates, fill in the matrix with ones.
+            truth[ind_x, ind_y] = 1
+
+        # Make it a lower triangular matrix to avoid cases where anaphor appears before the antecedent
+        # Next also,
+        truth = truth.tril()
+        truth = (truth - torch.eye(candidate_starts.shape[0],
+                                   candidate_starts.shape[0])).clamp(0)
+
+        return truth
 
     def process_document(self, instance: Document) -> dict:
         """
@@ -216,32 +297,28 @@ class MultiTaskDataset(Dataset):
                                          for _ in range(len(cluster))], dtype=torch.long,
                                         device=self.config.device) + 1  # n_gold
 
-        cluster_labels = self.get_candidate_labels(candidate_starts, candidate_ends,
-                                                   gold_starts, gold_ends, gold_cluster_ids)
+        cluster_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
+                                                           gold_starts, gold_ends, gold_cluster_ids)  # [n_cand, n_cand]
 
         # DEBUG
         if n_subwords > 512 and input_ids.shape != attention_mask.shape:
             print('potato')
 
-        return_dict = {'inputs':
-            {
-                'input_ids': input_ids,
-                'attention_mask': attention_mask,
-                'token_type_ids': token_type_ids,
-                'word_map': wordid_for_subword,
-                'sentence_map': sentid_for_subword,
-                'n_words': n_words,
-                'n_subwords': n_subwords,
-                'candidate_starts': candidate_starts,
-                'candidate_ends': candidate_ends
-                # 'instance': instance
-            },
-            'labels': {
-                'gold_cluster_ids_on_candidates': cluster_labels,
-                'gold_starts': gold_starts,
-                'gold_ends': gold_ends,
-                'gold_cluster_ids': gold_cluster_ids
-            }
+        return_dict = {
+            'input_ids': input_ids,
+            'attention_mask': attention_mask,
+            'token_type_ids': token_type_ids,
+            'word_map': wordid_for_subword,
+            'sentence_map': sentid_for_subword,
+            'n_words': n_words,
+            'n_subwords': n_subwords,
+            'candidate_starts': candidate_starts,
+            'candidate_ends': candidate_ends,
+            # Pred stuff
+            'gold_cluster_ids_on_candidates': cluster_labels,
+            'gold_starts': gold_starts,
+            'gold_ends': gold_ends,
+            'gold_cluster_ids': gold_cluster_ids
         }
 
         return return_dict
