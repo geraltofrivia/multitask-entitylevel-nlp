@@ -551,6 +551,7 @@ if __name__ == '__main__':
     config.top_span_ratio = 0.4
     config.max_top_antecedents = 50
     config.device = 'cpu'
+    config.name = 'bert-base-uncased'
 
     model = BasicMTL('bert-base-uncased', config=config)
     tokenizer = transformers.BertTokenizer.from_pretrained('bert-base-uncased')
