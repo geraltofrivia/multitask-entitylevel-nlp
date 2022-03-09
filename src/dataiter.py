@@ -23,6 +23,7 @@ class MultiTaskDataset(Dataset):
 
     def __init__(self, src: str, split: str, config, tokenizer: tf.BertTokenizer,
                  shuffle: bool = False, ignore_empty_coref: bool = False, rebuild_cache: bool = False):
+        # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
