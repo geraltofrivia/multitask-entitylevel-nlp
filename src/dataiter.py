@@ -7,11 +7,16 @@ import torch
 import pickle
 import warnings
 import numpy as np
-from typing import List
 import transformers as tf
 from tqdm.auto import tqdm
+from typing import List, Iterable
 from torch.utils.data import Dataset
 
+# Local imports
+try:
+    import _pathfix
+except ImportError:
+    from . import _pathfix
 from utils.nlp import to_toks, match_subwords_to_words
 from config import LOCATIONS as LOC, NPRSEED
 from utils.data import Document
@@ -22,12 +27,12 @@ np.random.seed(NPRSEED)
 class MultiTaskDataset(Dataset):
 
     def __init__(self, src: str, split: str, config, tokenizer: tf.BertTokenizer,
-                 shuffle: bool = False, ignore_empty_coref: bool = False, rebuild_cache: bool = False):
+                 shuffle: bool = False, tasks: Iterable[str] = (), rebuild_cache: bool = False):
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
-        self._ignore_empty_coref_ = ignore_empty_coref
+        self._tasks = tasks
         self.tokenizer = tokenizer
         self.config = config
 
@@ -53,7 +58,7 @@ class MultiTaskDataset(Dataset):
 
         if not loaded_from_disk:
             warnings.warn("Processed (training ready) data not found on disk. This will take some time. Approx. 5 min.")
-            self.data = RawCorefDataset(src=src, split=split, ignore_empty_coref=ignore_empty_coref, shuffle=shuffle)
+            self.data = RawDataset(src=src, split=split, tasks=self._tasks, shuffle=shuffle)
             self.process()
 
             # Try and dump it to disk
@@ -325,16 +330,40 @@ class MultiTaskDataset(Dataset):
         return return_dict
 
 
-class RawCorefDataset(Dataset):
+class RawDataset(Dataset):
 
     def __init__(self, src: str, split: str, shuffle: bool = False,
-                 ignore_empty_coref: bool = False):
+                 tasks: Iterable[str] = ()):
+        """
+            Returns an iterable that yields one document at a time.
+            It looks for pickled instances of class utils.data.Document in /data/parsed directories.
+
+            You can configure it to filter out instances which do not have annotations for a particular thing e.g.,
+                - coref by passing tasks=('coref',) (all instances w/o coref annotations will be skipped)
+                - ner by passing tasks=('ner_gold',)
+                - ner (silver std) by passing tasks=('ner_spacy',)
+                - or both by tasks=('coref', 'ner_gold') etc etc
+
+
+        :param src: the first child under /data/parsed, usually, the name of a dataset
+        :param split: often different splits are stored in different directories, so this is the second child under
+            /data/parsed/<src>
+        :param shuffle: whether the dataset should be shuffled or not
+        :param tasks: Read code comments but passing 'coref' and/or 'ner' as an item ensures that
+            only instances which contain coref and/or ner annotations are returned.
+        """
+
+        # Sanity check params
+        for task in tasks:
+            if not task in ['coref', 'ner_gold', 'ner_spacy']:
+                raise AssertionError(f"An unrecognized task name sent: {task}. "
+                                     "So far, we work with 'coref', 'ner_gold', 'ner_spacy'.")
 
         # super().__init__()
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
-        self._ignore_empty_coref_ = ignore_empty_coref
+        self._tasks = tasks
         self.data: List[Document] = []
 
         self.pull_from_disk()
@@ -358,7 +387,14 @@ class RawCorefDataset(Dataset):
 
             for instance in data_batch:
 
-                if self._ignore_empty_coref_ and instance.coref.isempty:
+                # See if the instance fits the criteria set in self._tasks
+                if 'coref' in self._tasks and instance.coref.isempty:
+                    continue
+
+                if 'ner_gold' in self._tasks and instance.ner_gold.isempty:
+                    continue
+
+                if 'ner_spacy' in self._tasks and instance.ner_spacy.isempty:
                     continue
 
                 self.data.append(instance)
@@ -381,7 +417,7 @@ class DataLoaderToHFTokenizer:
         Usage snippet:
 
         # Training a tokenizer from scratch
-        ds = RawCorefDataset('ontonotes', split, ignore_empty_coref=True)
+        ds = RawDataset('ontonotes', split, tasks=('coref',))
         docstrings = DataLoaderToHFTokenizer(dataloader=ds)
         tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
         if uncased:
@@ -396,7 +432,7 @@ class DataLoaderToHFTokenizer:
         tokenizer.train_from_iterator(docstrings, trainer=trainer)
     """
 
-    def __init__(self, dataset: RawCorefDataset):
+    def __init__(self, dataset: RawDataset):
         self.ds = dataset
 
     @staticmethod
@@ -420,7 +456,7 @@ if __name__ == '__main__':
     config.max_span_width = 8
     config.device = 'cpu'
 
-    ds = MultiTaskDataset('ontonotes', 'train', config=config, tokenizer=tokenizer, ignore_empty_coref=True,
+    ds = MultiTaskDataset('ontonotes', 'train', config=config, tokenizer=tokenizer, tasks=('ner_gold', 'coref'),
                           rebuild_cache=True)
 
     # Custom fields in config

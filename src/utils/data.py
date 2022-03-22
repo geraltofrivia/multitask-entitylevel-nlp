@@ -13,6 +13,10 @@ class Clusters:
         It provides some functionalities that might come in handy like
             finding clusters based on a particular pos
             easy representation for training data prep etc etc
+
+        Fields:
+            spans: List of List of span boundaries like [ [ [2, 5], [10, 20] ], [ [1,2], [11, 16] ] ]
+            words: Similar except instead of span boundary, each object itself is a list of tokens repr. that span.
     """
 
     """

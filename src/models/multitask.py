@@ -557,7 +557,7 @@ if __name__ == '__main__':
     tokenizer = transformers.BertTokenizer.from_pretrained('bert-base-uncased')
 
     # Try to wrap it in a dataloader
-    for x in MultiTaskDataset("ontonotes", "train", tokenizer=tokenizer, config=config, ignore_empty_coref=True):
+    for x in MultiTaskDataset("ontonotes", "train", tokenizer=tokenizer, config=config, tasks=('coref',)):
         pred = model.pred_with_labels(**x)
         print("haha")
         ...
