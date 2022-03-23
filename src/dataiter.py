@@ -7,6 +7,7 @@ import torch
 import pickle
 import warnings
 import numpy as np
+from pathlib import Path
 import transformers as tf
 from tqdm.auto import tqdm
 from typing import List, Iterable
@@ -32,7 +33,7 @@ class MultiTaskDataset(Dataset):
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
-        self._tasks = tasks
+        self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
 
@@ -40,30 +41,74 @@ class MultiTaskDataset(Dataset):
         with (LOC.manual / 'replacements.json').open('r') as f:
             self.replacements = json.load(f)
 
-        loaded_from_disk = False
+        self.data, flag_successfully_pulled_from_disk = self.load_from_disk(rebuild_cache)
 
-        # Check if the processed data is already stored in disk
-        dump_fname = LOC.parsed / self._src_ / self._split_ / 'MultiTaskDatasetDump.pkl'
-        if dump_fname.exists() and not rebuild_cache:
-            with dump_fname.open('rb') as f:
-                self.data, old_config = pickle.load(f)
-
-            # Verify config
-            if config.vocab_size == old_config.vocab_size and \
-                    config.hidden_size == old_config.hidden_size and \
-                    config.max_span_width == old_config.max_span_width:
-                loaded_from_disk = True
-            else:
-                ...
-
-        if not loaded_from_disk:
-            warnings.warn("Processed (training ready) data not found on disk. This will take some time. Approx. 5 min.")
-            self.data = RawDataset(src=src, split=split, tasks=self._tasks, shuffle=shuffle)
+        if not flag_successfully_pulled_from_disk:
+            self.data = RawDataset(src=src, split=split, tasks=self._tasks_, shuffle=shuffle)
             self.process()
+            self.write_to_disk()
 
-            # Try and dump it to disk
-            with dump_fname.open('wb+') as f:
-                pickle.dump((self.data, self.config), f)
+    def write_to_disk(self):
+        """
+            Write to MultiTaskDatasetDump_<task1>_<task2>[adinfinitum].pkl in /data/parsed/self._src_/self._split_
+            File names could be:
+                 MultiTaskDatasetDump_coref.pkl
+                 MultiTaskDatasetDump_ner_gold.pkl
+                 MultiTaskDatasetDump_ner_spacy.pkl
+                 MultiTaskDatasetDump_coref_ner_gold.pkl
+        """
+        # Prep the file name
+        dump_fname = LOC.parsed / self._src_ / self._split_
+        for task in self._tasks_:
+            dump_fname = dump_fname / f'_{task}'
+        dump_fname = Path(str(dump_fname) + '.pkl')
+
+        with dump_fname.open('wb+') as f:
+            pickle.dump((self.data, self.config), f)
+
+    def load_from_disk(self, ignore_cache: bool) -> (list, bool):
+        """
+            Look for MultiTaskDatasetDump_<task1>_<task2>[adinfinitum].pkl in /data/parsed/self._src_/self._split_
+            File names could be:
+                 MultiTaskDatasetDump_coref.pkl
+                 MultiTaskDatasetDump_ner_gold.pkl
+                 MultiTaskDatasetDump_ner_spacy.pkl
+                 MultiTaskDatasetDump_coref_ner_gold.pkl
+        :return: a list of processed dicts (optional) and
+            a bool indicating whether we successfully pulled sthing from the disk or not
+        """
+        success = False
+
+        if ignore_cache:
+            return None, success
+
+        # Prep the file name
+        dump_fname = LOC.parsed / self._src_ / self._split_
+        for task in self._tasks_:
+            dump_fname = dump_fname / f'_{task}'
+        dump_fname = Path(str(dump_fname) + '.pkl')
+
+        # Check if file exists
+        if not dump_fname.exists():
+            warnings.warn(f"Processed (training ready) data not found on {dump_fname}."
+                          "Reprocessing will commence now but will take some time. Approx. 5 min.")
+            return None, success
+
+        # Pull the data, and the config
+        with dump_fname.open('rb') as f:
+            data, old_config = pickle.load(f)
+
+        # Check if config matches
+        # TODO: we need a way to iterate over all fields of the config somehow
+        if config.vocab_size == old_config.vocab_size and \
+                config.hidden_size == old_config.hidden_size and \
+                config.max_span_width == old_config.max_span_width:
+            return data, True
+        else:
+            warnings.warn(f"Processed (training ready) found on {dump_fname}. But the config files mismatch."
+                          "Reprocessing will commence now but will take some time. Approx. 5 min.")
+
+            return None, False
 
     def __len__(self):
         return self.data.__len__()
@@ -197,8 +242,6 @@ class MultiTaskDataset(Dataset):
 
             NOTE: Yes this process will lead to some loss in contextual vectors since we're truncating the context
                 (n*2)-2 times but it seems to be the canonical way to treat these issues.
-
-                TODO: device for all tensors
         """
 
         # Some params pulled from config
@@ -455,9 +498,9 @@ if __name__ == '__main__':
     config = tf.BertConfig('bert-base-uncased')
     config.max_span_width = 8
     config.device = 'cpu'
+    tasks = ['ner_gold', 'coref']
 
-    ds = MultiTaskDataset('ontonotes', 'train', config=config, tokenizer=tokenizer, tasks=('ner_gold', 'coref'),
-                          rebuild_cache=True)
+    ds = MultiTaskDataset('ontonotes', 'train', config=config, tokenizer=tokenizer, tasks=tasks, rebuild_cache=True)
 
     # Custom fields in config
     # config.
