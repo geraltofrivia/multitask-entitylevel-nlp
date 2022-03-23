@@ -117,7 +117,7 @@ class MultiTaskDataset(Dataset):
         return self.data[item]
 
     def process(self):
-        self.data = [self.process_document(datum) for datum in tqdm(self.data)]
+        self.data = [self.process_document_generic(datum) for datum in tqdm(self.data)]
 
     def handle_replacements(self, tokens: List[str]) -> List[str]:
         return [self.replacements.get(tok, tok) for tok in tokens]
@@ -230,7 +230,51 @@ class MultiTaskDataset(Dataset):
 
         return truth
 
-    def process_document(self, instance: Document) -> dict:
+    def process_coref(self, instance: Document, generic_processed_stuff: dict) -> dict:
+        """
+            Work with 'generic' processed stuff and the raw instance to yield coref specific things
+                - cluster IDs specific to gold annotations (but imposed on cluster space)
+                - gold start and end spans and their corresponding cluster IDs
+        :return: a dict which gets should be added to generic_processed_stuff
+        """
+
+        """
+           # Label management:
+               - change the label from being a word level index to a subword (bert friendly) level index
+        """
+        gold_starts = torch.tensor([span[0] for cluster in instance.coref.spans for span in cluster],
+                                   dtype=torch.long, device=self.config.device)  # n_gold
+        gold_ends = torch.tensor([span[1] - 1 for cluster in instance.coref.spans for span in cluster],
+                                 dtype=torch.long, device=self.config.device)  # n_gold
+        # 1 is added at cluster ID ends because zero represents "no link/no cluster" I think.
+        gold_cluster_ids = torch.tensor([cluster_id for cluster_id, cluster in enumerate(instance.coref.spans)
+                                         for _ in range(len(cluster))], dtype=torch.long,
+                                        device=self.config.device) + 1  # n_gold
+
+        candidate_starts = generic_processed_stuff['candidate_starts']
+        candidate_ends = generic_processed_stuff['candidate_ends']
+
+        cluster_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
+                                                           gold_starts, gold_ends, gold_cluster_ids)  # [n_cand, n_cand]
+
+        coref_specific = {  # Pred stuff
+            'gold_cluster_ids_on_candidates': cluster_labels,
+            'gold_starts': gold_starts,
+            'gold_ends': gold_ends,
+            'gold_cluster_ids': gold_cluster_ids
+        }
+
+        return coref_specific
+
+    def process_ner_gold(self, instance: Document, generic_processed_stuff: dict) -> dict:
+        """
+            Work with generic processed stuff to also work with NER things
+            TODO: what do we need ?
+        :return:
+        """
+        raise NotImplementedError
+
+    def process_document_generic(self, instance: Document) -> dict:
         """
             PSA:
             Tokenizer will return tensors padded to max length of the model. For instance,
@@ -263,7 +307,7 @@ class MultiTaskDataset(Dataset):
         '''
             Find the word and sentence corresponding to each subword in the tokenized document
         '''
-        # Create a subword id to word id dictionarya
+        # Create a subword id to word id dictionary
         subword2word = match_subwords_to_words(tokens, tokenized.input_ids, self.tokenizer)
         word2subword_all = {}
         for sw_id, w_id in subword2word.items():
@@ -332,23 +376,6 @@ class MultiTaskDataset(Dataset):
         candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # n_subwords*max_span_width
         candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # n_subwords*max_span_width
 
-        """
-            # Label management:
-                - change the label from being a word level index to a subword (bert friendly) level index
-                
-        """
-        gold_starts = torch.tensor([span[0] for cluster in instance.coref.spans for span in cluster],
-                                   dtype=torch.long, device=self.config.device)  # n_gold
-        gold_ends = torch.tensor([span[1] - 1 for cluster in instance.coref.spans for span in cluster],
-                                 dtype=torch.long, device=self.config.device)  # n_gold
-        # 1 is added at cluster ID ends because zero represents "no link/no cluster" I think.
-        gold_cluster_ids = torch.tensor([cluster_id for cluster_id, cluster in enumerate(instance.coref.spans)
-                                         for _ in range(len(cluster))], dtype=torch.long,
-                                        device=self.config.device) + 1  # n_gold
-
-        cluster_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
-                                                           gold_starts, gold_ends, gold_cluster_ids)  # [n_cand, n_cand]
-
         # DEBUG
         if n_subwords > 512 and input_ids.shape != attention_mask.shape:
             print('potato')
@@ -363,12 +390,13 @@ class MultiTaskDataset(Dataset):
             'n_subwords': n_subwords,
             'candidate_starts': candidate_starts,
             'candidate_ends': candidate_ends,
-            # Pred stuff
-            'gold_cluster_ids_on_candidates': cluster_labels,
-            'gold_starts': gold_starts,
-            'gold_ends': gold_ends,
-            'gold_cluster_ids': gold_cluster_ids
         }
+
+        if 'coref' in self._tasks_:
+            return_dict['coref'] = self.process_coref(instance, return_dict)
+
+        if 'ner_gold' in self._tasks_:
+            return_dict['ner_gold'] = self.process_ner_gold(instance, return_dict)
 
         return return_dict
 
