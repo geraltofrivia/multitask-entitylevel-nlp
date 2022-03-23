@@ -8,7 +8,7 @@ import pickle
 import warnings
 import numpy as np
 from pathlib import Path
-import transformers as tf
+import transformers
 from tqdm.auto import tqdm
 from typing import List, Iterable
 from torch.utils.data import Dataset
@@ -27,7 +27,7 @@ np.random.seed(NPRSEED)
 
 class MultiTaskDataset(Dataset):
 
-    def __init__(self, src: str, split: str, config, tokenizer: tf.BertTokenizer,
+    def __init__(self, src: str, split: str, config, tokenizer: transformers.BertTokenizer,
                  shuffle: bool = False, tasks: Iterable[str] = (), rebuild_cache: bool = False):
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
@@ -36,6 +36,8 @@ class MultiTaskDataset(Dataset):
         self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
+
+        self.ner_tag_dict: dict = {'__na__': 0}
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / 'replacements.json').open('r') as f:
@@ -50,7 +52,7 @@ class MultiTaskDataset(Dataset):
 
     def write_to_disk(self):
         """
-            Write to MultiTaskDatasetDump_<task1>_<task2>[adinfinitum].pkl in /data/parsed/self._src_/self._split_
+            Write to MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
             File names could be:
                  MultiTaskDatasetDump_coref.pkl
                  MultiTaskDatasetDump_ner_gold.pkl
@@ -68,7 +70,7 @@ class MultiTaskDataset(Dataset):
 
     def load_from_disk(self, ignore_cache: bool) -> (list, bool):
         """
-            Look for MultiTaskDatasetDump_<task1>_<task2>[adinfinitum].pkl in /data/parsed/self._src_/self._split_
+            Look for MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
             File names could be:
                  MultiTaskDatasetDump_coref.pkl
                  MultiTaskDatasetDump_ner_gold.pkl
@@ -174,8 +176,6 @@ class MultiTaskDataset(Dataset):
             start and end token indices (in flattened document) of labeled spans
         labels: tensor of size (labeled)
             cluster ids
-        instance:  the entire instance thrown. Used to get a better repr of cluster IDs
-
 
         Returns
         -------
@@ -230,7 +230,11 @@ class MultiTaskDataset(Dataset):
 
         return truth
 
-    def process_coref(self, instance: Document, generic_processed_stuff: dict) -> dict:
+    def process_coref(self,
+                      instance: Document,
+                      generic_processed_stuff: dict,
+                      word2subword_starts: dict,
+                      word2subword_ends: dict) -> dict:
         """
             Work with 'generic' processed stuff and the raw instance to yield coref specific things
                 - cluster IDs specific to gold annotations (but imposed on cluster space)
@@ -242,11 +246,20 @@ class MultiTaskDataset(Dataset):
            # Label management:
                - change the label from being a word level index to a subword (bert friendly) level index
         """
-        gold_starts = torch.tensor([span[0] for cluster in instance.coref.spans for span in cluster],
-                                   dtype=torch.long, device=self.config.device)  # n_gold
-        gold_ends = torch.tensor([span[1] - 1 for cluster in instance.coref.spans for span in cluster],
-                                 dtype=torch.long, device=self.config.device)  # n_gold
-        # 1 is added at cluster ID ends because zero represents "no link/no cluster" I think.
+        try:
+            gold_starts = torch.tensor([word2subword_starts[span[0]]
+                                        for cluster in instance.coref.spans
+                                        for span in cluster],
+                                       dtype=torch.long, device=self.config.device)  # n_gold
+            gold_ends = torch.tensor([word2subword_ends[span[1] - 1]
+                                      for cluster in instance.coref.spans
+                                      for span in cluster],
+                                     dtype=torch.long, device=self.config.device)  # n_gold
+        except KeyError as e:
+            print(e)
+            print('oh shit')
+
+        # 1 is added at cluster ID ends because zero represents "no link/no cluster". I think...
         gold_cluster_ids = torch.tensor([cluster_id for cluster_id, cluster in enumerate(instance.coref.spans)
                                          for _ in range(len(cluster))], dtype=torch.long,
                                         device=self.config.device) + 1  # n_gold
@@ -266,13 +279,42 @@ class MultiTaskDataset(Dataset):
 
         return coref_specific
 
-    def process_ner_gold(self, instance: Document, generic_processed_stuff: dict) -> dict:
+    def process_ner_gold(self,
+                         instance: Document,
+                         generic_processed_stuff: dict,
+                         word2subword_starts: dict,
+                         word2subword_ends: dict) -> dict:
         """
             Work with generic processed stuff to also work with NER things
             TODO: what do we need ?
         :return:
         """
-        raise NotImplementedError
+        gold_starts = torch.tensor([word2subword_starts[span[0]]
+                                    for span in instance.ner_gold.spans],
+                                   dtype=torch.long, device=self.config.device)  # n_gold
+        gold_ends = torch.tensor([word2subword_ends[span[1] - 1]
+                                  for span in instance.ner_gold.spans],
+                                 dtype=torch.long, device=self.config.device)
+        gold_labels = []
+        for tag in instance.ner_gold.tags:
+            if tag not in self.ner_tag_dict:
+                self.ner_tag_dict[tag] = len(self.ner_tag_dict)
+            gold_labels.append(self.ner_tag_dict[tag])
+        gold_labels = torch.tensor(gold_labels, dtype=torch.long, device=self.config.device)
+
+        # Now to superimpose this tensor on the candidate space.
+        candidate_starts = generic_processed_stuff['candidate_starts']
+        candidate_ends = generic_processed_stuff['candidate_ends']
+        gold_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
+                                                        gold_starts, gold_ends, gold_labels)  # [n_cand, n_cand]
+
+        ner_specific = {
+            'gold_starts': gold_starts,
+            'gold_ends': gold_ends,
+            'gold_labels': gold_labels
+        }
+
+        return ner_specific
 
     def process_document_generic(self, instance: Document) -> dict:
         """
@@ -319,12 +361,12 @@ class MultiTaskDataset(Dataset):
                                           dtype=torch.long, device=self.config.device)
         sentid_for_subword = torch.tensor([instance.sentence_map[word_id] for word_id in wordid_for_subword],
                                           dtype=torch.long, device=self.config.device)
-        subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
-                                                 for word_id in range(len(word2subword_starts))],
-                                                dtype=torch.long, device=self.config.device)
-        subwordid_for_word_end = torch.tensor([word2subword_ends[word_id]
-                                               for word_id in range(len(word2subword_ends))],
-                                              dtype=torch.long, device=self.config.device)
+        # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
+        #                                          for word_id in range(len(word2subword_starts))],
+        #                                         dtype=torch.long, device=self.config.device)
+        # subwordid_for_word_end = torch.tensor([word2subword_ends[word_id]
+        #                                        for word_id in range(len(word2subword_ends))],
+        #                                       dtype=torch.long, device=self.config.device)
 
         # 1 marks that the index is a start of a new token, 0 marks that it is not.
         word_startmap_subword = wordid_for_subword != torch.roll(wordid_for_subword, 1)
@@ -393,10 +435,16 @@ class MultiTaskDataset(Dataset):
         }
 
         if 'coref' in self._tasks_:
-            return_dict['coref'] = self.process_coref(instance, return_dict)
+            return_dict['coref'] = self.process_coref(instance,
+                                                      return_dict,
+                                                      word2subword_starts,
+                                                      word2subword_ends)
 
         if 'ner_gold' in self._tasks_:
-            return_dict['ner_gold'] = self.process_ner_gold(instance, return_dict)
+            return_dict['ner_gold'] = self.process_ner_gold(instance,
+                                                            return_dict,
+                                                            word2subword_starts,
+                                                            word2subword_ends)
 
         return return_dict
 
@@ -426,7 +474,7 @@ class RawDataset(Dataset):
 
         # Sanity check params
         for task in tasks:
-            if not task in ['coref', 'ner_gold', 'ner_spacy']:
+            if task not in ['coref', 'ner_gold', 'ner_spacy']:
                 raise AssertionError(f"An unrecognized task name sent: {task}. "
                                      "So far, we work with 'coref', 'ner_gold', 'ner_spacy'.")
 
@@ -522,8 +570,15 @@ class DataLoaderToHFTokenizer:
 
 if __name__ == '__main__':
 
-    tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
-    config = tf.BertConfig('bert-base-uncased')
+    # # Attempt to pull from disk
+    # encoder = transformers.BertModel.from_pretrained(LOC.root / 'models' / 'huggingface'
+    # / 'bert-base-uncased' / 'encoder')
+    tokenizer = transformers.BertTokenizer.from_pretrained(
+        LOC.root / 'models' / 'huggingface' / 'bert-base-uncased' / 'tokenizer')
+    config = transformers.BertConfig(LOC.root / 'models' / 'huggingface' / 'bert-base-uncased' / 'tokenizer')
+
+    # tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
+    # config = tf.BertConfig('bert-base-uncased')
     config.max_span_width = 8
     config.device = 'cpu'
     tasks = ['ner_gold', 'coref']

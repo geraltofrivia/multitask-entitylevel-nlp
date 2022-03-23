@@ -1,4 +1,5 @@
 import torch
+import unidecode
 import transformers
 from copy import deepcopy
 from typing import List, Any, Dict
@@ -109,14 +110,20 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
     Create a dictionary that matches subword indices to word indices
     Expects the subwords to be done by a BertTokenizer.
     """
+    # DEBUG
+    if len(tokens) == 506 and tokens[0] == 'Having':
+        print('potato')
+
     sw2w = {}
     input_ids = torch.masked_select(input_ids.squeeze(0), input_ids.squeeze(0) != 0)
     sw_tokens = tokenizer.convert_ids_to_tokens(input_ids.tolist(),
                                                 skip_special_tokens=False)[:]
 
     # We do have to remove the PAD tokens however
-
+    # We also need to remove accents since the HF tokenizer removes them as well.
+    # ### And if we try to match vis-à-vis with vis-a-vis, the program crashes.
     tokens = [token.lower() for token in tokens[:]] if ignore_cases else tokens[:]
+    tokens = [unidecode.unidecode(token) for token in tokens]
     curr_sw_index = 0
     curr_w_index = 0
 
@@ -135,12 +142,17 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
         else:
             sw_phrase = ''
             sw_selected = -1
+
             for i, next_word in enumerate(sw_tokens):
                 next_word = next_word[:]
                 next_word = next_word if not next_word.startswith('##') else next_word[2:]
                 sw_phrase += next_word
 
                 sw_selected = i
+
+                if sw_selected > 8:
+                    print('here')
+
                 if sw_phrase == tokens[0]:
                     break
 
