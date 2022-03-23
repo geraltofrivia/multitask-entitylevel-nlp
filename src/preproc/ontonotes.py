@@ -14,10 +14,12 @@ import json
 import click
 import spacy
 import pickle
+import warnings
+import unidecode
 from pathlib import Path
 from tqdm.auto import tqdm
 from spacy.tokens import Token
-from unidecode import unidecode
+from copy import deepcopy
 from typing import Iterable, Union, List, Tuple, Dict
 
 # Local imports
@@ -230,9 +232,15 @@ class CoNLLOntoNotesParser:
 
     def _normalize_word_(self, word, language):
         # We normalise unicode etc here. It will make working with HF tokenizers down the road much easier.
-        word = unidecode(word)
-
+        backup_word = deepcopy(word)
         word = self.replacements.get(word, word)
+        word = unidecode.unidecode_expect_ascii(word, errors='strict')
+
+        # DEBUG
+        if word == '' and backup_word != '':
+            warnings.warn(
+                f"The word {backup_word} got changed to an empty string. This could create problems down the line. "
+                f"You should get in debug mode and investigate.")
 
         if language == "arabic":
             word = word[:word.find("#")]

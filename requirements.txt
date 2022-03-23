@@ -1,4 +1,5 @@
 spacy
+unidecode
 numpy
 jsonlines
 tqdm

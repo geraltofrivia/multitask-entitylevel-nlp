@@ -123,7 +123,7 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
     # We also need to remove accents since the HF tokenizer removes them as well.
     # ### And if we try to match vis-à-vis with vis-a-vis, the program crashes.
     tokens = [token.lower() for token in tokens[:]] if ignore_cases else tokens[:]
-    tokens = [unidecode.unidecode(token) for token in tokens]
+    # tokens = [unidecode.unidecode(token) for token in tokens]
     curr_sw_index = 0
     curr_w_index = 0
 
