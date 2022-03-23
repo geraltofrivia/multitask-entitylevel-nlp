@@ -10,14 +10,21 @@ Specifically, we want
 The dataclass is going to be document based. That is, one instance is one document.
 """
 import re
+import json
 import click
 import spacy
 import pickle
 from pathlib import Path
 from tqdm.auto import tqdm
 from spacy.tokens import Token
+from unidecode import unidecode
 from typing import Iterable, Union, List, Tuple, Dict
 
+# Local imports
+try:
+    import _pathfix
+except ImportError:
+    from . import _pathfix
 from utils.data import Document, Clusters, NamedEntities
 from config import LOCATIONS as LOC
 from utils.nlp import to_toks, NullTokenizer
@@ -41,6 +48,10 @@ class CoNLLOntoNotesParser:
         self.write_dir = LOC.parsed / 'ontonotes'
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
+
+        # Pull word replacements from the manually entered list
+        with (LOC.manual / 'replacements.json').open('r') as f:
+            self.replacements = json.load(f)
 
         self.nlp = spacy.load('en_core_web_sm')
         # This tokenizer DOES not tokenize documents.
@@ -202,7 +213,6 @@ class CoNLLOntoNotesParser:
                 ner_spacy.add_words(documents[i])
                 ner_spacy.add_pos(doc_pos[i])
 
-
                 doc = Document(
                     document=documents[i],
                     pos=doc_pos[i],
@@ -218,16 +228,16 @@ class CoNLLOntoNotesParser:
 
         return outputs
 
-    @staticmethod
-    def _normalize_word_(word, language):
+    def _normalize_word_(self, word, language):
+        # We normalise unicode etc here. It will make working with HF tokenizers down the road much easier.
+        word = unidecode(word)
+
+        word = self.replacements.get(word, word)
+
         if language == "arabic":
             word = word[:word.find("#")]
         if word == "/." or word == "/?" or word == "/-":
             return word[1:]
-        if word == '-LRB-':
-            return '('
-        if word == '-RRB-':
-            return ')'
         else:
             return word
 

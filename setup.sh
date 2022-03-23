@@ -29,3 +29,5 @@ python -m spacy download en_core_web_sm
 # Download word2vec and glove
 wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
 unzip models/glove/glove.6B.zip -d models/glove/
+
+./preproc.sh
