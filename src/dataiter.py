@@ -308,8 +308,8 @@ class MultiTaskDataset(Dataset):
                 device=self.config.device,
             )  # n_gold
         except KeyError as e:
-            print(e)
-            print("oh shit")
+            raise KeyError(f"No sw found for token #{e.args[0]}: {to_toks(instance.document)[e.args[0]]}"
+                           f"in {instance.docname}.")
 
         # 1 is added at cluster ID ends because zero represents "no link/no cluster". I think...
         gold_cluster_ids = (
@@ -515,10 +515,6 @@ class MultiTaskDataset(Dataset):
         candidate_ends = torch.masked_select(
             candidate_ends.view(-1), candidate_mask
         )  # n_subwords*max_span_width
-
-        # DEBUG
-        if n_subwords > 512 and input_ids.shape != attention_mask.shape:
-            print("potato")
 
         return_dict = {
             "input_ids": input_ids,

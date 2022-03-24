@@ -120,9 +120,6 @@ def match_subwords_to_words(
     Create a dictionary that matches subword indices to word indices
     Expects the subwords to be done by a BertTokenizer.
     """
-    # DEBUG
-    if len(tokens) == 1017 and tokens[1] == "Miracle":
-        print("potato")
 
     sw2w = {}
     input_ids = torch.masked_select(input_ids.squeeze(0), input_ids.squeeze(0) != 0)
@@ -179,7 +176,7 @@ def match_subwords_to_words(
                         or sw_phrase.startswith("hahahaha")
                         or sw_phrase.startswith("==")
                 ):
-                    print("here")
+                    print("TOO LONG: ", sw_phrase)
 
                 if sw_phrase == tokens[0]:
                     break
