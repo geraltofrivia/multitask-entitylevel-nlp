@@ -111,7 +111,7 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
     Expects the subwords to be done by a BertTokenizer.
     """
     # DEBUG
-    if len(tokens) == 240 and tokens[0] == 'EBay':
+    if len(tokens) == 1017 and tokens[1] == 'Miracle':
         print('potato')
 
     sw2w = {}
