@@ -71,10 +71,10 @@ class MultiTaskDataset(Dataset):
              MultiTaskDatasetDump_coref_ner_gold.pkl
         """
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_
+        dump_fname = LOC.parsed / self._src_ / self._split_ / 'MultiTaskDatasetDump'
         for task in self._tasks_:
-            dump_fname = dump_fname / f"_{task}"
-        dump_fname = Path(str(dump_fname) + ".pkl")
+            dump_fname = str(dump_fname) + f"_{task}"
+        dump_fname = Path(dump_fname + ".pkl")
 
         with dump_fname.open("wb+") as f:
             pickle.dump((self.data, self.config), f)
@@ -96,10 +96,10 @@ class MultiTaskDataset(Dataset):
             return None, success
 
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_
+        dump_fname = LOC.parsed / self._src_ / self._split_ / 'MultiTaskDatasetDump'
         for task in self._tasks_:
-            dump_fname = dump_fname / f"_{task}"
-        dump_fname = Path(str(dump_fname) + ".pkl")
+            dump_fname = str(dump_fname) + f"_{task}"
+        dump_fname = Path(dump_fname + ".pkl")
 
         # Check if file exists
         if not dump_fname.exists():
@@ -139,9 +139,6 @@ class MultiTaskDataset(Dataset):
         self.data = [self.process_document_generic(datum) for datum in tqdm(self.data)]
 
     def handle_replacements(self, tokens: List[str]) -> List[str]:
-        # DEBUG
-        if ':】 ' in tokens:
-            print("what is happening!")
         return [self.replacements.get(tok, tok) for tok in tokens]
 
     @staticmethod
@@ -695,7 +692,7 @@ if __name__ == "__main__":
         config=config,
         tokenizer=tokenizer,
         tasks=tasks,
-        rebuild_cache=True,
+        # rebuild_cache=True,
     )
 
     # Custom fields in config

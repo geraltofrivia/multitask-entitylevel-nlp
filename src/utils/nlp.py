@@ -154,10 +154,6 @@ def match_subwords_to_words(
             sw_phrase = ""
             sw_selected = -1
 
-            # DEBUG
-            if sw_phrase == ':' and tokens[0] == ':)':
-                print('potato')
-
             for i, next_word in enumerate(sw_tokens):
                 next_word = next_word[:]
                 next_word = (
@@ -170,6 +166,7 @@ def match_subwords_to_words(
                 # DEBUG: every time there are more than 8 sw in a word, figure out what's up!
                 if sw_selected > 8 and not (
                         sw_phrase.startswith("http")
+                        or sw_phrase.startswith('<http')
                         or "@yahoo" in sw_phrase
                         or "@hotmail" in sw_phrase
                         or "@gmail" in sw_phrase
