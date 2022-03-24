@@ -22,7 +22,7 @@ from pathlib import Path
 root_dir: str = os.getcwd()
 if not root_dir.endswith("src"):
     # noinspection PyTypeChecker
-    root_dir = Path(root_dir) / 'src'
+    root_dir = Path(root_dir) / "src"
 sys.path.append(str(root_dir))
 
 print(f"Fixing paths from {root_dir}")

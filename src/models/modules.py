@@ -19,22 +19,21 @@ except ImportError:
 
 class TextEncoder(nn.Module):
     """
-        Thin wrapper around huggingface BERT which manages the fact that we get one document divided by length
-            in a way that looks like a batch of inputs.
+    Thin wrapper around huggingface BERT which manages the fact that we get one document divided by length
+        in a way that looks like a batch of inputs.
     """
 
-    def __init__(self,
-                 config: transformers.BertConfig):
+    def __init__(self, config: transformers.BertConfig):
         """
-            :param config:  The config, apart from being a usual BertConfig, also contains some domain specific parts.
-            For sanity's sake, I recommend using this snippet to init it:
+        :param config:  The config, apart from being a usual BertConfig, also contains some domain specific parts.
+        For sanity's sake, I recommend using this snippet to init it:
 
-                ```py
-                config = transformers.BertConfig('bert-base-uncased')
-                config.max_span_width = 5
-                config.device = 'cpu'
-                config.name = 'bert-base-uncased'
-                ```
+            ```py
+            config = transformers.BertConfig('bert-base-uncased')
+            config.max_span_width = 5
+            config.device = 'cpu'
+            config.name = 'bert-base-uncased'
+            ```
         """
         super().__init__()
 
@@ -43,50 +42,55 @@ class TextEncoder(nn.Module):
         self.h_dim = self.config.hidden_size
 
         # Encoder responsible for giving contextual vectors to subword tokens
-        self.encoder = transformers.BertModel.from_pretrained(self.config.name).to(self.config.device)
+        self.encoder = transformers.BertModel.from_pretrained(self.config.name).to(
+            self.config.device
+        )
 
-    def forward(self,
-                input_ids: torch.Tensor,
-                attention_mask: torch.Tensor,
-                token_type_ids: torch.Tensor = None) -> (torch.Tensor, torch.Tensor):
+    def forward(
+            self,
+            input_ids: torch.Tensor,
+            attention_mask: torch.Tensor,
+            token_type_ids: torch.Tensor = None,
+    ) -> (torch.Tensor, torch.Tensor):
         """
-            Just run the tokenized, sparsely encoded sequence through a BERT model
+        Just run the tokenized, sparsely encoded sequence through a BERT model
 
-            It takes (n, 512) tensors and returns a (n, 512, 768) summary (each word has a 768 dim vec).
-            We reshape it back to (n*512, 768) dim vec.
+        It takes (n, 512) tensors and returns a (n, 512, 768) summary (each word has a 768 dim vec).
+        We reshape it back to (n*512, 768) dim vec.
 
-            Using masked select, we remove the padding tokens from encoded (and corresponding input ids).
+        Using masked select, we remove the padding tokens from encoded (and corresponding input ids).
 
-            Glossary for dimensions:
-            **n_seq**: the number of segments in the document (on the batch position)
-            **m_len**: the length of each segment (usually the same as encoder's max length)
-            **h_dim**: the hidden dim of the model output. E.g. 768 for pretrained bert base.
-            **n_swords**: the actual number of subwords that exist (less than n_seq * m_len)
+        Glossary for dimensions:
+        **n_seq**: the number of segments in the document (on the batch position)
+        **m_len**: the length of each segment (usually the same as encoder's max length)
+        **h_dim**: the hidden dim of the model output. E.g. 768 for pretrained bert base.
+        **n_swords**: the actual number of subwords that exist (less than n_seq * m_len)
 
-            :param input_ids: [n_seq, m_len]; output of BertTokenizer
-            :param attention_mask: [n_seq, m_len]; output of BertTokenizer
-            :param token_type_ids: [n_seq, m_len]; output of BertTokenizer; not used but doesn't hurt to send it.
+        :param input_ids: [n_seq, m_len]; output of BertTokenizer
+        :param attention_mask: [n_seq, m_len]; output of BertTokenizer
+        :param token_type_ids: [n_seq, m_len]; output of BertTokenizer; not used but doesn't hurt to send it.
         """
         encoded = self.encoder(input_ids, attention_mask)[0]  # [n_seq, m_len, h_dim]
         encoded = encoded.reshape((-1, self.h_dim))  # [n_seq * m_len, h_dim]
 
         # Remove all the padded tokens, using info from attention masks
-        encoded = torch.masked_select(encoded, attention_mask.bool().view(-1, 1)) \
-            .view(-1, self.h_dim)  # [n_words, h_dim]
-        input_ids = torch.masked_select(input_ids, attention_mask.bool()) \
-            .view(-1, 1)  # [n_swords, h_dim]
+        encoded = torch.masked_select(encoded, attention_mask.bool().view(-1, 1)).view(
+            -1, self.h_dim
+        )  # [n_words, h_dim]
+        input_ids = torch.masked_select(input_ids, attention_mask.bool()).view(
+            -1, 1
+        )  # [n_swords, h_dim]
 
         return encoded, input_ids
 
 
 class SpanEncoder(nn.Module):
     """
-        The module which takes BertEncoder outputs as input and candidate spans (should be generated during data iter)
-            and creates representations for all of them.
+    The module which takes BertEncoder outputs as input and candidate spans (should be generated during data iter)
+        and creates representations for all of them.
     """
 
-    def __init__(self,
-                 config: transformers.BertConfig):
+    def __init__(self, config: transformers.BertConfig):
         """
         :param config: BertConfig which as more things added to it, namely:
             ```py
@@ -113,18 +117,18 @@ class SpanEncoder(nn.Module):
 
         if self.use_span_width:
             # Span width embedding give a fix dim score to width of spans
-            self.span_width_embeddings = nn.Embedding(num_embeddings=self.config.max_span_width,
-                                                      embedding_dim=config.metadata_feature_size)
+            self.span_width_embeddings = nn.Embedding(
+                num_embeddings=self.config.max_span_width,
+                embedding_dim=config.metadata_feature_size,
+            )
 
         if self.use_span_intra_attention:
             # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
             self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1)
 
-    def forward(self,
-                encoded: torch.Tensor,
-                span_starts: torch.Tensor,
-                span_ends: torch.Tensor
-                ):
+    def forward(
+            self, encoded: torch.Tensor, span_starts: torch.Tensor, span_ends: torch.Tensor
+    ):
         """
 
         Span embeddings: based on candidate_starts, candidate_ends go through encoded
@@ -149,28 +153,48 @@ class SpanEncoder(nn.Module):
 
         :return: a tensor [n_cand, s_dim] corresponding to each span as denoted in span_start and span_end indices.
         """
-        emb = [encoded[span_starts], encoded[span_ends]]  # ([n_cand, h_dim], [n_cand, h_dim])
+        emb = [
+            encoded[span_starts],
+            encoded[span_ends],
+        ]  # ([n_cand, h_dim], [n_cand, h_dim])
 
         if self.use_span_width:
-            span_width = 1 + span_ends - span_starts  # [n_cand] (width is 1 -> config.max_span_width)
-            span_width_index = span_width - 1  # [n_cand] (index is 0 -> config.max_span_width - 1)
+            span_width = (
+                    1 + span_ends - span_starts
+            )  # [n_cand] (width is 1 -> config.max_span_width)
+            span_width_index = (
+                    span_width - 1
+            )  # [n_cand] (index is 0 -> config.max_span_width - 1)
 
             # Embed and dropout
             span_width_emb = self.span_width_embeddings(span_width_index)
-            span_width_emb = F.dropout(span_width_emb, p=self.config.ner_dropout, training=self.training)
+            span_width_emb = F.dropout(
+                span_width_emb, p=self.config.ner_dropout, training=self.training
+            )
 
             # Add these to the emb list as well
             emb.append(span_width_emb)
 
         if self.use_span_intra_attention:
-            document_range = torch.arange(start=0, end=encoded.shape[0], device=self.config.device).unsqueeze(0) \
-                .repeat(span_starts.shape[0], 1)  # [n_cand, n_swords]
-            token_mask = torch.logical_and(document_range >= span_starts.unsqueeze(1),
-                                           document_range <= span_ends.unsqueeze(1))  # [n_cand, n_swords]
-            token_attn = self.span_attend_projection(encoded).squeeze(1).unsqueeze(0)  # [1, n_swords]
-            token_attn = F.softmax(torch.log(token_mask.float()) + token_attn, 1)  # [n_cand, n_swords]
+            document_range = (
+                torch.arange(start=0, end=encoded.shape[0], device=self.config.device)
+                    .unsqueeze(0)
+                    .repeat(span_starts.shape[0], 1)
+            )  # [n_cand, n_swords]
+            token_mask = torch.logical_and(
+                document_range >= span_starts.unsqueeze(1),
+                document_range <= span_ends.unsqueeze(1),
+            )  # [n_cand, n_swords]
+            token_attn = (
+                self.span_attend_projection(encoded).squeeze(1).unsqueeze(0)
+            )  # [1, n_swords]
+            token_attn = F.softmax(
+                torch.log(token_mask.float()) + token_attn, 1
+            )  # [n_cand, n_swords]
 
-            attended_word_representations = torch.mm(token_attn, encoded)  # [n_cand, h_dim]
+            attended_word_representations = torch.mm(
+                token_attn, encoded
+            )  # [n_cand, h_dim]
 
             # Add these to the emb list as well
             emb.append(attended_word_representations)
@@ -181,8 +205,8 @@ class SpanEncoder(nn.Module):
 
 class NERDecoder(nn.Module):
     """
-        Takes span representations (as outputted by the span encoder),
-            and simply runs them through a 2 layer clf to get a distribution over number of classes
+    Takes span representations (as outputted by the span encoder),
+        and simply runs them through a 2 layer clf to get a distribution over number of classes
     """
 
     def __init__(self, config: transformers.BertConfig):
@@ -220,29 +244,27 @@ class NERDecoder(nn.Module):
             nn.Linear(s_dim, config.clf_h_dim),
             nn.ReLU(),
             nn.Dropout(config.ner_dropout),
-            nn.Linear(config.clf_h_dim, config.ner_classes)
+            nn.Linear(config.clf_h_dim, config.ner_classes),
         )
 
-    def heuristic_decoder(self,
-                          span_emb: torch.Tensor,
-                          span_starts: torch.Tensor,
-                          span_ends: torch.Tensor):
+    def heuristic_decoder(
+            self, span_emb: torch.Tensor, span_starts: torch.Tensor, span_ends: torch.Tensor
+    ):
         # TODO: dis
         raise NotImplementedError
         # return span_emb
 
-    def forward(self,
-                span_emb: torch.Tensor,
-                span_starts: torch.Tensor,
-                span_ends: torch.Tensor):
+    def forward(
+            self, span_emb: torch.Tensor, span_starts: torch.Tensor, span_ends: torch.Tensor
+    ):
         """
-            As simple as forwards gets.
+        As simple as forwards gets.
 
 
-            :param span_emb: a [n_cand, s_dim] matrix
-            :param span_starts: [n_cand], the precomputed span start indices
-            :param span_ends: [n_cand], the precomputed span end indices
-            :return: a [n_cand, ner_classes] matrix
+        :param span_emb: a [n_cand, s_dim] matrix
+        :param span_starts: [n_cand], the precomputed span start indices
+        :param span_ends: [n_cand], the precomputed span end indices
+        :return: a [n_cand, ner_classes] matrix
         """
         predictions = self.clf(span_emb)
 

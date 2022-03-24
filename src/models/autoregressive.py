@@ -13,16 +13,18 @@ class LSTMEncoder(nn.Module):
 
 class BertBase(transformers.BertPreTrainedModel):
     """
-        Encapsulates a regular BERT encoder.
-        It takes word/subword IDs (done in a huggingface fashion), and encodes them.
+    Encapsulates a regular BERT encoder.
+    It takes word/subword IDs (done in a huggingface fashion), and encodes them.
 
-        IMPORTANT: for documents longer than max len (usually 512), in terms of subword tokens,
-            we expect the doc to be broken down from (1, sl) to (num_subseq, max_seq_len).
+    IMPORTANT: for documents longer than max len (usually 512), in terms of subword tokens,
+        we expect the doc to be broken down from (1, sl) to (num_subseq, max_seq_len).
     """
 
     def __init__(self, transformers_config):
         super().__init__(transformers_config)
-        self.model = transformers.BertModel(transformers_config, add_pooling_layer=False)
+        self.model = transformers.BertModel(
+            transformers_config, add_pooling_layer=False
+        )
 
     def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor):
         """

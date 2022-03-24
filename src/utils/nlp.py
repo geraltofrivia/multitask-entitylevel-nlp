@@ -34,23 +34,23 @@ except ImportError:
 # Local Imports
 from utils.misc import pop
 
-SPAN_POS_BLACKLIST_PREFIX = ('DT', 'JJ')
-SPAN_POS_BLACKLIST_SUFFIX = ('.', 'POS')
-NCHUNK_POS_WHITELIST = ('NN', 'NNS', 'NNP', 'NNPS')
+SPAN_POS_BLACKLIST_PREFIX = ("DT", "JJ")
+SPAN_POS_BLACKLIST_SUFFIX = (".", "POS")
+NCHUNK_POS_WHITELIST = ("NN", "NNS", "NNP", "NNPS")
 
 
 def to_toks(doc: List[List[Any]]) -> List[Any]:
-    """ [ ['a', 'sent'], ['another' 'sent'] ] -> ['a', 'sent', 'another', 'sent'] """
+    """[ ['a', 'sent'], ['another' 'sent'] ] -> ['a', 'sent', 'another', 'sent']"""
     return [word for sent in doc for word in sent]
 
 
 def to_str(raw: List[List[str]]) -> str:
-    sents = [' '.join(sent) for sent in raw]
-    return ' '.join(sents)
+    sents = [" ".join(sent) for sent in raw]
+    return " ".join(sents)
 
 
 def is_nchunk(span: List[int], pos: List[List[str]]) -> bool:
-    """ Check if every element in the span belongs to whitelist of noun pos tags. """
+    """Check if every element in the span belongs to whitelist of noun pos tags."""
     span_pos = to_toks(pos)[span[0]: span[1]]
     for pos_tag in span_pos:
         if pos_tag not in NCHUNK_POS_WHITELIST:
@@ -59,20 +59,26 @@ def is_nchunk(span: List[int], pos: List[List[str]]) -> bool:
     return True
 
 
-def remove_pos(span: List[int], pos: List[List[str]], remove_all: bool = False,
-               prefix: List[str] = SPAN_POS_BLACKLIST_PREFIX,
-               suffix: List[str] = SPAN_POS_BLACKLIST_SUFFIX) -> List[int]:
+def remove_pos(
+        span: List[int],
+        pos: List[List[str]],
+        remove_all: bool = False,
+        prefix: List[str] = SPAN_POS_BLACKLIST_PREFIX,
+        suffix: List[str] = SPAN_POS_BLACKLIST_SUFFIX,
+) -> List[int]:
     """
-        We remove certain words from the given span (from the start or from the end) based on the pos tags defined.
-        We may remove everything from the span if the span contains only these pos based things based on remove_all flag
+    We remove certain words from the given span (from the start or from the end) based on the pos tags defined.
+    We may remove everything from the span if the span contains only these pos based things based on remove_all flag
     """
 
     pos = to_toks(pos)[span[0]: span[1]]
     span = deepcopy(span)
 
     while True:
-        if (span[0] == span[1] and remove_all) or (span[0] + 1 == span[1] and not remove_all):
-            """ If all words are gone or if one word remains but remove_all is turned off, return """
+        if (span[0] == span[1] and remove_all) or (
+                span[0] + 1 == span[1] and not remove_all
+        ):
+            """If all words are gone or if one word remains but remove_all is turned off, return"""
             break
 
         if pos[0] in prefix:
@@ -93,8 +99,8 @@ def remove_pos(span: List[int], pos: List[List[str]], remove_all: bool = False,
 
 class NullTokenizer(DummyTokenizer):
     """
-        Use it when the text is already tokenized but the doc's gotta go through spacy.
-        Usage: `nlp.tokenizer = CustomTokenizer(nlp.vocab)`
+    Use it when the text is already tokenized but the doc's gotta go through spacy.
+    Usage: `nlp.tokenizer = CustomTokenizer(nlp.vocab)`
     """
 
     def __init__(self, vocab):
@@ -104,20 +110,25 @@ class NullTokenizer(DummyTokenizer):
         return Doc(self.vocab, words=words)
 
 
-def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: transformers.BertTokenizer,
-                            ignore_cases: bool = True, ) -> Dict[int, int]:
+def match_subwords_to_words(
+        tokens: List[str],
+        input_ids: dict,
+        tokenizer: transformers.BertTokenizer,
+        ignore_cases: bool = True,
+) -> Dict[int, int]:
     """
     Create a dictionary that matches subword indices to word indices
     Expects the subwords to be done by a BertTokenizer.
     """
     # DEBUG
-    if len(tokens) == 1017 and tokens[1] == 'Miracle':
-        print('potato')
+    if len(tokens) == 1017 and tokens[1] == "Miracle":
+        print("potato")
 
     sw2w = {}
     input_ids = torch.masked_select(input_ids.squeeze(0), input_ids.squeeze(0) != 0)
-    sw_tokens = tokenizer.convert_ids_to_tokens(input_ids.tolist(),
-                                                skip_special_tokens=False)[:]
+    sw_tokens = tokenizer.convert_ids_to_tokens(
+        input_ids.tolist(), skip_special_tokens=False
+    )[:]
 
     # We do have to remove the PAD tokens however
     # We also need to remove accents since the HF tokenizer removes them as well.
@@ -140,18 +151,38 @@ def match_subwords_to_words(tokens: List[str], input_ids: dict, tokenizer: trans
             curr_sw_index += 1
             curr_w_index += 1
         else:
-            sw_phrase = ''
+            sw_phrase = ""
             sw_selected = -1
+
+            # DEBUG
+            if sw_phrase == ':' and tokens[0] == ':)':
+                print('potato')
 
             for i, next_word in enumerate(sw_tokens):
                 next_word = next_word[:]
-                next_word = next_word if not next_word.startswith('##') else next_word[2:]
+                next_word = (
+                    next_word if not next_word.startswith("##") else next_word[2:]
+                )
                 sw_phrase += next_word
 
                 sw_selected = i
 
-                if sw_selected > 8:
-                    print('here')
+                # DEBUG: every time there are more than 8 sw in a word, figure out what's up!
+                if sw_selected > 8 and not (
+                        sw_phrase.startswith("http")
+                        or "@yahoo" in sw_phrase
+                        or "@hotmail" in sw_phrase
+                        or "@gmail" in sw_phrase
+                        or sw_phrase.endswith('.com')
+                        or sw_phrase.startswith("~~")
+                        or sw_phrase.startswith("--")
+                        or sw_phrase.startswith("__")
+                        or sw_phrase.startswith("..")
+                        or sw_phrase.startswith("!!")
+                        or sw_phrase.startswith("hahahaha")
+                        or sw_phrase.startswith("==")
+                ):
+                    print("here")
 
                 if sw_phrase == tokens[0]:
                     break

@@ -9,14 +9,14 @@ from utils.nlp import to_toks
 @dataclass
 class Clusters:
     """
-        This dataclass is a collection of coreference clusters inside a document data class (below)
-        It provides some functionalities that might come in handy like
-            finding clusters based on a particular pos
-            easy representation for training data prep etc etc
+    This dataclass is a collection of coreference clusters inside a document data class (below)
+    It provides some functionalities that might come in handy like
+        finding clusters based on a particular pos
+        easy representation for training data prep etc etc
 
-        Fields:
-            spans: List of List of span boundaries like [ [ [2, 5], [10, 20] ], [ [1,2], [11, 16] ] ]
-            words: Similar except instead of span boundary, each object itself is a list of tokens repr. that span.
+    Fields:
+        spans: List of List of span boundaries like [ [ [2, 5], [10, 20] ], [ [1,2], [11, 16] ] ]
+        words: Similar except instead of span boundary, each object itself is a list of tokens repr. that span.
     """
 
     """
@@ -46,7 +46,7 @@ class Clusters:
         return list(unique_spans)
 
     def allocate_span_heads(self, span_heads: dict):
-        """ Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
+        """Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
         cluster_heads = []
         for i, cluster in enumerate(self.spans):
             cluster_heads.append([])
@@ -57,9 +57,9 @@ class Clusters:
 
     def add_words(self, doc: List[List[str]]):
         """
-            Based on self.clusters, and clusters_h , fill in clusters_ and clusters_h_
-            That is, I already know the spans of mentions and their span heads.
-            If I know the words in the document, I can also store the mention words in a list ...
+        Based on self.clusters, and clusters_h , fill in clusters_ and clusters_h_
+        That is, I already know the spans of mentions and their span heads.
+        If I know the words in the document, I can also store the mention words in a list ...
         """
         clusters_, clusters_h_ = [], []
         f_doc = to_toks(doc)
@@ -75,7 +75,7 @@ class Clusters:
         self.words_head = clusters_h_
 
     def add_pos(self, pos: List[List[str]]):
-        """ Same as self.add_words but for pos tags """
+        """Same as self.add_words but for pos tags"""
         clusters_pos, clusters_h_pos = [], []
         f_pos = to_toks(pos)
 
@@ -93,13 +93,15 @@ class Clusters:
 @dataclass
 class NamedEntities:
     """
-        Another data class obj containing all the things needed for smoothly using named entity information in a doc
+    Another data class obj containing all the things needed for smoothly using named entity information in a doc
     """
 
     # Gold annotations for named entity spans
     spans: List[List[int]]  # Looks like [[112, 113], [155, 159], ... ]
     tags: List[str]  # Looks like [ 'Person', 'Cardinal' ...
-    words: List[List[str]] = field(default_factory=list)  # Looks like [['Michael', 'Jackson'] ... ]
+    words: List[List[str]] = field(
+        default_factory=list
+    )  # Looks like [['Michael', 'Jackson'] ... ]
     pos: List[List[str]] = field(default_factory=list)
     spans_head: List[List[int]] = field(default_factory=list)
     words_head: List[List[str]] = field(default_factory=list)
@@ -112,15 +114,15 @@ class NamedEntities:
     def isempty(self):
         return len(self.spans) == 0
 
-    def get_tag_of(self, span, src: str = 'spans') -> str:
+    def get_tag_of(self, span, src: str = "spans") -> str:
         # Get span ID and based on it, fetch the tag
-        if src not in ['spans', 'words', 'pos', 'spans_head', 'words_head', 'pos_head']:
+        if src not in ["spans", "words", "pos", "spans_head", "words_head", "pos_head"]:
             raise AssertionError(f"Data source {src} not understood.")
         index = getattr(self, src).index(span)
         return self.tags[index]
 
     def allocate_span_heads(self, span_heads: dict):
-        """ Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
+        """Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
         spans_head = []
         for i, span in enumerate(self.spans):
             spans_head.append(list(span_heads[tuple(span)]))
@@ -129,9 +131,9 @@ class NamedEntities:
 
     def add_words(self, doc: List[List[str]]):
         """
-            Based on self.clusters, and clusters_h , fill in clusters_ and clusters_h_
-            That is, I already know the spans of mentions and their span heads.
-            If I know the words in the document, I can also store the mention words in a list ...
+        Based on self.clusters, and clusters_h , fill in clusters_ and clusters_h_
+        That is, I already know the spans of mentions and their span heads.
+        If I know the words in the document, I can also store the mention words in a list ...
         """
         words, words_head = [], []
         f_doc = to_toks(doc)
@@ -144,7 +146,7 @@ class NamedEntities:
         self.words_head = words_head
 
     def add_pos(self, pos: List[List[str]]):
-        """ Same as self.add_words() but for pos tags """
+        """Same as self.add_words() but for pos tags"""
         temp_pos, temp_pos_head = [], []
         f_pos = to_toks(pos)
 
@@ -156,7 +158,7 @@ class NamedEntities:
         self.pos_head = temp_pos_head
 
     def get_all(self, tag: str, src: str) -> list:
-        if src not in ['spans', 'words', 'pos', 'spans_head', 'words_head', 'pos_head']:
+        if src not in ["spans", "words", "pos", "spans_head", "words_head", "pos_head"]:
             raise AssertionError(f"Data source {src} not understood.")
         return [getattr(self, src)[i] for i, _tag in self.tags if _tag == tag]
 
@@ -189,24 +191,32 @@ class Document:
 
     def finalise(self):
         """
-            Sanity checks:
-                -> every span in clusters, named_entities_gold has their corresponding span head found out
-                -> length of doc pos and doc words (flattened) is the same
+        Sanity checks:
+            -> every span in clusters, named_entities_gold has their corresponding span head found out
+            -> length of doc pos and doc words (flattened) is the same
         """
 
-        if not (len(self.document) == len(self.pos) and len(to_toks(self.document)) == len(to_toks(self.pos))):
+        if not (
+                len(self.document) == len(self.pos)
+                and len(to_toks(self.document)) == len(to_toks(self.pos))
+        ):
             raise AssertionError("Length mismatch between doc words and doc pos tags")
 
     @cached_property
     def sentence_map(self) -> List[int]:
         """
-            A list of sentence ID corresponding to every token in to_toks(document).
-            In other words, for any word index (in a flattened document),
-                this can tell you the sentence ID of that word by:
+        A list of sentence ID corresponding to every token in to_toks(document).
+        In other words, for any word index (in a flattened document),
+            this can tell you the sentence ID of that word by:
 
-                `sent_id = instance.sentence_id[4]` # prob 0 th sentence for 4th word
+            `sent_id = instance.sentence_id[4]` # prob 0 th sentence for 4th word
         """
         sentence_lengths = [len(sent) for sent in self.document]
-        sentence_map = [[sentence_id] * sentence_length for sentence_id, sentence_length in enumerate(sentence_lengths)]
-        sentence_map = to_toks(sentence_map)  # len(to_toks(self.document)) == len(sentence_map)
+        sentence_map = [
+            [sentence_id] * sentence_length
+            for sentence_id, sentence_length in enumerate(sentence_lengths)
+        ]
+        sentence_map = to_toks(
+            sentence_map
+        )  # len(to_toks(self.document)) == len(sentence_map)
         return sentence_map

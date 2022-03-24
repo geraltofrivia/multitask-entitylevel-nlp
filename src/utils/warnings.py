@@ -4,5 +4,6 @@
 
 
 class SpanHeadNotFoundError(Exception):
-    """ This is raised by the Document dataclass when an unforeseen spans' head is demanded """
+    """This is raised by the Document dataclass when an unforeseen spans' head is demanded"""
+
     ...
