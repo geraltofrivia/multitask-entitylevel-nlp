@@ -31,6 +31,7 @@ except ImportError:
         def from_disk(self, _path, **kwargs):
             return self
 
+
 # Local Imports
 from utils.misc import pop
 
@@ -163,11 +164,11 @@ def match_subwords_to_words(
                 # DEBUG: every time there are more than 8 sw in a word, figure out what's up!
                 if sw_selected > 8 and not (
                         sw_phrase.startswith("http")
-                        or sw_phrase.startswith('<http')
+                        or sw_phrase.startswith("<http")
                         or "@yahoo" in sw_phrase
                         or "@hotmail" in sw_phrase
                         or "@gmail" in sw_phrase
-                        or sw_phrase.endswith('.com')
+                        or sw_phrase.endswith(".com")
                         or sw_phrase.startswith("~~")
                         or sw_phrase.startswith("--")
                         or sw_phrase.startswith("__")

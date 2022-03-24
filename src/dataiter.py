@@ -71,7 +71,7 @@ class MultiTaskDataset(Dataset):
              MultiTaskDatasetDump_coref_ner_gold.pkl
         """
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_ / 'MultiTaskDatasetDump'
+        dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
         for task in self._tasks_:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
@@ -96,7 +96,7 @@ class MultiTaskDataset(Dataset):
             return None, success
 
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_ / 'MultiTaskDatasetDump'
+        dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
         for task in self._tasks_:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
@@ -308,8 +308,10 @@ class MultiTaskDataset(Dataset):
                 device=self.config.device,
             )  # n_gold
         except KeyError as e:
-            raise KeyError(f"No sw found for token #{e.args[0]}: {to_toks(instance.document)[e.args[0]]}"
-                           f"in {instance.docname}.")
+            raise KeyError(
+                f"No sw found for token #{e.args[0]}: {to_toks(instance.document)[e.args[0]]}"
+                f"in {instance.docname}."
+            )
 
         # 1 is added at cluster ID ends because zero represents "no link/no cluster". I think...
         gold_cluster_ids = (

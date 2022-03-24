@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import List
+from typing import List, Iterable
 import transformers
 
 # Local imports
@@ -58,6 +58,13 @@ class BasicMTL(nn.Module):
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.binary_hdim, 1),
+        )
+
+        self.unary_ner = nn.Sequential(
+            nn.Linear(span_embedding_dim, config.unary_hdim),
+            nn.ReLU(),
+            nn.Dropout(config.coref_dropout),
+            nn.Linear(config.unary_hdim, config.n_classes_ner),
         )
 
         # TODO: delete
@@ -313,7 +320,7 @@ class BasicMTL(nn.Module):
         return top_antecedents, top_antecedents_mask, top_antecedents_fast_scores
 
     @staticmethod
-    def softmax_loss(top_antecedent_scores, top_antecedent_labels):
+    def coref_softmax_loss(top_antecedent_scores, top_antecedent_labels):
         """
         Code copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L587
         Calculate softmax loss
@@ -337,7 +344,7 @@ class BasicMTL(nn.Module):
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]
 
-    def forward(
+    def coref(
             self,
             input_ids: torch.tensor,
             attention_mask: torch.tensor,
@@ -348,6 +355,8 @@ class BasicMTL(nn.Module):
             n_subwords: int,
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
+            candidate_span_embeddings: torch.tensor,
+            encoded: torch.tensor,
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -362,42 +371,7 @@ class BasicMTL(nn.Module):
 
         """
 
-        """
-            Step 1: Encode
-            
-            Just run the tokenized, sparsely encoded sequence through a BERT model
-            
-            It takes (n, 512) tensors and returns a (n, 512, 768) summary (each word has a 768 dim vec).
-            We reshape it back to (n*512, 768) dim vec.
-            
-            Using masked select, we remove the padding tokens from encoded (and corresponding input ids).
-        """
-        encoded = self.encoder(input_ids, attention_mask)[0]  # n_seq, m_len, h_dim
-        encoded = encoded.reshape((-1, self.n_hid_dim))  # n_seq * m_len, h_dim
-
-        # Remove all the padded tokens, using info from attention masks
-        encoded = torch.masked_select(encoded, attention_mask.bool().view(-1, 1)).view(
-            -1, self.n_hid_dim
-        )  # n_words, h_dim
-        input_ids = torch.masked_select(input_ids, attention_mask.bool()).view(
-            -1, 1
-        )  # n_words, h_dim
-
-        # TODO: some gold stuff
-
-        """
-            Step 2: Span embeddings
-            
-            candidate_span_embeddings: 3*h_dim + meta_dim 
-            Span embeddings: based on candidate_starts, candidate_ends go through encoded 
-                and find start and end subword embeddings. Concatenate them. 
-                add embedding corresponding to the width of the span
-                add an attention weighted sum of vectors within the span.  
-        """
-        # n_cands, 3*h_dim + meta_dim
-        candidate_span_embeddings = self.get_span_embeddings(
-            encoded, candidate_starts, candidate_ends
-        )
+        # Step 1 and Step 2 are performed inside model.forward
 
         """
             Step 3: Span Pruning (for Coref)
@@ -412,9 +386,8 @@ class BasicMTL(nn.Module):
                 if we have under 50 antecedents to begin with 
         """
         # For Coref task, we pass the span embeddings through the span pruner
-        candidate_span_scores = self.unary_coref(candidate_span_embeddings).squeeze(
-            1
-        )  # n_cands
+        # n_cands
+        candidate_span_scores = self.unary_coref(candidate_span_embeddings).squeeze(1)
         # TODO: joe adds span width embeddings here but we skip it for simplicity's sake.
 
         # get beam size
@@ -559,6 +532,8 @@ class BasicMTL(nn.Module):
             [top_antecedent_scores, dummy_scores], dim=1
         )  # [n_ana, n_ante + 1]
 
+        # TODO: still need to understand Coref in its entirety.
+
         # Now we just return them.top_antecedents_per_ana_emb
         return {
             "top_span_starts": top_span_starts,
@@ -567,6 +542,134 @@ class BasicMTL(nn.Module):
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
         }
+
+    def ner(
+            self,
+            input_ids: torch.tensor,
+            attention_mask: torch.tensor,
+            token_type_ids: torch.tensor,
+            sentence_map: List[int],
+            word_map: List[int],
+            n_words: int,
+            n_subwords: int,
+            candidate_starts: torch.tensor,
+            candidate_ends: torch.tensor,
+            candidate_span_embeddings: torch.tensor,
+            encoded: torch.tensor,
+    ):
+        """
+            Just a unary classifier over all spans.
+            Just that. That's it.
+        """
+        candidate_span_scores = self.unary_ner(candidate_span_embeddings).squeeze(1)
+        print(candidate_span_scores.shape)
+        return candidate_span_scores
+
+    def forward(
+            self,
+            input_ids: torch.tensor,
+            attention_mask: torch.tensor,
+            token_type_ids: torch.tensor,
+            sentence_map: List[int],
+            word_map: List[int],
+            n_words: int,
+            n_subwords: int,
+            candidate_starts: torch.tensor,
+            candidate_ends: torch.tensor,
+            tasks: Iterable[str],
+    ):
+        """
+        :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
+        :param attention_mask: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
+        :param token_type_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
+        :param sentence_map: list of sentence ID for each subword (excluding padded stuff)
+        :param word_map: list of word ID for each subword (excluding padded stuff)
+        :param n_words: number of words (not subwords) in the original doc
+        :param n_subwords: number of subwords
+        :param candidate_starts: subword ID for candidate span starts
+        :param candidate_ends: subword ID for candidate span ends
+        :param tasks: list containing either coref or ner or both (indicating which routes to follow for this batch)
+        """
+
+        """
+            Step 1: Encode
+            
+            Just run the tokenized, sparsely encoded sequence through a BERT model
+            
+            It takes (n, 512) tensors and returns a (n, 512, 768) summary (each word has a 768 dim vec).
+            We reshape it back to (n*512, 768) dim vec.
+            
+            Using masked select, we remove the padding tokens from encoded (and corresponding input ids).
+        """
+        encoded = self.encoder(input_ids, attention_mask)[0]  # n_seq, m_len, h_dim
+        encoded = encoded.reshape((-1, self.n_hid_dim))  # n_seq * m_len, h_dim
+
+        # Remove all the padded tokens, using info from attention masks
+        encoded = torch.masked_select(encoded, attention_mask.bool().view(-1, 1)).view(
+            -1, self.n_hid_dim
+        )  # n_words, h_dim
+        input_ids = torch.masked_select(input_ids, attention_mask.bool()).view(
+            -1, 1
+        )  # n_words, h_dim
+
+        # TODO: some gold stuff
+
+        """
+            Step 2: Span embeddings
+            
+            candidate_span_embeddings: 3*h_dim + meta_dim 
+            Span embeddings: based on candidate_starts, candidate_ends go through encoded 
+                and find start and end subword embeddings. Concatenate them. 
+                add embedding corresponding to the width of the span
+                add an attention weighted sum of vectors within the span.  
+        """
+        # n_cands, 3*h_dim + meta_dim
+        candidate_span_embeddings = self.get_span_embeddings(
+            encoded, candidate_starts, candidate_ends
+        )
+
+        # Just init the return dict
+        return_dict = {
+            'encoded': encoded,
+            'input_ids': input_ids,
+            'candidate_span_embeddings': candidate_span_embeddings,
+            'coref': None,
+            'ner': None
+        }
+
+        if "coref" in tasks:
+            coref_op = self.coref(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                sentence_map=sentence_map,
+                word_map=word_map,
+                n_words=n_words,
+                n_subwords=n_subwords,
+                candidate_starts=candidate_starts,
+                candidate_ends=candidate_ends,
+                candidate_span_embeddings=candidate_span_embeddings,
+                encoded=encoded
+            )
+            return_dict['coref'] = coref_op
+
+        if "ner" in tasks:
+            ner_op = self.ner(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                token_type_ids=token_type_ids,
+                sentence_map=sentence_map,
+                word_map=word_map,
+                n_words=n_words,
+                n_subwords=n_subwords,
+                candidate_starts=candidate_starts,
+                candidate_ends=candidate_ends,
+                candidate_span_embeddings=candidate_span_embeddings,
+                encoded=encoded
+            )
+            return_dict['ner'] = ner_op
+
+        return return_dict
 
     def pred_with_labels(
             self,
@@ -579,10 +682,9 @@ class BasicMTL(nn.Module):
             n_subwords: int,
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
-            gold_starts: torch.tensor,
-            gold_ends: torch.tensor,
-            gold_cluster_ids: torch.tensor,
-            gold_cluster_ids_on_candidates: torch.tensor,
+            tasks: Iterable[str],
+            coref: dict = None,
+            ner: dict = None
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -603,7 +705,7 @@ class BasicMTL(nn.Module):
         (starts with 1)
 
         """
-        predictions = self(
+        predictions = self.forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
@@ -615,19 +717,16 @@ class BasicMTL(nn.Module):
             candidate_ends=candidate_ends,
         )
 
-        (
-            top_span_starts,
-            top_span_ends,
-            top_span_indices,
-            top_antecedent_scores,
-            top_antecedent_mask,
-        ) = (
-            predictions["top_span_starts"],
-            predictions["top_span_ends"],
-            predictions["top_span_indices"],
-            predictions["top_antecedent_scores"],
-            predictions["top_antecedent_mask"],
-        )
+        if 'coref' in tasks:
+            gold_starts = coref['gold_starts']
+            gold_ends = coref['gold_ends']
+            gold_cluster_id_on_candidates = coref['gold_cluster_id_on_candidates']
+
+        top_span_starts = predictions["top_span_starts"]
+        top_span_ends = predictions["top_span_ends"]
+        top_span_indices = predictions["top_span_indices"]
+        top_antecedent_scores = predictions["top_antecedent_scores"]
+        top_antecedent_mask = predictions["top_antecedent_mask"]
 
         top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
 
@@ -656,7 +755,7 @@ class BasicMTL(nn.Module):
         top_antecedent_labels = torch.cat(
             [dummy_labels, pairwise_labels], 1
         )  # [top_cand, top_ant + 1]
-        loss = self.softmax_loss(
+        loss = self.coref_softmax_loss(
             top_antecedent_scores, top_antecedent_labels
         )  # [top_cand]
         loss = torch.sum(loss)
@@ -678,13 +777,18 @@ if __name__ == "__main__":
     config.device = "cpu"
     config.name = "bert-base-uncased"
 
-    model = BasicMTL("bert-base-uncased", config=config)
+    # Init the tokenizer
     tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
 
+    # Get the dataset up and running
+    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner_gold'))
+    config.n_classes_ner = ds.ner_tag_dict.__len__()
+
+    # Make the model
+    model = BasicMTL("bert-base-uncased", config=config)
+
     # Try to wrap it in a dataloader
-    for x in MultiTaskDataset(
-            "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("coref",)
-    ):
+    for x in ds:
         pred = model.pred_with_labels(**x)
         print("haha")
         ...
