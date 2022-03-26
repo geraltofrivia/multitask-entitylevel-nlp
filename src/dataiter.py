@@ -44,13 +44,11 @@ class MultiTaskDataset(Dataset):
         self.tokenizer = tokenizer
         self.config = config
 
-        self.ner_tag_dict: dict = {"__na__": 0}
-
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
-        self.data, flag_successfully_pulled_from_disk = self.load_from_disk(
+        self.data, self.ner_tag_dict, flag_successfully_pulled_from_disk = self.load_from_disk(
             rebuild_cache
         )
 
@@ -58,6 +56,7 @@ class MultiTaskDataset(Dataset):
             self.data = RawDataset(
                 src=src, split=split, tasks=self._tasks_, shuffle=shuffle
             )
+            self.ner_tag_dict: dict = {"__na__": 0}
             self.process()
             self.write_to_disk()
 
@@ -77,7 +76,7 @@ class MultiTaskDataset(Dataset):
         dump_fname = Path(dump_fname + ".pkl")
 
         with dump_fname.open("wb+") as f:
-            pickle.dump((self.data, self.config), f)
+            pickle.dump((self.data, self.ner_tag_dict, self.config), f)
 
     def load_from_disk(self, ignore_cache: bool) -> (list, bool):
         """
@@ -93,7 +92,7 @@ class MultiTaskDataset(Dataset):
         success = False
 
         if ignore_cache:
-            return None, success
+            return None, {"__na__": 0}, success
 
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
@@ -107,27 +106,29 @@ class MultiTaskDataset(Dataset):
                 f"Processed (training ready) data not found on {dump_fname}."
                 "Reprocessing will commence now but will take some time. Approx. 5 min."
             )
-            return None, success
+            return None, {"__na__": 0}, success
 
         # Pull the data, and the config
         with dump_fname.open("rb") as f:
-            data, old_config = pickle.load(f)
+            data, ner_tag_dict, old_config = pickle.load(f)
 
         # Check if config matches
         # TODO: we need a way to iterate over all fields of the config somehow
         if (
-                config.vocab_size == old_config.vocab_size
-                and config.hidden_size == old_config.hidden_size
-                and config.max_span_width == old_config.max_span_width
+                self.config.vocab_size == old_config.vocab_size
+                and self.config.hidden_size == old_config.hidden_size
+                and self.config.max_span_width == old_config.max_span_width
         ):
-            return data, True
+            print(f"Pulled {len(data)} instances from {dump_fname}.")
+
+            return data, ner_tag_dict, True
         else:
             warnings.warn(
                 f"Processed (training ready) found on {dump_fname}. But the config files mismatch."
                 "Reprocessing will commence now but will take some time. Approx. 5 min."
             )
 
-            return None, False
+            return None, {"__na__": 0}, False
 
     def __len__(self):
         return self.data.__len__()
@@ -518,7 +519,10 @@ class MultiTaskDataset(Dataset):
             candidate_ends.view(-1), candidate_mask
         )  # n_subwords*max_span_width
 
+        tasks = [task if not task.startswith('ner') else 'ner' for task in self._tasks_]
+
         return_dict = {
+            "tasks": tasks,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
@@ -536,7 +540,7 @@ class MultiTaskDataset(Dataset):
             )
 
         if "ner_gold" in self._tasks_:
-            return_dict["ner_gold"] = self.process_ner_gold(
+            return_dict["ner"] = self.process_ner_gold(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
@@ -573,6 +577,8 @@ class RawDataset(Dataset):
                     f"An unrecognized task name sent: {task}. "
                     "So far, we work with 'coref', 'ner_gold', 'ner_spacy'."
                 )
+            if 'ner_gold' in task and 'ner_spacy' in task:
+                raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
 
         # super().__init__()
         self._src_ = src

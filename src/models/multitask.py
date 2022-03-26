@@ -344,6 +344,10 @@ class BasicMTL(nn.Module):
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]
 
+    @staticmethod
+    def ner_loss(logits: torch.tensor, labels: torch.tensor):
+        return torch.nn.functional.nll_loss(input=logits, target=labels)
+
     def coref(
             self,
             input_ids: torch.tensor,
@@ -561,9 +565,8 @@ class BasicMTL(nn.Module):
             Just a unary classifier over all spans.
             Just that. That's it.
         """
-        candidate_span_scores = self.unary_ner(candidate_span_embeddings).squeeze(1)
-        print(candidate_span_scores.shape)
-        return candidate_span_scores
+        logits = self.unary_ner(candidate_span_embeddings).squeeze(1)
+        return {'logits': logits}
 
     def forward(
             self,
@@ -715,53 +718,71 @@ class BasicMTL(nn.Module):
             n_subwords=n_subwords,
             candidate_starts=candidate_starts,
             candidate_ends=candidate_ends,
+            tasks=tasks
         )
 
         if 'coref' in tasks:
+            # Unpack Coref specific args (y labels)
             gold_starts = coref['gold_starts']
             gold_ends = coref['gold_ends']
-            gold_cluster_id_on_candidates = coref['gold_cluster_id_on_candidates']
+            gold_cluster_ids_on_candidates = coref['gold_cluster_ids_on_candidates']
 
-        top_span_starts = predictions["top_span_starts"]
-        top_span_ends = predictions["top_span_ends"]
-        top_span_indices = predictions["top_span_indices"]
-        top_antecedent_scores = predictions["top_antecedent_scores"]
-        top_antecedent_mask = predictions["top_antecedent_mask"]
+            # Unpack Coref specific model predictions
+            top_span_starts = predictions["top_span_starts"]
+            top_span_ends = predictions["top_span_ends"]
+            top_span_indices = predictions["top_span_indices"]
+            top_antecedent_scores = predictions["top_antecedent_scores"]
+            top_antecedent_mask = predictions["top_antecedent_mask"]
 
-        top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
+            # Some minor post processing.
+            top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
 
-        top_antecedent_indices = torch.argsort(top_antecedent_scores, descending=True)
-        top_antecedent_cluster_ids = top_span_cluster_ids[
-            top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
-        ]
-        top_antecedent_cluster_ids[
-            top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0
-            ] = 0
+            top_antecedent_indices = torch.argsort(top_antecedent_scores, descending=True)
+            top_antecedent_cluster_ids = top_span_cluster_ids[
+                top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
+            ]
+            top_antecedent_cluster_ids[
+                top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0
+                ] = 0
 
-        # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
-        top_antecedent_cluster_ids += torch.log(top_antecedent_mask.float()).int()[
-                                      :, : top_antecedent_mask.shape[1] - 1
-                                      ]  # [top_cand, top_ant]
-        same_cluster_indicator = torch.eq(
-            top_antecedent_cluster_ids, top_span_cluster_ids.unsqueeze(1)
-        )  # [top_cand, top_ant]
-        non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
-        pairwise_labels = torch.logical_and(
-            same_cluster_indicator, non_dummy_indicator
-        )  # [top_cand, top_ant]
-        dummy_labels = torch.logical_not(
-            pairwise_labels.any(1, keepdims=True)
-        )  # [top_cand, 1]
-        top_antecedent_labels = torch.cat(
-            [dummy_labels, pairwise_labels], 1
-        )  # [top_cand, top_ant + 1]
-        loss = self.coref_softmax_loss(
-            top_antecedent_scores, top_antecedent_labels
-        )  # [top_cand]
-        loss = torch.sum(loss)
+            # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
+            top_antecedent_cluster_ids += torch.log(top_antecedent_mask.float()).int()[
+                                          :, : top_antecedent_mask.shape[1] - 1
+                                          ]  # [top_cand, top_ant]
+            same_cluster_indicator = torch.eq(
+                top_antecedent_cluster_ids, top_span_cluster_ids.unsqueeze(1)
+            )  # [top_cand, top_ant]
+            non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
+            pairwise_labels = torch.logical_and(
+                same_cluster_indicator, non_dummy_indicator
+            )  # [top_cand, top_ant]
+            # noinspection PyArgumentList
+            dummy_labels = torch.logical_not(
+                pairwise_labels.any(1, keepdims=True)
+            )  # [top_cand, 1]
+            top_antecedent_labels = torch.cat(
+                [dummy_labels, pairwise_labels], 1
+            )  # [top_cand, top_ant + 1]
+            coref_loss = self.coref_softmax_loss(
+                top_antecedent_scores, top_antecedent_labels
+            )  # [top_cand]
+            coref_loss = torch.sum(coref_loss)
 
-        predictions["loss"] = loss
-        return loss
+            predictions["loss"] = coref_loss
+        else:
+            coref_loss = None
+
+        if 'ner' in tasks:
+            labels = ner['gold_labels']  # n_spans, 1
+            logits = predictions['ner']['logits']  # n_spans, n_classes
+
+            # Calculating the loss
+            ner_loss = self.ner_loss(logits=logits, labels=labels)
+
+        else:
+            ner_loss = None
+
+        return coref_loss, ner_loss
 
 
 if __name__ == "__main__":
@@ -781,7 +802,8 @@ if __name__ == "__main__":
     tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
 
     # Get the dataset up and running
-    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner_gold'))
+    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner_gold',))
+    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner_gold',))
     config.n_classes_ner = ds.ner_tag_dict.__len__()
 
     # Make the model
@@ -790,5 +812,5 @@ if __name__ == "__main__":
     # Try to wrap it in a dataloader
     for x in ds:
         pred = model.pred_with_labels(**x)
-        print("haha")
+        print(pred)
         ...
