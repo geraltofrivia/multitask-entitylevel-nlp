@@ -48,9 +48,11 @@ class MultiTaskDataset(Dataset):
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
-        self.data, self.ner_tag_dict, flag_successfully_pulled_from_disk = self.load_from_disk(
-            rebuild_cache
-        )
+        (
+            self.data,
+            self.ner_tag_dict,
+            flag_successfully_pulled_from_disk,
+        ) = self.load_from_disk(rebuild_cache)
 
         if not flag_successfully_pulled_from_disk:
             self.data = RawDataset(
@@ -519,7 +521,7 @@ class MultiTaskDataset(Dataset):
             candidate_ends.view(-1), candidate_mask
         )  # n_subwords*max_span_width
 
-        tasks = [task if not task.startswith('ner') else 'ner' for task in self._tasks_]
+        tasks = [task if not task.startswith("ner") else "ner" for task in self._tasks_]
 
         return_dict = {
             "tasks": tasks,
@@ -577,7 +579,7 @@ class RawDataset(Dataset):
                     f"An unrecognized task name sent: {task}. "
                     "So far, we work with 'coref', 'ner', 'ner_spacy'."
                 )
-            if 'ner' in task and 'ner_spacy' in task:
+            if "ner" in task and "ner_spacy" in task:
                 raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
 
         # super().__init__()

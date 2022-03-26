@@ -2,15 +2,13 @@
     TODO:
         - in data sampler (pipeline, make sure to convert 1, sl -> n, max sl sequences.
             One doc per batch. Pad_to_multiple_of etc etc.
-
 """
 import math
 import torch
+import transformers
 import torch.nn as nn
 import torch.nn.functional as F
-
 from typing import List, Iterable
-import transformers
 
 # Local imports
 try:
@@ -562,11 +560,11 @@ class BasicMTL(nn.Module):
             encoded: torch.tensor,
     ):
         """
-            Just a unary classifier over all spans.
-            Just that. That's it.
+        Just a unary classifier over all spans.
+        Just that. That's it.
         """
         logits = self.unary_ner(candidate_span_embeddings).squeeze(1)
-        return {'logits': logits}
+        return {"logits": logits}
 
     def forward(
             self,
@@ -633,11 +631,11 @@ class BasicMTL(nn.Module):
 
         # Just init the return dict
         return_dict = {
-            'encoded': encoded,
-            'input_ids': input_ids,
-            'candidate_span_embeddings': candidate_span_embeddings,
-            'coref': None,
-            'ner': None
+            "encoded": encoded,
+            "input_ids": input_ids,
+            "candidate_span_embeddings": candidate_span_embeddings,
+            "coref": None,
+            "ner": None,
         }
 
         if "coref" in tasks:
@@ -652,9 +650,9 @@ class BasicMTL(nn.Module):
                 candidate_starts=candidate_starts,
                 candidate_ends=candidate_ends,
                 candidate_span_embeddings=candidate_span_embeddings,
-                encoded=encoded
+                encoded=encoded,
             )
-            return_dict['coref'] = coref_op
+            return_dict["coref"] = coref_op
 
         if "ner" in tasks:
             ner_op = self.ner(
@@ -668,9 +666,9 @@ class BasicMTL(nn.Module):
                 candidate_starts=candidate_starts,
                 candidate_ends=candidate_ends,
                 candidate_span_embeddings=candidate_span_embeddings,
-                encoded=encoded
+                encoded=encoded,
             )
-            return_dict['ner'] = ner_op
+            return_dict["ner"] = ner_op
 
         return return_dict
 
@@ -687,7 +685,7 @@ class BasicMTL(nn.Module):
             candidate_ends: torch.tensor,
             tasks: Iterable[str],
             coref: dict = None,
-            ner: dict = None
+            ner: dict = None,
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -718,14 +716,14 @@ class BasicMTL(nn.Module):
             n_subwords=n_subwords,
             candidate_starts=candidate_starts,
             candidate_ends=candidate_ends,
-            tasks=tasks
+            tasks=tasks,
         )
 
-        if 'coref' in tasks:
+        if "coref" in tasks:
             # Unpack Coref specific args (y labels)
-            gold_starts = coref['gold_starts']
-            gold_ends = coref['gold_ends']
-            gold_cluster_ids_on_candidates = coref['gold_cluster_ids_on_candidates']
+            gold_starts = coref["gold_starts"]
+            gold_ends = coref["gold_ends"]
+            gold_cluster_ids_on_candidates = coref["gold_cluster_ids_on_candidates"]
 
             # Unpack Coref specific model predictions
             top_span_starts = predictions["top_span_starts"]
@@ -737,7 +735,9 @@ class BasicMTL(nn.Module):
             # Some minor post processing.
             top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
 
-            top_antecedent_indices = torch.argsort(top_antecedent_scores, descending=True)
+            top_antecedent_indices = torch.argsort(
+                top_antecedent_scores, descending=True
+            )
             top_antecedent_cluster_ids = top_span_cluster_ids[
                 top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
             ]
@@ -752,7 +752,9 @@ class BasicMTL(nn.Module):
             same_cluster_indicator = torch.eq(
                 top_antecedent_cluster_ids, top_span_cluster_ids.unsqueeze(1)
             )  # [top_cand, top_ant]
-            non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
+            non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(
+                1
+            )  # [top_cand, 1]
             pairwise_labels = torch.logical_and(
                 same_cluster_indicator, non_dummy_indicator
             )  # [top_cand, top_ant]
@@ -772,9 +774,9 @@ class BasicMTL(nn.Module):
         else:
             coref_loss = None
 
-        if 'ner' in tasks:
-            labels = ner['gold_labels']  # n_spans, 1
-            logits = predictions['ner']['logits']  # n_spans, n_classes
+        if "ner" in tasks:
+            labels = ner["gold_labels"]  # n_spans, 1
+            logits = predictions["ner"]["logits"]  # n_spans, n_classes
 
             # Calculating the loss
             ner_loss = self.ner_loss(logits=logits, labels=labels)
@@ -782,12 +784,9 @@ class BasicMTL(nn.Module):
         else:
             ner_loss = None
 
-        losses = {
-            "coref_loss": coref_loss,
-            "ner_loss": ner_loss
-        }
+        losses = {"coref_loss": coref_loss, "ner_loss": ner_loss}
 
-        return coref_loss, ner_loss
+        return losses
 
 
 if __name__ == "__main__":
@@ -807,8 +806,12 @@ if __name__ == "__main__":
     tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
 
     # Get the dataset up and running
-    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner',))
-    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner',))
+    ds = MultiTaskDataset(
+        "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
+    )
+    ds = MultiTaskDataset(
+        "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
+    )
     config.n_classes_ner = ds.ner_tag_dict.__len__()
 
     # Make the model
