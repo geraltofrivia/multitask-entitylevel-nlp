@@ -268,7 +268,7 @@ class CoNLLOntoNotesParser:
                     split=split_nm,
                     genre=genre,
                     docpart=doc_parts[i],
-                    ner_gold=ner_gold,
+                    ner=ner_gold,
                     ner_spacy=ner_spacy,
                     coref=coref,
                 )

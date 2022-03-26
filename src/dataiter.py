@@ -65,9 +65,9 @@ class MultiTaskDataset(Dataset):
         Write to MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
         File names could be:
              MultiTaskDatasetDump_coref.pkl
-             MultiTaskDatasetDump_ner_gold.pkl
+             MultiTaskDatasetDump_ner.pkl
              MultiTaskDatasetDump_ner_spacy.pkl
-             MultiTaskDatasetDump_coref_ner_gold.pkl
+             MultiTaskDatasetDump_coref_ner.pkl
         """
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
@@ -83,9 +83,9 @@ class MultiTaskDataset(Dataset):
             Look for MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
             File names could be:
                  MultiTaskDatasetDump_coref.pkl
-                 MultiTaskDatasetDump_ner_gold.pkl
+                 MultiTaskDatasetDump_ner.pkl
                  MultiTaskDatasetDump_ner_spacy.pkl
-                 MultiTaskDatasetDump_coref_ner_gold.pkl
+                 MultiTaskDatasetDump_coref_ner.pkl
         :return: a list of processed dicts (optional) and
             a bool indicating whether we successfully pulled sthing from the disk or not
         """
@@ -344,7 +344,7 @@ class MultiTaskDataset(Dataset):
 
         return coref_specific
 
-    def process_ner_gold(
+    def process_ner(
             self,
             instance: Document,
             generic_processed_stuff: dict,
@@ -357,17 +357,17 @@ class MultiTaskDataset(Dataset):
         :return:
         """
         gold_starts = torch.tensor(
-            [word2subword_starts[span[0]] for span in instance.ner_gold.spans],
+            [word2subword_starts[span[0]] for span in instance.ner.spans],
             dtype=torch.long,
             device=self.config.device,
         )  # n_gold
         gold_ends = torch.tensor(
-            [word2subword_ends[span[1] - 1] for span in instance.ner_gold.spans],
+            [word2subword_ends[span[1] - 1] for span in instance.ner.spans],
             dtype=torch.long,
             device=self.config.device,
         )
         gold_labels = []
-        for tag in instance.ner_gold.tags:
+        for tag in instance.ner.tags:
             if tag not in self.ner_tag_dict:
                 self.ner_tag_dict[tag] = len(self.ner_tag_dict)
             gold_labels.append(self.ner_tag_dict[tag])
@@ -539,8 +539,8 @@ class MultiTaskDataset(Dataset):
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
-        if "ner_gold" in self._tasks_:
-            return_dict["ner"] = self.process_ner_gold(
+        if "ner" in self._tasks_:
+            return_dict["ner"] = self.process_ner(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
@@ -557,9 +557,9 @@ class RawDataset(Dataset):
 
             You can configure it to filter out instances which do not have annotations for a particular thing e.g.,
                 - coref by passing tasks=('coref',) (all instances w/o coref annotations will be skipped)
-                - ner by passing tasks=('ner_gold',)
+                - ner by passing tasks=('ner',)
                 - ner (silver std) by passing tasks=('ner_spacy',)
-                - or both by tasks=('coref', 'ner_gold') etc etc
+                - or both by tasks=('coref', 'ner') etc etc
 
 
         :param src: the first child under /data/parsed, usually, the name of a dataset
@@ -572,12 +572,12 @@ class RawDataset(Dataset):
 
         # Sanity check params
         for task in tasks:
-            if task not in ["coref", "ner_gold", "ner_spacy"]:
+            if task not in ["coref", "ner", "ner_spacy"]:
                 raise AssertionError(
                     f"An unrecognized task name sent: {task}. "
-                    "So far, we work with 'coref', 'ner_gold', 'ner_spacy'."
+                    "So far, we work with 'coref', 'ner', 'ner_spacy'."
                 )
-            if 'ner_gold' in task and 'ner_spacy' in task:
+            if 'ner' in task and 'ner_spacy' in task:
                 raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
 
         # super().__init__()
@@ -614,7 +614,7 @@ class RawDataset(Dataset):
                 if "coref" in self._tasks and instance.coref.isempty:
                     continue
 
-                if "ner_gold" in self._tasks and instance.ner_gold.isempty:
+                if "ner" in self._tasks and instance.ner.isempty:
                     continue
 
                 if "ner_spacy" in self._tasks and instance.ner_spacy.isempty:
@@ -688,7 +688,7 @@ if __name__ == "__main__":
     # config = tf.BertConfig('bert-base-uncased')
     config.max_span_width = 8
     config.device = "cpu"
-    tasks = ["ner_gold", "coref"]
+    tasks = ["ner", "coref"]
 
     ds = MultiTaskDataset(
         "ontonotes",

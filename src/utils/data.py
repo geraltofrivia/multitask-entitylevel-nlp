@@ -181,7 +181,7 @@ class Document:
     coref: Clusters
 
     # Named Entity objects storing spacy and gold named entities (if found)
-    ner_gold: NamedEntities
+    ner: NamedEntities
     ner_spacy: NamedEntities
 
     # Split (ontonotes split: train;test;development; conll-2012-test

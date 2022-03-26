@@ -782,6 +782,11 @@ class BasicMTL(nn.Module):
         else:
             ner_loss = None
 
+        losses = {
+            "coref_loss": coref_loss,
+            "ner_loss": ner_loss
+        }
+
         return coref_loss, ner_loss
 
 
@@ -802,8 +807,8 @@ if __name__ == "__main__":
     tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
 
     # Get the dataset up and running
-    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner_gold',))
-    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner_gold',))
+    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner',))
+    ds = MultiTaskDataset('ontonotes', 'train', tokenizer=tokenizer, config=config, tasks=('ner',))
     config.n_classes_ner = ds.ner_tag_dict.__len__()
 
     # Make the model
