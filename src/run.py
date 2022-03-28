@@ -35,42 +35,17 @@ def get_pretrained_dirs(nm: str):
 
 def simplest_loop(
         epochs: int,
-        data: dict,
         opt: torch.optim,
-        loss_fn: torch.nn,
         train_fn: Callable,
         predict_fn: Callable,
-        device: Union[str, torch.device],
-        data_fn: Callable,
+        trn_dl: Callable,
+        dev_dl: Callable,
         eval_fn: Callable = None,
 ) -> (list, list, list):
-    """
-    A fn which can be used to train a language model.
-
-    The model doesn't need to be an nn.Module,
-        but have an eval (optional), a train and a predict function.
-
-    Data should be a dict like so:
-        {"train":{"x":np.arr, "y":np.arr}, "val":{"x":np.arr, "y":np.arr} }
-
-    Train_fn must return both loss and y_pred
-
-    :param epochs: number of epochs to train for
-    :param data: a dict having keys train_x, test_x, train_y, test_y
-    :param device: torch device to create new tensor from data
-    :param opt: optimizer
-    :param loss_fn: loss function
-    :param train_fn: function to call with x and y
-    :param predict_fn: function to call with x (test)
-    :param data_fn: a class to which we can pass X and Y, and get an iterator.
-    :param eval_fn: (optional) function which when given pred and true, returns acc
-    :return: traces
-    """
 
     train_loss = []
     train_acc = []
     valid_acc = []
-    lrs = []
 
     # Epoch level
     for e in range(epochs):
@@ -82,17 +57,16 @@ def simplest_loop(
         with Timer() as timer:
 
             # Make data
-            trn_dl, val_dl = data_fn(split="train"), data_fn(split="valid")
+            trn_ds, dev_ds = trn_dl(), dev_dl()
 
             # Train Loop
-            for instance in tqdm(trn_dl):
+            for instance in tqdm(trn_ds):
                 opt.zero_grad()
 
                 outputs = train_fn(**instance)
                 # TODO: change the loss parser when tasks change
                 loss = outputs["loss"]["ner"]
 
-                # per_epoch_tr_acc.append(eval_fn(y_pred=y_pred, y_true=_y).item())
                 per_epoch_loss.append(loss.item())
 
                 loss.backward()
@@ -102,10 +76,12 @@ def simplest_loop(
             with torch.no_grad():
 
                 per_epoch_vl_acc = []
-                for instance in tqdm(val_dl):
+                for instance in tqdm(dev_ds):
                     outputs = predict_fn(**instance)
+                    ner_logits = outputs['ner']['logits']
 
-                    per_epoch_vl_acc.append(eval_fn(y_pred, _y).item())
+                    # TODO: write an eval function (somewhere)
+                    per_epoch_vl_acc.append(0)
 
         # Bookkeep
         train_acc.append(np.mean(per_epoch_tr_acc))
@@ -184,10 +160,6 @@ def run(
 ):
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
-    # Parsing the task
-    if tasks != ["coref"]:
-        raise BadParameters("Only coref is supported for now.")
-
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
     config = transformers.BertConfig(dir_config)
     config.max_span_width = 5
@@ -205,7 +177,7 @@ def run(
     temp_ds = MultiTaskDataset(
         src=dataset,
         config=config,
-        tasks=("ner_gold",),
+        tasks=("ner",),
         split="train",
         tokenizer=tokenizer,
     )
@@ -216,18 +188,22 @@ def run(
 
     # Load the data
     train_ds = partial(
-        MultiTaskDataset, src=dataset, config=config, tasks=("ner_gold",), split="train"
+        MultiTaskDataset, src=dataset, config=config, tasks=("ner",), split="train", tokenizer=tokenizer
     )
     valid_ds = partial(
         MultiTaskDataset,
         src=dataset,
         config=config,
-        tasks=("coref",),
+        tasks=("ner",),
         split="development",
+        tokenizer=tokenizer
     )
+    opt = torch.optim.SGD(model.parameters(), lr=0.01)
 
-    # outputs = loop(model=model, train_dataset=train_ds, valid_dataset=valid_ds, config=config)
+    outputs = simplest_loop(epochs=epochs, trn_dl=train_ds, dev_dl=valid_ds,
+                            train_fn=model.pred_with_labels, predict_fn=model.forward, opt=opt)
+    print('potato')
 
 
 if __name__ == "__main__":
-    pass
+    run()

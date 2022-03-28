@@ -578,6 +578,7 @@ class BasicMTL(nn.Module):
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
             tasks: Iterable[str],
+            *args, **kwargs
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -697,13 +698,20 @@ class BasicMTL(nn.Module):
         :param n_subwords: number of subwords
         :param candidate_starts: subword ID for candidate span starts
         :param candidate_ends: subword ID for candidate span ends
-        :param gold_starts: subword ID for actual span starts [n_gold_spans,]
-        :param gold_ends: subword ID for actual span ends [n_gold_spans,]
-        :param gold_cluster_ids: cluster ID for actual spans [n_gold_spans,] (starts with 1)
-        :param gold_cluster_ids_on_candidates: cluster ID for actual spans [n_gold_spans,]
-            indexed according to the candidate spans i.e. 0 when candidate is not annotated,
-            >0 for actual cluster ID of the candidate span
-        (starts with 1)
+        :param tasks: list of which forward functions to compute (and which labels to expect) e.g. ['coref', 'ner']
+        :param coref: A dict containing gold annotations for coref for this document.
+        It is expected to be there if 'coref' is a element in arg "tasks"
+        Specifically,
+            gold_starts: subword ID for actual span starts [n_gold_spans,]
+            gold_ends: subword ID for actual span ends [n_gold_spans,]
+            gold_cluster_ids_on_candidates: cluster ID for actual spans [n_gold_spans,]
+                indexed according to the candidate spans i.e. 0 when candidate is not annotated,
+                >0 for actual cluster ID of the candidate span
+                (starts with 1)
+        :param ner: A dict containing gold annotations for NER for this document.
+        It is expected to be there if 'ner' is a element in arg "tasks"
+        Specifically:
+            gold_labels: one label corresponding to every candidate span generated.
 
         """
         predictions = self.forward(
@@ -775,18 +783,24 @@ class BasicMTL(nn.Module):
             coref_loss = None
 
         if "ner" in tasks:
-            labels = ner["gold_labels"]  # n_spans, 1
-            logits = predictions["ner"]["logits"]  # n_spans, n_classes
+            ner_labels = ner["gold_labels"]  # n_spans, 1
+            ner_logits = predictions["ner"]["logits"]  # n_spans, n_classes
 
             # Calculating the loss
-            ner_loss = self.ner_loss(logits=logits, labels=labels)
+            ner_loss = self.ner_loss(logits=ner_logits, labels=ner_labels)
 
         else:
             ner_loss = None
+            ner_logits = None
+            ner_labels = None
 
-        losses = {"coref_loss": coref_loss, "ner_loss": ner_loss}
+        outputs = {
+            "loss": {"coref": coref_loss, "ner": ner_loss},
+            "ner": {"logits": ner_logits, "labels": ner_labels}
+            # TODO: add coref things here also
+        }
 
-        return losses
+        return outputs
 
 
 if __name__ == "__main__":
@@ -806,9 +820,6 @@ if __name__ == "__main__":
     tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
 
     # Get the dataset up and running
-    ds = MultiTaskDataset(
-        "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
-    )
     ds = MultiTaskDataset(
         "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
     )
