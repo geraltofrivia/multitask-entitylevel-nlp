@@ -4,11 +4,17 @@ import numpy as np
 import transformers
 from pathlib import Path
 from copy import deepcopy
+from tqdm.auto import tqdm
 from functools import partial
 from mytorch.utils.goodies import Timer
 from typing import List, Callable, Union
 
-from tqdm.auto import tqdm
+# Local imports
+try:
+    import _pathfix
+except ImportError:
+    from . import _pathfix
+from eval import ner_all as ner
 from config import LOCATIONS as LOC
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
@@ -52,6 +58,7 @@ def simplest_loop(
 
         per_epoch_loss = []
         per_epoch_tr_acc = []
+        per_epoch_vl_acc = []
 
         # Train
         with Timer() as timer:
@@ -66,8 +73,11 @@ def simplest_loop(
                 outputs = train_fn(**instance)
                 # TODO: change the loss parser when tasks change
                 loss = outputs["loss"]["ner"]
+                # TODO: add other metrics here
+                acc = eval_fn(outputs["ner"]["logits"], outputs["ner"]["labels"])
 
                 per_epoch_loss.append(loss.item())
+                per_epoch_tr_acc.append(acc)
 
                 loss.backward()
                 opt.step()
@@ -78,10 +88,13 @@ def simplest_loop(
                 per_epoch_vl_acc = []
                 for instance in tqdm(dev_ds):
                     outputs = predict_fn(**instance)
-                    ner_logits = outputs['ner']['logits']
+                    ner_logits = outputs["ner"]["logits"]
+                    # Can we make the following generalised? So far its too specific to the loop.
+                    ner_labels = instance["ner"]["gold_labels"]
+                    acc = eval_fn(ner_logits, ner_labels)
 
                     # TODO: write an eval function (somewhere)
-                    per_epoch_vl_acc.append(0)
+                    per_epoch_vl_acc.append(acc)
 
         # Bookkeep
         train_acc.append(np.mean(per_epoch_tr_acc))
@@ -188,7 +201,12 @@ def run(
 
     # Load the data
     train_ds = partial(
-        MultiTaskDataset, src=dataset, config=config, tasks=("ner",), split="train", tokenizer=tokenizer
+        MultiTaskDataset,
+        src=dataset,
+        config=config,
+        tasks=("ner",),
+        split="train",
+        tokenizer=tokenizer,
     )
     valid_ds = partial(
         MultiTaskDataset,
@@ -196,13 +214,20 @@ def run(
         config=config,
         tasks=("ner",),
         split="development",
-        tokenizer=tokenizer
+        tokenizer=tokenizer,
     )
     opt = torch.optim.SGD(model.parameters(), lr=0.01)
 
-    outputs = simplest_loop(epochs=epochs, trn_dl=train_ds, dev_dl=valid_ds,
-                            train_fn=model.pred_with_labels, predict_fn=model.forward, opt=opt)
-    print('potato')
+    outputs = simplest_loop(
+        epochs=epochs,
+        trn_dl=train_ds,
+        dev_dl=valid_ds,
+        train_fn=model.pred_with_labels,
+        predict_fn=model.forward,
+        eval_fn=ner,
+        opt=opt,
+    )
+    print("potato")
 
 
 if __name__ == "__main__":

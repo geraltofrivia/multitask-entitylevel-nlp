@@ -578,7 +578,8 @@ class BasicMTL(nn.Module):
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
             tasks: Iterable[str],
-            *args, **kwargs
+            *args,
+            **kwargs
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
