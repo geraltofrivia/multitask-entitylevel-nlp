@@ -83,7 +83,7 @@ class MultiTaskDataset(Dataset):
         dump_fname = Path(dump_fname + ".pkl")
 
         with dump_fname.open("wb+") as f:
-            pickle.dump((self.data, self.ner_tag_dict, self.config), f)
+            pickle.dump((self.data, self.config), f)
 
     def load_from_disk(self, ignore_cache: bool) -> (list, bool):
         """
