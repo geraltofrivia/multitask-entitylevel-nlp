@@ -564,6 +564,7 @@ class BasicMTL(nn.Module):
         Just that. That's it.
         """
         logits = self.unary_ner(candidate_span_embeddings).squeeze(1)
+        logits = torch.nn.functional.softmax(logits, dim=1)
         return {"logits": logits}
 
     def forward(
@@ -795,7 +796,7 @@ class BasicMTL(nn.Module):
 
             assert not torch.isnan(ner_loss), \
                 f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
-                f"\n\tLabels shape: {ner_labels}.shape, " \
+                f"\n\tLabels shape: {ner_labels.shape}, " \
                 f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
 
 

@@ -89,8 +89,11 @@ def simplest_loop(
 
             # Train Loop
             for instance in tqdm(trn_ds):
+
+                # Reset the gradients.
                 opt.zero_grad()
 
+                # Forward Pass
                 outputs = train_fn(**instance)
 
                 """
@@ -134,10 +137,9 @@ def simplest_loop(
             valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
 
         print(f"\nEpoch: {e:3d}" +
-              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" + ''
-                                                                                             ''.join(
-                  [f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                   for metric_nm, metric_vls in train_metrics[task_nm].items()]) +
+              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +
+                       ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                for metric_nm, metric_vls in train_metrics[task_nm].items()]) +
                        ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                 for metric_nm, metric_vls in valid_metrics[task_nm].items()])
                        # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
