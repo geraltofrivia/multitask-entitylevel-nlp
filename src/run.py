@@ -55,7 +55,7 @@ def compute_metrics(metrics: Dict[str, Callable], logits, labels) -> Dict[str, f
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
     for task_nm in inter_epoch.keys():
-        for metric_nm, metric_list in intra_epoch['task_nm'].items():
+        for metric_nm, metric_list in intra_epoch[task_nm].items():
             inter_epoch[task_nm][metric_nm].append(np.mean(metric_list))
     return inter_epoch
 
@@ -124,7 +124,7 @@ def simplest_loop(
                         labels = instance["ner"]["gold_labels"]
 
                         instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
-                        for metric_nm, metric_vl in instance_metrics:
+                        for metric_nm, metric_vl in instance_metrics.items():
                             per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
 
         # Bookkeep
@@ -133,8 +133,13 @@ def simplest_loop(
             train_metrics = aggregate_metrics(train_metrics, per_epoch_tr_metrics)
             valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
 
-        print(f"Epoch: {e:3d}" +
+        print(f"\nEpoch: {e:3d}" +
               ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" + ''
+                                                                                             ''.join(
+                  [f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                   for metric_nm, metric_vls in train_metrics[task_nm].items()]) +
+                       ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                for metric_nm, metric_vls in valid_metrics[task_nm].items()])
                        # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                        # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
                        for task_nm in tasks]))
