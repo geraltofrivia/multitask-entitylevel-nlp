@@ -48,7 +48,7 @@ class MultiTaskDataset(Dataset):
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
-        with (LOC.manual / f"ner_{self.src}_tag_dict.json").open("r") as f:
+        with (LOC.manual / f"ner_{self._src_}_tag_dict.json").open("r") as f:
             self.ner_tag_dict = json.load(f)
 
         (
