@@ -74,7 +74,7 @@ class MultiTaskDataset(Dataset):
             Expect them to be extremely heavily twisted in the case of __na__ of course.
         """
         # Create a flat (long, long) list of all labels
-        y = torch.cat([datum['ner']['gold_labels'] for datum in self.data])
+        y = torch.cat([datum['ner']['gold_labels'] for datum in self.data]).to('cpu')
         return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
 
     def write_to_disk(self):
