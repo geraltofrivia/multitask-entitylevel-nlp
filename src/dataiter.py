@@ -48,9 +48,11 @@ class MultiTaskDataset(Dataset):
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
+        with (LOC.manual / f"ner_{self.src}_tag_dict.json").open("r") as f:
+            self.ner_tag_dict = json.load(f)
+
         (
             self.data,
-            self.ner_tag_dict,
             flag_successfully_pulled_from_disk,
         ) = self.load_from_disk(rebuild_cache)
 
@@ -58,7 +60,6 @@ class MultiTaskDataset(Dataset):
             self.data = RawDataset(
                 src=src, split=split, tasks=self._tasks_, shuffle=shuffle
             )
-            self.ner_tag_dict: dict = {"__na__": 0}
             self.process()
             self.write_to_disk()
 
@@ -98,7 +99,7 @@ class MultiTaskDataset(Dataset):
         success = False
 
         if ignore_cache:
-            return None, {"__na__": 0}, success
+            return None, success
 
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
@@ -112,11 +113,11 @@ class MultiTaskDataset(Dataset):
                 f"Processed (training ready) data not found on {dump_fname}."
                 "Reprocessing will commence now but will take some time. Approx. 5 min."
             )
-            return None, {"__na__": 0}, success
+            return None, success
 
         # Pull the data, and the config
         with dump_fname.open("rb") as f:
-            data, ner_tag_dict, old_config = pickle.load(f)
+            data, old_config = pickle.load(f)
 
         # Check if config matches
         # TODO: we need a way to iterate over all fields of the config somehow
@@ -139,14 +140,14 @@ class MultiTaskDataset(Dataset):
 
             print(f"Pulled {len(data)} instances from {dump_fname}.")
 
-            return data, ner_tag_dict, True
+            return data, True
         else:
             warnings.warn(
                 f"Processed (training ready) found on {dump_fname}. But the config files mismatch."
                 "Reprocessing will commence now but will take some time. Approx. 5 min."
             )
 
-            return None, {"__na__": 0}, False
+            return None, False
 
     def __len__(self):
         return self.data.__len__()
@@ -387,7 +388,7 @@ class MultiTaskDataset(Dataset):
         gold_labels = []
         for tag in instance.ner.tags:
             if tag not in self.ner_tag_dict:
-                self.ner_tag_dict[tag] = len(self.ner_tag_dict)
+                raise AssertionError(f"Tag {tag} not found in Tag dict!")
             gold_labels.append(self.ner_tag_dict[tag])
         gold_labels = torch.tensor(
             gold_labels, dtype=torch.long, device=self.config.device

@@ -70,6 +70,9 @@ class BasicMTL(nn.Module):
             span_embedding_dim, span_embedding_dim
         ).to(config.device)
 
+        # Losses
+        self.ner_loss = nn.CrossEntropyLoss()
+
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
         CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L564
@@ -342,9 +345,9 @@ class BasicMTL(nn.Module):
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]
 
-    @staticmethod
-    def ner_loss(logits: torch.tensor, labels: torch.tensor):
-        return torch.nn.functional.nll_loss(input=logits, target=labels)
+    # @staticmethod
+    # def ner_loss(logits: torch.tensor, labels: torch.tensor):
+    #     return torch.nn.functional.nll_loss(input=logits, target=labels)
 
     def coref(
             self,
