@@ -62,6 +62,10 @@ class MultiTaskDataset(Dataset):
             self.process()
             self.write_to_disk()
 
+        if self.config.trim:
+            warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
+            self.data = self.data[:50]
+
     def write_to_disk(self):
         """
         Write to MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
@@ -121,6 +125,18 @@ class MultiTaskDataset(Dataset):
                 and self.config.hidden_size == old_config.hidden_size
                 and self.config.max_span_width == old_config.max_span_width
         ):
+            # Convert every tensor to the right device
+            for i, datum in enumerate(data):
+                for k, v in datum.items():
+                    if type(v) is torch.Tensor:
+                        datum[k] = v.to(self.config.device)
+                    elif type(v) is dict:
+                        for _k, _v in v.items():
+                            if type(_v) is torch.Tensor:
+                                datum[k][_k] = _v.to(self.config.device)
+                    else:
+                        ...
+
             print(f"Pulled {len(data)} instances from {dump_fname}.")
 
             return data, ner_tag_dict, True
