@@ -36,7 +36,7 @@ class BasicMTL(nn.Module):
         ).to(config.device)
 
         # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
-        self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1)
+        self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1).to(config.device)
 
         # Mention scorer (Unary, hdim) takes span representations and passes them through a 2 layer FFNN to score
         #   whether they are valid spans or not.
