@@ -795,7 +795,7 @@ class BasicMTL(nn.Module):
             ner_logits = predictions["ner"]["logits"]  # n_spans, n_classes
 
             # Calculating the loss
-            ner_loss = self.ner_loss(logits=ner_logits, labels=ner_labels)
+            ner_loss = self.ner_loss(ner_logits, ner_labels)
 
             assert not torch.isnan(ner_loss), \
                 f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
