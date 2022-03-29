@@ -41,6 +41,7 @@ def get_pretrained_dirs(nm: str):
 
 def simplest_loop(
         epochs: int,
+        tasks: Iterable[str],
         opt: torch.optim,
         train_fn: Callable,
         predict_fn: Callable,
@@ -48,17 +49,16 @@ def simplest_loop(
         dev_dl: Callable,
         eval_fn: Callable = None,
 ) -> (list, list, list):
-
-    train_loss = []
-    train_acc = []
-    valid_acc = []
+    train_loss = {task_nm: [] for task_nm in tasks}
+    train_acc = {task_nm: [] for task_nm in tasks}
+    valid_acc = {task_nm: [] for task_nm in tasks}
 
     # Epoch level
     for e in range(epochs):
 
-        per_epoch_loss = []
-        per_epoch_tr_acc = []
-        per_epoch_vl_acc = []
+        per_epoch_loss = {task_nm: [] for task_nm in tasks}
+        per_epoch_tr_acc = {task_nm: [] for task_nm in tasks}
+        per_epoch_vl_acc = {task_nm: [] for task_nm in tasks}
 
         # Train
         with Timer() as timer:
@@ -71,13 +71,19 @@ def simplest_loop(
                 opt.zero_grad()
 
                 outputs = train_fn(**instance)
-                # TODO: change the loss parser when tasks change
-                loss = outputs["loss"]["ner"]
-                # TODO: add other metrics here
-                acc = eval_fn(outputs["ner"]["logits"], outputs["ner"]["labels"])
 
-                per_epoch_loss.append(loss.item())
-                per_epoch_tr_acc.append(acc)
+                """
+                    Depending on instance.tasks list, do the following:
+                        - task specific loss (added to losses)
+                        - task specific metrics (added to metrics)
+                """
+                for task_nm in instance['tasks']:
+                    loss = outputs["loss"][task_nm]
+                    per_epoch_loss[task_nm].append(loss.item())
+
+                    # TODO: add other metrics here
+                    acc = eval_fn(outputs[task_nm]["logits"], outputs[task_nm]["labels"])
+                    per_epoch_tr_acc[task_nm].append(acc)
 
                 loss.backward()
                 opt.step()
@@ -85,32 +91,41 @@ def simplest_loop(
             # Val
             with torch.no_grad():
 
-                per_epoch_vl_acc = []
+                per_epoch_vl_acc = {task_nm: [] for task_nm in tasks}
                 for instance in tqdm(dev_ds):
                     outputs = predict_fn(**instance)
-                    ner_logits = outputs["ner"]["logits"]
-                    # Can we make the following generalised? So far its too specific to the loop.
-                    ner_labels = instance["ner"]["gold_labels"]
-                    acc = eval_fn(ner_logits, ner_labels)
 
-                    # TODO: write an eval function (somewhere)
-                    per_epoch_vl_acc.append(acc)
+                    for task_nm in instance["tasks"]:
+                        logits = outputs[task_nm]["logits"]
+                        # TODO: make the label puller task specific somehow
+                        labels = instance["ner"]["gold_labels"]
+                        acc = eval_fn(logits, labels)
+
+                        # TODO: write an eval function (somewhere)
+                        per_epoch_vl_acc[task_nm].append(acc)
 
         # Bookkeep
-        train_acc.append(np.mean(per_epoch_tr_acc))
-        train_loss.append(np.mean(per_epoch_loss))
-        valid_acc.append(np.mean(per_epoch_vl_acc))
+        for task_nm in tasks:
+            train_acc[task_nm].append(np.mean(per_epoch_tr_acc[task_nm]))
+            train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
+            valid_acc[task_nm].append(np.mean(per_epoch_vl_acc[task_nm]))
 
-        print(
-            "Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
-            % {
-                "epo": e,
-                "loss": float(np.mean(per_epoch_loss)),
-                "tracc": float(np.mean(per_epoch_tr_acc)),
-                "vlacc": float(np.mean(per_epoch_vl_acc)),
-                "time": timer.interval / 60.0,
-            }
-        )
+        print(f"Epoch: {e:3d}" +
+              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +
+                       f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
+                       f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}" for task_nm in tasks]))
+
+        #
+        # print(
+        #     "Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
+        #     % {
+        #         "epo": e,
+        #         "loss": float(np.mean(per_epoch_loss)),
+        #         "tracc": float(np.mean(per_epoch_tr_acc)),
+        #         "vlacc": float(np.mean(per_epoch_vl_acc)),
+        #         "time": timer.interval / 60.0,
+        #     }
+        # )
 
     return train_acc, valid_acc, train_loss
 
@@ -208,7 +223,7 @@ def run(
         MultiTaskDataset,
         src=dataset,
         config=config,
-        tasks=("ner",),
+        tasks=tasks,
         split="train",
         tokenizer=tokenizer,
     )
@@ -216,11 +231,11 @@ def run(
         MultiTaskDataset,
         src=dataset,
         config=config,
-        tasks=("ner",),
+        tasks=tasks,
         split="development",
         tokenizer=tokenizer,
     )
-    opt = torch.optim.SGD(model.parameters(), lr=0.01)
+    opt = torch.optim.SGD(model.parameters(), lr=0.001)
 
     outputs = simplest_loop(
         epochs=epochs,
@@ -230,6 +245,7 @@ def run(
         predict_fn=model.forward,
         eval_fn=ner,
         opt=opt,
+        tasks=tasks
     )
     print("potato")
 
