@@ -21,6 +21,16 @@ from dataiter import MultiTaskDataset
 from utils.exceptions import BadParameters
 
 
+def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
+    if freeze_encoder:
+        return optimizer_class(
+            [param for name, param in model.named_parameters() if not name.startswith("encoder")],
+            lr=lr
+        )
+    else:
+        return optimizer_class(model.parameters(), lr=lr)
+
+
 def get_pretrained_dirs(nm: str):
     """Check if the given nm is stored locally. If so, load that. Else, pass it on as is."""
     plausible_parent_dir: Path = LOC.root / "models" / "huggingface" / nm
@@ -53,6 +63,9 @@ def simplest_loop(
     train_acc = {task_nm: [] for task_nm in tasks}
     valid_acc = {task_nm: [] for task_nm in tasks}
 
+    # Make data
+    trn_ds, dev_ds = trn_dl(), dev_dl()
+
     # Epoch level
     for e in range(epochs):
 
@@ -62,9 +75,6 @@ def simplest_loop(
 
         # Train
         with Timer() as timer:
-
-            # Make data
-            trn_ds, dev_ds = trn_dl(), dev_dl()
 
             # Train Loop
             for instance in tqdm(trn_ds):
@@ -91,7 +101,6 @@ def simplest_loop(
             # Val
             with torch.no_grad():
 
-                per_epoch_vl_acc = {task_nm: [] for task_nm in tasks}
                 for instance in tqdm(dev_ds):
                     outputs = predict_fn(**instance)
 
@@ -101,7 +110,6 @@ def simplest_loop(
                         labels = instance["ner"]["gold_labels"]
                         acc = eval_fn(logits, labels)
 
-                        # TODO: write an eval function (somewhere)
                         per_epoch_vl_acc[task_nm].append(acc)
 
         # Bookkeep
@@ -115,35 +123,7 @@ def simplest_loop(
                        f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                        f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}" for task_nm in tasks]))
 
-        #
-        # print(
-        #     "Epoch: %(epo)03d | Loss: %(loss).5f | Tr_c: %(tracc)0.5f | Vl_c: %(vlacc)0.5f | Time: %(time).3f min"
-        #     % {
-        #         "epo": e,
-        #         "loss": float(np.mean(per_epoch_loss)),
-        #         "tracc": float(np.mean(per_epoch_tr_acc)),
-        #         "vlacc": float(np.mean(per_epoch_vl_acc)),
-        #         "time": timer.interval / 60.0,
-        #     }
-        # )
-
     return train_acc, valid_acc, train_loss
-
-
-#
-# def loop(model, config, train_dataset, valid_dataset):
-#
-#     inter_epoch_loss = []
-#
-#     for e in range(config.epochs):
-#
-#         intra_epoch_loss = []
-#         for data in tqdm(train_dataset()):
-#
-#             outputs = model.pred_with_labels(**data)
-#
-#             loss = outputs['loss']
-#             intra_epoch_loss.append(loss)
 
 
 @click.command()
@@ -181,13 +161,16 @@ def simplest_loop(
 )
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
+@click.option('--train-encoder', is_flag=True, default=False,
+              help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
 def run(
         dataset: str,
         epochs: int = 10,
         encoder: str = "bert-base-uncased",
         tasks: List[str] = None,
         device: str = "cpu",
-        trim: bool = False
+        trim: bool = False,
+        train_encoder: bool = False
 ):
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
@@ -203,6 +186,7 @@ def run(
     config.device = device
     config.epochs = epochs
     config.trim = trim
+    config.freeze_encoder = not train_encoder
 
     # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
     temp_ds = MultiTaskDataset(
@@ -235,7 +219,12 @@ def run(
         split="development",
         tokenizer=tokenizer,
     )
-    opt = torch.optim.SGD(model.parameters(), lr=0.001)
+
+    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.001, freeze_encoder=config.freeze_encoder)
+    # opt = torch.optim.SGD(model.parameters(), lr=0.001)
+
+    print(config)
+    print("Training commences!")
 
     outputs = simplest_loop(
         epochs=epochs,
