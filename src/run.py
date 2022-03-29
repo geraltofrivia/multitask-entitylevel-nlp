@@ -7,7 +7,7 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 from functools import partial
 from mytorch.utils.goodies import Timer
-from typing import List, Callable, Union
+from typing import List, Callable, Iterable
 
 # Local imports
 try:
@@ -164,12 +164,15 @@ def simplest_loop(
     default=None,
     help="The device to use: cpu, cuda, cuda:0, ...",
 )
+@click.option('--trim', is_flag=True,
+              help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
 def run(
         dataset: str,
         epochs: int = 10,
         encoder: str = "bert-base-uncased",
         tasks: List[str] = None,
         device: str = "cpu",
+        trim: bool = False
 ):
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
@@ -184,8 +187,8 @@ def run(
     config.max_top_antecedents = 50
     config.device = device
     config.epochs = epochs
+    config.trim = trim
 
-    # TODO: need to figure this out: how many classes per dataset.
     # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
     temp_ds = MultiTaskDataset(
         src=dataset,
@@ -197,6 +200,7 @@ def run(
     config.n_classes_ner = deepcopy(temp_ds.ner_tag_dict.__len__())
     del temp_ds
 
+    # Make the model
     model = BasicMTL(dir_encoder, config=config)
 
     # Load the data
