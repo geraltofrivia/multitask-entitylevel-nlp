@@ -27,7 +27,7 @@ class BasicMTL(nn.Module):
         self.n_hid_dim: int = self.config.hidden_size
 
         # Encoder responsible for giving contextual vectors to subword tokens
-        self.encoder = transformers.BertModel.from_pretrained(enc_modelnm)
+        self.encoder = transformers.BertModel.from_pretrained(enc_modelnm).to(config.device)
 
         # Span width embeddings give a fix dim score to width of spans (usually 1 to config.max_span_width (~5))
         self.span_width_embeddings = nn.Embedding(
@@ -604,6 +604,9 @@ class BasicMTL(nn.Module):
             
             Using masked select, we remove the padding tokens from encoded (and corresponding input ids).
         """
+        assert self.encoder.device == input_ids.device == attention_mask.device, \
+            f"encoder: {self.encoder.device}, input_ids: {input_ids.device}, attn_mask: {attention_mask.device}"
+
         encoded = self.encoder(input_ids, attention_mask)[0]  # n_seq, m_len, h_dim
         encoded = encoded.reshape((-1, self.n_hid_dim))  # n_seq * m_len, h_dim
 
