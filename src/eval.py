@@ -12,7 +12,7 @@ def ner_all(logits, labels):
     :param labels: n_spans
     :return: scalar
     """
-    return torch.mean((torch.argmax(logits, dim=1) == labels).float()).item()
+    return torch.mean((torch.argmax(logits, dim=1) == labels).float())
 
 
 def ner_only_annotated(logits, labels):
@@ -25,3 +25,19 @@ def ner_only_annotated(logits, labels):
     return torch.mean(
         (torch.argmax(logits[labels != 0], dim=1) == labels[labels != 0]).float()
     )
+
+
+def ner_span_recog_precision(logits: torch.Tensor, labels: torch.Tensor):
+    """
+        Treat as binary clf. And find proportion of spans which were correctly recognized as being spans (regardless of the label).
+    """
+    _logits = torch.argmax(logits, dim=1)  # n_spans, 1
+    return torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
+
+
+def ner_span_recog_recall(logits: torch.Tensor, labels: torch.Tensor):
+    """
+        Treat as binary clf. And find proportion of spans which were correctly recognized as being spans (regardless of the label).
+    """
+    _logits = torch.argmax(logits, dim=1)  # n_spans, 1
+    return torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((_logits > 0).to(float))

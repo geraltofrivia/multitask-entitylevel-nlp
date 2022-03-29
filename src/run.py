@@ -7,18 +7,18 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 from functools import partial
 from mytorch.utils.goodies import Timer
-from typing import List, Callable, Iterable
+from typing import List, Callable, Iterable, Dict
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from eval import ner_all as ner
 from config import LOCATIONS as LOC
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
 from utils.exceptions import BadParameters
+from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
@@ -49,6 +49,17 @@ def get_pretrained_dirs(nm: str):
         return nm, nm, nm
 
 
+def compute_metrics(metrics: Dict[str, Callable], logits, labels) -> Dict[str, float]:
+    return {metric_nm: metric_fn(logits=logits, labels=labels).item() for metric_nm, metric_fn in metrics.items()}
+
+
+def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
+    for task_nm in inter_epoch.keys():
+        for metric_nm, metric_list in intra_epoch['task_nm'].items():
+            inter_epoch[task_nm][metric_nm].append(np.mean(metric_list))
+    return inter_epoch
+
+
 def simplest_loop(
         epochs: int,
         tasks: Iterable[str],
@@ -57,11 +68,11 @@ def simplest_loop(
         predict_fn: Callable,
         trn_dl: Callable,
         dev_dl: Callable,
-        eval_fn: Callable = None,
+        eval_fns: dict,
 ) -> (list, list, list):
     train_loss = {task_nm: [] for task_nm in tasks}
-    train_acc = {task_nm: [] for task_nm in tasks}
-    valid_acc = {task_nm: [] for task_nm in tasks}
+    train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
+    valid_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
 
     # Make data
     trn_ds, dev_ds = trn_dl(), dev_dl()
@@ -70,8 +81,8 @@ def simplest_loop(
     for e in range(epochs):
 
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
-        per_epoch_tr_acc = {task_nm: [] for task_nm in tasks}
-        per_epoch_vl_acc = {task_nm: [] for task_nm in tasks}
+        per_epoch_tr_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
+        per_epoch_vl_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
 
         # Train
         with Timer() as timer:
@@ -92,8 +103,11 @@ def simplest_loop(
                     per_epoch_loss[task_nm].append(loss.item())
 
                     # TODO: add other metrics here
-                    acc = eval_fn(outputs[task_nm]["logits"], outputs[task_nm]["labels"])
-                    per_epoch_tr_acc[task_nm].append(acc)
+                    instance_metrics = compute_metrics(eval_fns[task_nm],
+                                                       logits=outputs[task_nm]["logits"],
+                                                       labels=outputs[task_nm]["labels"])
+                    for metric_nm, metric_vl in instance_metrics.items():
+                        per_epoch_tr_metrics[task_nm][metric_nm].append(metric_vl)
 
                 loss.backward()
                 opt.step()
@@ -108,22 +122,24 @@ def simplest_loop(
                         logits = outputs[task_nm]["logits"]
                         # TODO: make the label puller task specific somehow
                         labels = instance["ner"]["gold_labels"]
-                        acc = eval_fn(logits, labels)
 
-                        per_epoch_vl_acc[task_nm].append(acc)
+                        instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
+                        for metric_nm, metric_vl in instance_metrics:
+                            per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
 
         # Bookkeep
         for task_nm in tasks:
-            train_acc[task_nm].append(np.mean(per_epoch_tr_acc[task_nm]))
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
-            valid_acc[task_nm].append(np.mean(per_epoch_vl_acc[task_nm]))
+            train_metrics = aggregate_metrics(train_metrics, per_epoch_tr_metrics)
+            valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
 
         print(f"Epoch: {e:3d}" +
-              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +
-                       f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
-                       f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}" for task_nm in tasks]))
+              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" + ''
+                       # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
+                       # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
+                       for task_nm in tasks]))
 
-    return train_acc, valid_acc, train_loss
+    return train_metrics, valid_metrics, train_loss
 
 
 @click.command()
@@ -220,8 +236,20 @@ def run(
         tokenizer=tokenizer,
     )
 
+    # Make the optimizer
     opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.001, freeze_encoder=config.freeze_encoder)
     # opt = torch.optim.SGD(model.parameters(), lr=0.001)
+
+    # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
+    eval_fns = {
+        'ner': {'acc': ner_all,
+                'acc_l': ner_only_annotated,
+                'span_p': ner_span_recog_precision,
+                'span_r': ner_span_recog_recall},
+        'coref': {
+
+        }
+    }
 
     print(config)
     print("Training commences!")
@@ -232,7 +260,7 @@ def run(
         dev_dl=valid_ds,
         train_fn=model.pred_with_labels,
         predict_fn=model.forward,
-        eval_fn=ner,
+        eval_fns=eval_fns,
         opt=opt,
         tasks=tasks
     )
