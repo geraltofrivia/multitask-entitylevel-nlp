@@ -86,7 +86,7 @@ class BasicMTL(nn.Module):
         """
         document_range = (
             torch.arange(
-                start=0, end=hidden_states.shape[0], device=hidden_states.device
+                start=0, end=hidden_states.shape[0], device=self.config.device
             )
                 .unsqueeze(0)
                 .repeat(span_starts.shape[0], 1)
