@@ -62,7 +62,7 @@ class BasicMTL(nn.Module):
             nn.Linear(span_embedding_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, config.n_classes_ner),
+            nn.Linear(config.unary_hdim, config.ner_n_classes),
         ).to(config.device)
 
         # TODO: delete
@@ -71,7 +71,10 @@ class BasicMTL(nn.Module):
         ).to(config.device)
 
         # Losses
-        self.ner_loss = nn.CrossEntropyLoss()
+        if self.config.ner_ignore_weights:
+            self.ner_loss = nn.CrossEntropyLoss()
+        else:
+            self.ner_loss = nn.CrossEntropyLoss(weight=torch.tensor(config.ner_class_weights, device=config.device))
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
@@ -837,7 +840,7 @@ if __name__ == "__main__":
     ds = MultiTaskDataset(
         "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
     )
-    config.n_classes_ner = ds.ner_tag_dict.__len__()
+    config.ner_n_classes = ds.ner_tag_dict.__len__()
 
     # Make the model
     model = BasicMTL("bert-base-uncased", config=config)

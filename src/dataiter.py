@@ -12,6 +12,7 @@ import transformers
 from tqdm.auto import tqdm
 from typing import List, Iterable
 from torch.utils.data import Dataset
+from sklearn.utils import compute_class_weight
 
 # Local imports
 try:
@@ -66,6 +67,15 @@ class MultiTaskDataset(Dataset):
         if self.config.trim:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
             self.data = self.data[:50]
+
+    def estimate_class_weights(self) -> List[float]:
+        """
+            A sense of prior prob of predicting a class, based on the data available.
+            Expect them to be extremely heavily twisted in the case of __na__ of course.
+        """
+        # Create a flat (long, long) list of all labels
+        y = torch.cat([datum['ner']['gold_labels'] for datum in self.data])
+        return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
 
     def write_to_disk(self):
         """

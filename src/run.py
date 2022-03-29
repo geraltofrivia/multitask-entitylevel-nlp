@@ -75,7 +75,8 @@ def simplest_loop(
     valid_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
 
     # Make data
-    trn_ds, dev_ds = trn_dl(), dev_dl()
+    trn_ds = trn_dl()
+    dev_ds = dev_dl()
 
     # Epoch level
     for e in range(epochs):
@@ -185,7 +186,9 @@ def simplest_loop(
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
 @click.option('--train-encoder', is_flag=True, default=False,
-              help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
+              help="If enabled, the BERTish encoder is not frozen but trains also.")
+@click.option('--ner-unweighted', is_flag=True, default=False,
+              help="If True, we do not input priors of classes (estimated from the dev set) into Model -> NER CE loss.")
 def run(
         dataset: str,
         epochs: int = 10,
@@ -193,7 +196,8 @@ def run(
         tasks: List[str] = None,
         device: str = "cpu",
         trim: bool = False,
-        train_encoder: bool = False
+        train_encoder: bool = False,
+        ner_unweighted: bool = False
 ):
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
@@ -210,16 +214,18 @@ def run(
     config.epochs = epochs
     config.trim = trim
     config.freeze_encoder = not train_encoder
+    config.ner_ignore_weights = ner_unweighted
 
     # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
     temp_ds = MultiTaskDataset(
         src=dataset,
         config=config,
         tasks=("ner",),
-        split="train",
+        split="development",
         tokenizer=tokenizer,
     )
-    config.n_classes_ner = deepcopy(temp_ds.ner_tag_dict.__len__())
+    config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
+    config.ner_class_weights = temp_ds.estimate_class_weights()
     del temp_ds
 
     # Make the model
@@ -244,7 +250,7 @@ def run(
     )
 
     # Make the optimizer
-    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.001, freeze_encoder=config.freeze_encoder)
+    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.005, freeze_encoder=config.freeze_encoder)
     # opt = torch.optim.SGD(model.parameters(), lr=0.001)
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
