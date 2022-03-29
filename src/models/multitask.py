@@ -33,7 +33,7 @@ class BasicMTL(nn.Module):
         self.span_width_embeddings = nn.Embedding(
             num_embeddings=config.max_span_width,
             embedding_dim=config.metadata_feature_size,
-        )
+        ).to(config.device)
 
         # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
         self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1)
@@ -49,26 +49,26 @@ class BasicMTL(nn.Module):
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.unary_hdim, 1),
-        )
+        ).to(config.device)
 
         self.binary_coref = nn.Sequential(
             nn.Linear((span_embedding_dim * 3), config.binary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.binary_hdim, 1),
-        )
+        ).to(config.device)
 
         self.unary_ner = nn.Sequential(
             nn.Linear(span_embedding_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.unary_hdim, config.n_classes_ner),
-        )
+        ).to(config.device)
 
         # TODO: delete
         self.fast_antecedent_projection = torch.nn.Linear(
             span_embedding_dim, span_embedding_dim
-        )
+        ).to(config.device)
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
