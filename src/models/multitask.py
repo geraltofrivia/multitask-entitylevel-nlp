@@ -76,7 +76,7 @@ class BasicMTL(nn.Module):
                 self.ner_loss = nn.CrossEntropyLoss()
             else:
                 self.ner_loss = nn.CrossEntropyLoss(weight=torch.tensor(config.ner_class_weights, device=config.device))
-        except AttributeError as e:
+        except AttributeError:
             # Simply put, NER ignore weights has not been defined.
             self.ner_loss = nn.CrossEntropyLoss()
 
@@ -86,7 +86,7 @@ class BasicMTL(nn.Module):
             else:
                 self.pruner_loss = nn.BCEWithLogitsLoss(weight=torch.tensor(config.pruner_class_weights,
                                                                             device=config.device))
-        except AttributeError as e:
+        except AttributeError:
             self.pruner_loss = nn.BCEWithLogitsLoss()
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
@@ -106,10 +106,9 @@ class BasicMTL(nn.Module):
         document_range = (
             torch.arange(
                 start=0, end=hidden_states.shape[0], device=self.config.device
-            )
-                .unsqueeze(0)
-                .repeat(span_starts.shape[0], 1)
+            ).unsqueeze(0).repeat(span_starts.shape[0], 1)
         )  # [num_cand, num_words]
+        # noinspection PyTypeChecker
         token_mask = torch.logical_and(
             document_range >= span_starts.unsqueeze(1),
             document_range <= span_ends.unsqueeze(1),
@@ -162,7 +161,7 @@ class BasicMTL(nn.Module):
     def bucket_distance(distances):
         """
         CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L496
-        Places the given values (designed for distances) into 10 semi-logscale buckets:
+        Places the given values (designed for distances) into 10 semi-logs cale buckets:
         [0, 1, 2, 3, 4, 5-7, 8-15, 16-31, 32-63, 64+].
 
         Parameters
@@ -330,9 +329,9 @@ class BasicMTL(nn.Module):
         top_antecedents_fast_scores = self.batch_gather(
             fast_antecedent_scores, top_antecedents
         )  # [cand, num_ant]
-        top_antecedents_offsets = self.batch_gather(
-            antecedent_offsets, top_antecedents
-        )  # [cand, num_ant]
+        # top_antecedents_offsets = self.batch_gather(
+        #     antecedent_offsets, top_antecedents
+        # )  # [cand, num_ant]
         return top_antecedents, top_antecedents_mask, top_antecedents_fast_scores
 
     @staticmethod
@@ -364,6 +363,7 @@ class BasicMTL(nn.Module):
     # def ner_loss(logits: torch.tensor, labels: torch.tensor):
     #     return torch.nn.functional.nll_loss(input=logits, target=labels)
 
+    # noinspection PyUnusedLocal
     def pruner(
             self,
             n_subwords: int,
@@ -381,18 +381,6 @@ class BasicMTL(nn.Module):
                 3. top_span_ends: same as above ( #top_cand,)
                 4. top_span_scores (if needed) same as above but has logits' values for each selected span ( #top_cand,)
                 5. top_span_emb: candidate span vecs selected based on the beam search thing (#top_cand, span_emb_dim)
-
-        :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
-        :param attention_mask: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
-        :param token_type_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
-        :param sentence_map: list of sentence ID for each subword (excluding padded stuff)
-        :param word_map: list of word ID for each subword (excluding padded stuff)
-        :param n_words: number of words (not subwords) in the original doc
-        :param n_subwords: number of subwords
-        :param candidate_starts: subword ID for candidate span starts
-        :param candidate_ends: subword ID for candidate span ends
-        :param candidate_span_embeddings: encoded repr for each span candidate.  # n_cands, 3*h_dim + meta_dim
-        :param encoded: outputs of the BERT model (after batch based stacking-unstacking is done): # n_words, h_dim
         """
         """
             Step 3: Span Pruning (for Coref)
@@ -416,7 +404,7 @@ class BasicMTL(nn.Module):
 
         # get beam size
         n_top_spans = int(float(n_subwords * self.config.top_span_ratio))
-        n_top_ante = min(self.config.max_top_antecedents, n_top_spans)
+        # n_top_ante = min(self.config.max_top_antecedents, n_top_spans)
 
         # Get top mention scores and sort by span order (avoiding overlaps in selected spans)
         top_span_indices = self.extract_spans(
@@ -429,6 +417,10 @@ class BasicMTL(nn.Module):
         ]  # [top_cand, span_emb]
         top_span_mention_scores = candidate_span_scores[top_span_indices]  # [top_cand]
 
+        # Make another field which is one hot in cand. space, indicating the top_span_indices
+        logits_after_pruning = torch.zeros_like(candidate_starts, device=self.config.device, dtype=torch.float)
+        logits_after_pruning[top_span_indices] = 1
+
         return {
             "logits": candidate_span_scores,
             "top_span_starts": top_span_starts,
@@ -436,9 +428,11 @@ class BasicMTL(nn.Module):
             "top_span_mention_scores": top_span_mention_scores,
             "top_span_emb": top_span_emb,
             "n_top_spans": n_top_spans,
-            "top_span_indices": top_span_indices
+            "top_span_indices": top_span_indices,
+            "logits_after_pruning": logits_after_pruning
         }
 
+    # noinspection PyUnusedLocal
     def coref(
             self,
             encoded: torch.tensor,
@@ -562,7 +556,7 @@ class BasicMTL(nn.Module):
             -1
         )  # [n_ana, n_ante]
 
-        # Dummy scores are set to zero (for reasons explained in Lee et al 2017 e2ecoref)
+        # Dummy scores are set to zero (for reasons explained in Lee et al 2017 e2e coref)
         dummy_scores = torch.zeros(
             [n_top_spans, 1], device=encoded.device
         )  # [n_ana, 1]
@@ -579,19 +573,11 @@ class BasicMTL(nn.Module):
             "top_antecedent_mask": top_antecedents_mask,
         }
 
+    # noinspection PyUnusedLocal
     def ner(
             self,
-            input_ids: torch.tensor,
-            attention_mask: torch.tensor,
-            token_type_ids: torch.tensor,
-            sentence_map: List[int],
-            word_map: List[int],
-            n_words: int,
-            n_subwords: int,
-            candidate_starts: torch.tensor,
-            candidate_ends: torch.tensor,
             candidate_span_embeddings: torch.tensor,
-            encoded: torch.tensor,
+            *args, **kwargs
     ):
         """
         Just a unary classifier over all spans.
@@ -601,6 +587,7 @@ class BasicMTL(nn.Module):
         logits = torch.nn.functional.softmax(logits, dim=1)
         return {"logits": logits}
 
+    # noinspection PyUnusedLocal
     def forward(
             self,
             input_ids: torch.tensor,
@@ -780,9 +767,10 @@ class BasicMTL(nn.Module):
             tasks=tasks,
         )
 
-        if "pruner" in tasks:
+        if "pruner" in tasks or "coref" in tasks:
             # Unpack pruner specific args (y labels)
             pruner_logits = predictions["pruner"]["logits"]
+            pruner_logits_after_pruning = predictions["pruner"]["logits_after_pruning"]
             pruner_labels = pruner["gold_labels"]
 
             pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
@@ -793,18 +781,19 @@ class BasicMTL(nn.Module):
                 f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
         else:
             pruner_loss = None
-            pruner_logits = None
             pruner_labels = None
+            pruner_logits = None
+            pruner_logits_after_pruning = None
 
         if "coref" in tasks:
             # Unpack Coref specific args (y labels)
-            gold_starts = coref["gold_starts"]
-            gold_ends = coref["gold_ends"]
+            # gold_starts = coref["gold_starts"]
+            # gold_ends = coref["gold_ends"]
             gold_cluster_ids_on_candidates = coref["gold_cluster_ids_on_candidates"]
 
             # Unpack Coref specific model predictions
-            top_span_starts = predictions["pruner"]["top_span_starts"]
-            top_span_ends = predictions["pruner"]["top_span_ends"]
+            # top_span_starts = predictions["pruner"]["top_span_starts"]
+            # top_span_ends = predictions["pruner"]["top_span_ends"]
             top_span_indices = predictions["pruner"]["top_span_indices"]
             top_antecedent_scores = predictions["coref"]["top_antecedent_scores"]
             top_antecedent_mask = predictions["coref"]["top_antecedent_mask"]
@@ -878,7 +867,8 @@ class BasicMTL(nn.Module):
             "loss": {"coref": coref_loss, "ner": ner_loss, "pruner": pruner_loss},
             "ner": {"logits": ner_logits, "labels": ner_labels},
             "coref": {"logits": coref_logits, "labels": coref_labels},
-            "pruner": {"logits": pruner_logits, "labels": pruner_labels}
+            "pruner": {"logits": pruner_logits, "labels": pruner_labels,
+                       "logits_after_pruning": pruner_logits_after_pruning}
         }
 
         return outputs

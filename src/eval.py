@@ -15,6 +15,24 @@ def ner_all(logits, labels):
     return torch.mean((torch.argmax(logits, dim=1) == labels).float())
 
 
+def pruner_p(logits, labels):
+    """
+    :param logits: n_spans
+    :param labels: n_spans
+    :return: scalar
+    """
+    return torch.sum((logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
+
+
+def pruner_r(logits, labels):
+    """
+    :param logits: n_spans
+    :param labels: n_spans
+    :return: scalar
+    """
+    return torch.sum((logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((logits > 0).to(float))
+
+
 def ner_only_annotated(logits, labels):
     """
         Only care about the accuracy of spans which are actually annotated in text.

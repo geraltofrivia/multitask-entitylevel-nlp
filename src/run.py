@@ -17,8 +17,8 @@ except ImportError:
 from config import LOCATIONS as LOC
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
-from utils.exceptions import BadParameters
-from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision
+from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision, \
+    pruner_p, pruner_r
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
@@ -107,13 +107,17 @@ def simplest_loop(
                     loss = outputs["loss"][task_nm]
                     per_epoch_loss[task_nm].append(loss.item())
 
-                    # TODO: add other metrics here
+                    # For the pruner task, we don't want "logits" we want "logits_after_pruning"
+                    logits_keynm = "logits" if task_nm != "pruner" else "logits_after_pruning"
                     instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                       logits=outputs[task_nm]["logits"],
+                                                       logits=outputs[task_nm][logits_keynm],
                                                        labels=outputs[task_nm]["labels"])
+
                     for metric_nm, metric_vl in instance_metrics.items():
                         per_epoch_tr_metrics[task_nm][metric_nm].append(metric_vl)
 
+                # TODO: losses need to be mixed!
+                loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
                 loss.backward()
                 opt.step()
 
@@ -124,7 +128,11 @@ def simplest_loop(
                     outputs = forward_fn(**instance)
 
                     for task_nm in instance["tasks"]:
-                        logits = outputs[task_nm]["logits"]
+
+                        # For the pruner task, we don't want "logits" we want "logits_after_pruning"
+                        logits_keynm = "logits" if task_nm != "pruner" else "logits_after_pruning"
+
+                        logits = outputs[task_nm][logits_keynm]
                         labels = outputs[task_nm]["labels"]
 
                         instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
@@ -208,17 +216,19 @@ def run(
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
 
-    # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
-    temp_ds = MultiTaskDataset(
-        src=dataset,
-        config=config,
-        tasks=("ner",),
-        split="development",
-        tokenizer=tokenizer,
-    )
-    config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
-    config.ner_class_weights = temp_ds.estimate_class_weights()
-    del temp_ds
+    if 'ner' in tasks or 'pruner' in tasks:
+        # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
+        temp_ds = MultiTaskDataset(
+            src=dataset,
+            config=config,
+            tasks=tasks,
+            split="development",
+            tokenizer=tokenizer,
+        )
+        config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
+        config.ner_class_weights = temp_ds.estimate_class_weights('ner')
+        config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
+        del temp_ds
 
     # Make the model
     model = BasicMTL(dir_encoder, config=config)
@@ -245,14 +255,16 @@ def run(
     opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.005, freeze_encoder=config.freeze_encoder)
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
-    eval_fns = {
+    eval_fns: Dict[str, Dict[str, Callable]] = {
         'ner': {'acc': ner_all,
                 'acc_l': ner_only_annotated,
                 'span_p': ner_span_recog_precision,
                 'span_r': ner_span_recog_recall},
         'coref': {
 
-        }
+        },
+        'pruner': {'p': pruner_p,
+                   'r': pruner_r}
     }
 
     print(config)

@@ -69,7 +69,7 @@ class MultiTaskDataset(Dataset):
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
             self.data = self.data[:50]
 
-    def estimate_class_weights(self) -> List[float]:
+    def estimate_class_weights(self, task: str) -> List[float]:
         """
             A sense of prior prob of predicting a class, based on the data available.
             Expect them to be extremely heavily twisted in the case of __na__ of course.
@@ -77,7 +77,7 @@ class MultiTaskDataset(Dataset):
         # DEBUG!
         print(len(self.data))
         # Create a flat (long, long) list of all labels
-        y = torch.cat([datum['ner']['gold_labels'] for datum in self.data]).to('cpu')
+        y = torch.cat([datum[task]['gold_labels'] for datum in self.data]).to('cpu')
         return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
 
     def write_to_disk(self):
@@ -311,6 +311,37 @@ class MultiTaskDataset(Dataset):
         ).clamp(0)
 
         return truth
+
+    def process_pruner(
+            self,
+            instance: Document,
+            generic_processed_stuff: dict,
+            coref_processed_stuff: dict
+    ):
+        """
+            Just create a 1/0 vec representing all valid candidates in gold candidate stuff.
+        """
+        # unpack things
+        candidate_starts = generic_processed_stuff["candidate_starts"]
+        candidate_ends = generic_processed_stuff["candidate_ends"]
+        gold_starts = coref_processed_stuff["gold_starts"]
+        gold_ends = coref_processed_stuff["gold_ends"]
+        gold_cluster_ids = coref_processed_stuff["gold_cluster_ids"]
+
+        # replace gold labels with all ones.
+        new_cluster_ids = torch.ones_like(gold_cluster_ids)
+
+        # TODO: put it back up nicely and wrap it along with other tasks
+        # TODO: what to do with dataiter -> does it need info of pruner as well? no, right?
+        gold_labels = self.get_candidate_labels_mangoes(
+            candidate_starts, candidate_ends, gold_starts, gold_ends, new_cluster_ids
+        ).to(float)
+
+        pruner_specific = {  # Pred stuff
+            "gold_labels": gold_labels,
+        }
+
+        return pruner_specific
 
     def process_coref(
             self,
@@ -583,6 +614,11 @@ class MultiTaskDataset(Dataset):
             return_dict["coref"] = self.process_coref(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
+
+            if "pruner" in self._tasks_:
+                return_dict["pruner"] = self.process_pruner(
+                    instance, return_dict, return_dict["coref"]
+                )
 
         if "ner" in self._tasks_:
             return_dict["ner"] = self.process_ner(
