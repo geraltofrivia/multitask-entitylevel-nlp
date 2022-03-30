@@ -120,6 +120,8 @@ def simplest_loop(
                 loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
                 loss.backward()
                 opt.step()
+                del loss
+                del outputs
 
             # Val
             with torch.no_grad():
@@ -138,6 +140,8 @@ def simplest_loop(
                         instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
                         for metric_nm, metric_vl in instance_metrics.items():
                             per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
+
+                    del outputs
 
         # Bookkeep
         for task_nm in tasks:
