@@ -22,9 +22,10 @@ def ner_only_annotated(logits, labels):
     :param labels: n_spans
     :return: scalar
     """
-    return torch.mean(
+    op = torch.mean(
         (torch.argmax(logits[labels != 0], dim=1) == labels[labels != 0]).float()
     )
+    return op
 
 
 def ner_span_recog_precision(logits: torch.Tensor, labels: torch.Tensor):

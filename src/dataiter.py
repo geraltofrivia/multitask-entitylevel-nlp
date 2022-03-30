@@ -21,6 +21,7 @@ except ImportError:
     from . import _pathfix
 from utils.nlp import to_toks, match_subwords_to_words
 from config import LOCATIONS as LOC, NPRSEED
+from utils.warnings import NoValidAnnotations
 from utils.data import Document
 
 np.random.seed(NPRSEED)
@@ -166,7 +167,14 @@ class MultiTaskDataset(Dataset):
         return self.data[item]
 
     def process(self):
-        self.data = [self.process_document_generic(datum) for datum in tqdm(self.data)]
+        self.data = []
+        for datum in tqdm(self.data):
+            try:
+                self.data.append(self.process_document_generic(datum))
+            except NoValidAnnotations:
+                # Maybe due to the way spans are generated, this instance has no valid annotations
+                # ### for one of the tasks we want to extract from it. We ignore this instance.
+                continue
 
     def handle_replacements(self, tokens: List[str]) -> List[str]:
         return [self.replacements.get(tok, tok) for tok in tokens]
@@ -416,6 +424,10 @@ class MultiTaskDataset(Dataset):
             "gold_ends": gold_ends,
             "gold_labels": gold_labels,
         }
+
+        # Finally, check if gold_labels are empty (maybe all spans are larger than max span width or something)
+        if gold_labels.nonzero().shape[0] == 0:
+            raise NoValidAnnotations("NER")
 
         return ner_specific
 
