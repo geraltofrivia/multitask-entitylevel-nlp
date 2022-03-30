@@ -70,11 +70,24 @@ class BasicMTL(nn.Module):
             span_embedding_dim, span_embedding_dim
         ).to(config.device)
 
-        # Losses
-        if self.config.ner_ignore_weights:
+        # Initialising Losses
+        try:
+            if self.config.ner_ignore_weights:
+                self.ner_loss = nn.CrossEntropyLoss()
+            else:
+                self.ner_loss = nn.CrossEntropyLoss(weight=torch.tensor(config.ner_class_weights, device=config.device))
+        except AttributeError as e:
+            # Simply put, NER ignore weights has not been defined.
             self.ner_loss = nn.CrossEntropyLoss()
-        else:
-            self.ner_loss = nn.CrossEntropyLoss(weight=torch.tensor(config.ner_class_weights, device=config.device))
+
+        try:
+            if self.config.pruner_ignore_weights:
+                self.pruner_loss = nn.BCEWithLogitsLoss()
+            else:
+                self.pruner_loss = nn.BCEWithLogitsLoss(weight=torch.tensor(config.pruner_class_weights,
+                                                                            device=config.device))
+        except AttributeError as e:
+            self.pruner_loss = nn.BCEWithLogitsLoss()
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
@@ -353,23 +366,18 @@ class BasicMTL(nn.Module):
 
     def pruner(
             self,
-            input_ids: torch.tensor,
-            attention_mask: torch.tensor,
-            token_type_ids: torch.tensor,
-            sentence_map: List[int],
-            word_map: List[int],
-            n_words: int,
             n_subwords: int,
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
             candidate_span_embeddings: torch.tensor,
-            encoded: torch.tensor,
+            *args, **kwargs
     ):
         """
             This takes span repr vectors and passes them through a unary classifier, scores them and returns
                 1. logits - score for every span ( #n_cand, )
-                2. top_span_starts: based on num of selected spans  ( #top_cand,)
+                1. top_span_indices: based on num of selected spans  ( #top_cand,)
                     (beam search based on candidates and overlaps and shit)
+                2. top_span_starts: indices imposed on original candidate span starts ( #top_cand,)
                 3. top_span_ends: same as above ( #top_cand,)
                 4. top_span_scores (if needed) same as above but has logits' values for each selected span ( #top_cand,)
                 5. top_span_emb: candidate span vecs selected based on the beam search thing (#top_cand, span_emb_dim)
@@ -426,7 +434,9 @@ class BasicMTL(nn.Module):
             "top_span_starts": top_span_starts,
             "top_span_ends": top_span_ends,
             "top_span_mention_scores": top_span_mention_scores,
-            "top_span_emb": top_span_emb
+            "top_span_emb": top_span_emb,
+            "n_top_spans": n_top_spans,
+            "top_span_indices": top_span_indices
         }
 
     def coref(
@@ -668,8 +678,7 @@ class BasicMTL(nn.Module):
             "ner": None,
         }
 
-        if "coref" in tasks:
-            # First do the pruning
+        if "coref" in tasks or "pruner" in tasks:
             pruner_op = self.pruner(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
@@ -685,13 +694,14 @@ class BasicMTL(nn.Module):
             )
             return_dict['pruner'] = pruner_op
 
-            coref_op = self.coref(
-                encoded=encoded,
-                top_span_emb=pruner_op['top_span_emb'],
-                top_span_mention_scores=pruner_op['top_span_mention_scores'],
-                n_top_spans=pruner_op['n_top_spans']
-            )
-            return_dict["coref"] = coref_op
+            if "coref" in tasks:
+                coref_op = self.coref(
+                    encoded=encoded,
+                    top_span_emb=pruner_op['top_span_emb'],
+                    top_span_mention_scores=pruner_op['top_span_mention_scores'],
+                    n_top_spans=pruner_op['n_top_spans']
+                )
+                return_dict["coref"] = coref_op
 
         if "ner" in tasks:
             ner_op = self.ner(
@@ -725,6 +735,7 @@ class BasicMTL(nn.Module):
             tasks: Iterable[str],
             coref: dict = None,
             ner: dict = None,
+            pruner: dict = None
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -750,7 +761,11 @@ class BasicMTL(nn.Module):
         It is expected to be there if 'ner' is a element in arg "tasks"
         Specifically:
             gold_labels: one label corresponding to every candidate span generated.
-
+        :param pruner: a dict containing gold annotations for Pruner submodule for this document.
+        Specifically:
+            gold_labels: 0/1 arr indicating which of all the candidate spans are named entities
+                which are coreferent (in the case of ontonotes),
+                or just valid mentions (singletons + coreferent) for other datasets.
         """
         predictions = self.forward(
             input_ids=input_ids,
@@ -766,7 +781,20 @@ class BasicMTL(nn.Module):
         )
 
         if "pruner" in tasks:
-            ...
+            # Unpack pruner specific args (y labels)
+            pruner_logits = predictions["pruner"]["logits"]
+            pruner_labels = pruner["gold_labels"]
+
+            pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
+
+            assert not torch.isnan(pruner_loss), \
+                f"Found nan in loss. Here are some details - \n\tLogits shape: {pruner_logits.shape}, " \
+                f"\n\tLabels shape: {pruner_labels.shape}, " \
+                f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
+        else:
+            pruner_loss = None
+            pruner_logits = None
+            pruner_labels = None
 
         if "coref" in tasks:
             # Unpack Coref specific args (y labels)
@@ -774,21 +802,22 @@ class BasicMTL(nn.Module):
             gold_ends = coref["gold_ends"]
             gold_cluster_ids_on_candidates = coref["gold_cluster_ids_on_candidates"]
 
-            # TODO: pruner specific predictions here
-
             # Unpack Coref specific model predictions
-            top_span_starts = predictions["top_span_starts"]
-            top_span_ends = predictions["top_span_ends"]
-            top_span_indices = predictions["top_span_indices"]
-            top_antecedent_scores = predictions["top_antecedent_scores"]
-            top_antecedent_mask = predictions["top_antecedent_mask"]
+            top_span_starts = predictions["pruner"]["top_span_starts"]
+            top_span_ends = predictions["pruner"]["top_span_ends"]
+            top_span_indices = predictions["pruner"]["top_span_indices"]
+            top_antecedent_scores = predictions["coref"]["top_antecedent_scores"]
+            top_antecedent_mask = predictions["coref"]["top_antecedent_mask"]
 
             # Some minor post processing.
             top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
 
+            # Now you have a notion of which are the likeliest antecedents for every given anaphor (sorted by scores).
             top_antecedent_indices = torch.argsort(
                 top_antecedent_scores, descending=True
             )
+
+            # TODO: understand here onwards
             top_antecedent_cluster_ids = top_span_cluster_ids[
                 top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
             ]
@@ -821,9 +850,13 @@ class BasicMTL(nn.Module):
             )  # [top_cand]
             coref_loss = torch.sum(coref_loss)
 
-            predictions["loss"] = coref_loss
+            # predictions["loss"] = coref_loss
+            coref_logits = top_antecedent_scores
+            coref_labels = top_antecedent_labels
         else:
             coref_loss = None
+            coref_labels = None
+            coref_logits = None
 
         if "ner" in tasks:
             ner_labels = ner["gold_labels"]  # n_spans, 1
@@ -836,17 +869,16 @@ class BasicMTL(nn.Module):
                 f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
                 f"\n\tLabels shape: {ner_labels.shape}, " \
                 f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
-
-
         else:
             ner_loss = None
             ner_logits = None
             ner_labels = None
 
         outputs = {
-            "loss": {"coref": coref_loss, "ner": ner_loss},
-            "ner": {"logits": ner_logits, "labels": ner_labels}
-            # TODO: add coref things here also
+            "loss": {"coref": coref_loss, "ner": ner_loss, "pruner": pruner_loss},
+            "ner": {"logits": ner_logits, "labels": ner_labels},
+            "coref": {"logits": coref_logits, "labels": coref_labels},
+            "pruner": {"logits": pruner_logits, "labels": pruner_labels}
         }
 
         return outputs

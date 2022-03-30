@@ -50,7 +50,8 @@ def get_pretrained_dirs(nm: str):
 
 
 def compute_metrics(metrics: Dict[str, Callable], logits, labels) -> Dict[str, float]:
-    return {metric_nm: metric_fn(logits=logits, labels=labels).item() for metric_nm, metric_fn in metrics.items()}
+    return {metric_nm: metric_fn(logits=logits, labels=labels).cpu().detach().item()
+            for metric_nm, metric_fn in metrics.items()}
 
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
