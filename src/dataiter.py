@@ -59,7 +59,7 @@ class MultiTaskDataset(Dataset):
         ) = self.load_from_disk(rebuild_cache)
 
         if not flag_successfully_pulled_from_disk:
-            self.data = RawDataset(
+            self.dataset = RawDataset(
                 src=src, split=split, tasks=self._tasks_, shuffle=shuffle
             )
             self.process()
@@ -74,6 +74,8 @@ class MultiTaskDataset(Dataset):
             A sense of prior prob of predicting a class, based on the data available.
             Expect them to be extremely heavily twisted in the case of __na__ of course.
         """
+        # DEBUG!
+        print(len(self.data))
         # Create a flat (long, long) list of all labels
         y = torch.cat([datum['ner']['gold_labels'] for datum in self.data]).to('cpu')
         return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
@@ -168,13 +170,15 @@ class MultiTaskDataset(Dataset):
 
     def process(self):
         self.data = []
-        for datum in tqdm(self.data):
+        for datum in tqdm(self.dataset):
             try:
                 self.data.append(self.process_document_generic(datum))
             except NoValidAnnotations:
                 # Maybe due to the way spans are generated, this instance has no valid annotations
                 # ### for one of the tasks we want to extract from it. We ignore this instance.
                 continue
+
+        del self.dataset
 
     def handle_replacements(self, tokens: List[str]) -> List[str]:
         return [self.replacements.get(tok, tok) for tok in tokens]
