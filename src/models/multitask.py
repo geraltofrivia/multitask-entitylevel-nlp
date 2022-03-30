@@ -192,9 +192,8 @@ class BasicMTL(nn.Module):
         start_to_latest_end = {}
         selected_spans = []
         current_span_index = 0
-        while len(
-                selected_spans
-        ) < num_top_mentions and current_span_index < candidate_starts.size(0):
+        while len(selected_spans) < num_top_mentions and \
+                current_span_index < candidate_starts.size(0):
             ind = top_span_indices[current_span_index]
             any_crossing = False
             cand_start = candidate_starts[ind].item()
@@ -352,7 +351,7 @@ class BasicMTL(nn.Module):
     # def ner_loss(logits: torch.tensor, labels: torch.tensor):
     #     return torch.nn.functional.nll_loss(input=logits, target=labels)
 
-    def coref(
+    def pruner(
             self,
             input_ids: torch.tensor,
             attention_mask: torch.tensor,
@@ -367,6 +366,14 @@ class BasicMTL(nn.Module):
             encoded: torch.tensor,
     ):
         """
+            This takes span repr vectors and passes them through a unary classifier, scores them and returns
+                1. logits - score for every span ( #n_cand, )
+                2. top_span_starts: based on num of selected spans  ( #top_cand,)
+                    (beam search based on candidates and overlaps and shit)
+                3. top_span_ends: same as above ( #top_cand,)
+                4. top_span_scores (if needed) same as above but has logits' values for each selected span ( #top_cand,)
+                5. top_span_emb: candidate span vecs selected based on the beam search thing (#top_cand, span_emb_dim)
+
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
         :param attention_mask: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
         :param token_type_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -376,11 +383,9 @@ class BasicMTL(nn.Module):
         :param n_subwords: number of subwords
         :param candidate_starts: subword ID for candidate span starts
         :param candidate_ends: subword ID for candidate span ends
-
+        :param candidate_span_embeddings: encoded repr for each span candidate.  # n_cands, 3*h_dim + meta_dim
+        :param encoded: outputs of the BERT model (after batch based stacking-unstacking is done): # n_words, h_dim
         """
-
-        # Step 1 and Step 2 are performed inside model.forward
-
         """
             Step 3: Span Pruning (for Coref)
             
@@ -393,6 +398,9 @@ class BasicMTL(nn.Module):
                 or we keep antecedents proportional to doc length (say 40% of doc length) 
                 if we have under 50 antecedents to begin with 
         """
+        # TODO: some gold stuff
+        # TODO: some meta stuff
+
         # For Coref task, we pass the span embeddings through the span pruner
         # n_cands
         candidate_span_scores = self.unary_coref(candidate_span_embeddings).squeeze(1)
@@ -413,12 +421,25 @@ class BasicMTL(nn.Module):
         ]  # [top_cand, span_emb]
         top_span_mention_scores = candidate_span_scores[top_span_indices]  # [top_cand]
 
-        # TODO: some gold stuff
-        # TODO: some meta stuff
+        return {
+            "logits": candidate_span_scores,
+            "top_span_starts": top_span_starts,
+            "top_span_ends": top_span_ends,
+            "top_span_mention_scores": top_span_mention_scores,
+            "top_span_emb": top_span_emb
+        }
 
-        opp = self.coarse_to_fine_pruning(
-            top_span_emb, top_span_mention_scores, self.config.max_top_antecedents
-        )
+    def coref(
+            self,
+            encoded: torch.tensor,
+            top_span_emb: torch.tensor,
+            top_span_mention_scores: torch.tensor,
+            n_top_spans: int,
+            *args, **kwargs
+    ):
+        # opp = self.coarse_to_fine_pruning(
+        #     top_span_emb, top_span_mention_scores, self.config.max_top_antecedents
+        # )
 
         """
             Step 4: Filtering antecedents for each anaphor
@@ -472,7 +493,7 @@ class BasicMTL(nn.Module):
         # We further need to clamp them to k.
         # For that, we just crop top_antecedents_per_ana_ind
         top_antecedents_per_ana_ind = top_antecedents_per_ana_ind[
-                                      :, : config.max_top_antecedents
+                                      :, : self.config.max_top_antecedents
                                       ]  # [n_ana, n_ante]
         # # Below is garbage, ignore
         # # For that, a simple col mul. will suffice
@@ -520,7 +541,7 @@ class BasicMTL(nn.Module):
             1
         )  # [n_ana, n_ante, span_emb]
         anaphor_emb = top_span_emb.unsqueeze(1).repeat(
-            1, config.max_top_antecedents, 1
+            1, self.config.max_top_antecedents, 1
         )  # [n_ana, n_ante, span_emb]
         pair_emb = torch.cat(
             [anaphor_emb, top_antecedents_per_ana_emb, similarity_emb], 2
@@ -544,9 +565,6 @@ class BasicMTL(nn.Module):
 
         # Now we just return them.top_antecedents_per_ana_emb
         return {
-            "top_span_starts": top_span_starts,
-            "top_span_ends": top_span_ends,
-            "top_span_indices": top_span_indices,
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
         }
@@ -651,7 +669,8 @@ class BasicMTL(nn.Module):
         }
 
         if "coref" in tasks:
-            coref_op = self.coref(
+            # First do the pruning
+            pruner_op = self.pruner(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,
@@ -662,7 +681,15 @@ class BasicMTL(nn.Module):
                 candidate_starts=candidate_starts,
                 candidate_ends=candidate_ends,
                 candidate_span_embeddings=candidate_span_embeddings,
+                encoded=encoded
+            )
+            return_dict['pruner'] = pruner_op
+
+            coref_op = self.coref(
                 encoded=encoded,
+                top_span_emb=pruner_op['top_span_emb'],
+                top_span_mention_scores=pruner_op['top_span_mention_scores'],
+                n_top_spans=pruner_op['n_top_spans']
             )
             return_dict["coref"] = coref_op
 
@@ -738,11 +765,16 @@ class BasicMTL(nn.Module):
             tasks=tasks,
         )
 
+        if "pruner" in tasks:
+            ...
+
         if "coref" in tasks:
             # Unpack Coref specific args (y labels)
             gold_starts = coref["gold_starts"]
             gold_ends = coref["gold_ends"]
             gold_cluster_ids_on_candidates = coref["gold_cluster_ids_on_candidates"]
+
+            # TODO: pruner specific predictions here
 
             # Unpack Coref specific model predictions
             top_span_starts = predictions["top_span_starts"]

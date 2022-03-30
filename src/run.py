@@ -64,7 +64,7 @@ def simplest_loop(
         epochs: int,
         tasks: Iterable[str],
         opt: torch.optim,
-        train_fn: Callable,
+        forward_fn: Callable,
         predict_fn: Callable,
         trn_dl: Callable,
         dev_dl: Callable,
@@ -95,7 +95,7 @@ def simplest_loop(
                 opt.zero_grad()
 
                 # Forward Pass
-                outputs = train_fn(**instance)
+                outputs = forward_fn(**instance)
 
                 """
                     Depending on instance.tasks list, do the following:
@@ -120,12 +120,11 @@ def simplest_loop(
             with torch.no_grad():
 
                 for instance in tqdm(dev_ds):
-                    outputs = predict_fn(**instance)
+                    outputs = forward_fn(**instance)
 
                     for task_nm in instance["tasks"]:
                         logits = outputs[task_nm]["logits"]
-                        # TODO: make the label puller task specific somehow
-                        labels = instance["ner"]["gold_labels"]
+                        labels = outputs[task_nm]["labels"]
 
                         instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
                         for metric_nm, metric_vl in instance_metrics.items():
@@ -151,17 +150,9 @@ def simplest_loop(
 
 
 @click.command()
-@click.option(
-    "--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc"
-)
-@click.option(
-    "--tasks",
-    "-t",
-    type=str,
-    default=None,
-    multiple=True,
-    help="Multiple values are okay e.g. -t coref -t ner or just one of these",
-)
+@click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
+@click.option("--tasks", "-t", type=str, default=None, multiple=True,
+              help="Multiple values are okay e.g. -t coref -t ner or just one of these", )
 @click.option(
     "--encoder",
     "-enc",
@@ -251,7 +242,6 @@ def run(
 
     # Make the optimizer
     opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.005, freeze_encoder=config.freeze_encoder)
-    # opt = torch.optim.SGD(model.parameters(), lr=0.001)
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
     eval_fns = {
@@ -271,7 +261,7 @@ def run(
         epochs=epochs,
         trn_dl=train_ds,
         dev_dl=valid_ds,
-        train_fn=model.pred_with_labels,
+        forward_fn=model.pred_with_labels,
         predict_fn=model.forward,
         eval_fns=eval_fns,
         opt=opt,

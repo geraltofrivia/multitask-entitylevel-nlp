@@ -617,7 +617,7 @@ class RawDataset(Dataset):
 
         # Sanity check params
         for task in tasks:
-            if task not in ["coref", "ner", "ner_spacy"]:
+            if task not in ["coref", "ner", "ner_spacy", "pruner"]:
                 raise AssertionError(
                     f"An unrecognized task name sent: {task}. "
                     "So far, we work with 'coref', 'ner', 'ner_spacy'."
