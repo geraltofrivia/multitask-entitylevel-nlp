@@ -146,7 +146,7 @@ def training_loop(
                 # Try to plug mem leaks
                 del loss
                 del outputs
-                del instance
+                # del instance
 
             # Val
             with torch.no_grad():
@@ -173,7 +173,7 @@ def training_loop(
 
                     # Try to plug mem leaks
                     del outputs
-                    del instance
+                    # del instance
 
             del trn_ds, dev_ds
 
