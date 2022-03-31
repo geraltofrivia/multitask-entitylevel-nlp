@@ -167,6 +167,9 @@ class MultiTaskDataset(Dataset):
     def __getitem__(self, item):
         return self.data[item]
 
+    def __setitem__(self, i, item):
+        self.data[i] = item
+
     def process(self):
         self.data = []
         for datum in tqdm(self.dataset):
