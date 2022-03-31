@@ -1,5 +1,6 @@
 import click
 import torch
+import warnings
 import numpy as np
 import transformers
 from pathlib import Path
@@ -7,7 +8,7 @@ from copy import deepcopy
 from tqdm.auto import tqdm
 from functools import partial
 from mytorch.utils.goodies import Timer
-from typing import List, Callable, Iterable, Dict
+from typing import List, Callable, Iterable, Dict, Union
 
 # Local imports
 try:
@@ -61,12 +62,23 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
     return inter_epoch
 
 
-def simplest_loop(
+def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
+    """ Go through every k, v in a dict and change its device (make it recursive) """
+    for k, v in instance.items():
+        if type(v) is torch.Tensor:
+            instance[k] = v.to(device)
+        elif type(v) is dict:
+            instance[k] = change_device(v, device)
+
+    return instance
+
+
+def training_loop(
         epochs: int,
         tasks: Iterable[str],
         opt: torch.optim,
         forward_fn: Callable,
-        predict_fn: Callable,
+        device: Union[str, torch.device],
         trn_dl: Callable,
         dev_dl: Callable,
         eval_fns: dict,
@@ -75,12 +87,12 @@ def simplest_loop(
     train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
     valid_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
 
-    # Make data
-    trn_ds = trn_dl()
-    dev_ds = dev_dl()
-
     # Epoch level
     for e in range(epochs):
+
+        # Make data
+        trn_ds = trn_dl()
+        dev_ds = dev_dl()
 
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
         per_epoch_tr_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
@@ -90,10 +102,20 @@ def simplest_loop(
         with Timer() as timer:
 
             # Train Loop
-            for instance in tqdm(trn_ds):
+            for i, instance in tqdm(enumerate(trn_ds)):
 
                 # Reset the gradients.
                 opt.zero_grad()
+
+                # Move all input tensors to the right devices
+                instance = change_device(instance, device)
+
+                # DEBUG
+                # if instance['candidate_starts'].shape[0] > 15000:
+                #     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
+                #                   f"Input: {instance['input_ids'].shape}.
+                #                   Spans: {instance['candidate_starts'].shape}")
+                #     continue
 
                 # Forward Pass
                 outputs = forward_fn(**instance)
@@ -120,13 +142,21 @@ def simplest_loop(
                 loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
                 loss.backward()
                 opt.step()
+
+                # Try to plug mem leaks
                 del loss
                 del outputs
+                del instance
 
             # Val
             with torch.no_grad():
 
                 for instance in tqdm(dev_ds):
+
+                    # Move the instance to the right device
+                    instance = change_device(instance, device)
+
+                    # Forward Pass
                     outputs = forward_fn(**instance)
 
                     for task_nm in instance["tasks"]:
@@ -141,7 +171,11 @@ def simplest_loop(
                         for metric_nm, metric_vl in instance_metrics.items():
                             per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
 
+                    # Try to plug mem leaks
                     del outputs
+                    del instance
+
+            del trn_ds, dev_ds
 
         # Bookkeep
         for task_nm in tasks:
@@ -150,14 +184,14 @@ def simplest_loop(
             valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
 
         print(f"\nEpoch: {e:3d}" +
-              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +
-                       ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                for metric_nm, metric_vls in train_metrics[task_nm].items()]) +
-                       ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                for metric_nm, metric_vls in valid_metrics[task_nm].items()])
-                       # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
-                       # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
-                       for task_nm in tasks]))
+              '\n'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +
+                         ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                  for metric_nm, metric_vls in train_metrics[task_nm].items()]) +
+                         ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                  for metric_nm, metric_vls in valid_metrics[task_nm].items()])
+                         # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
+                         # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
+                         for task_nm in tasks]))
 
     return train_metrics, valid_metrics, train_loss
 
@@ -229,9 +263,11 @@ def run(
             split="development",
             tokenizer=tokenizer,
         )
-        config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
-        config.ner_class_weights = temp_ds.estimate_class_weights('ner')
-        config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
+        if 'ner' in tasks:
+            config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
+            config.ner_class_weights = temp_ds.estimate_class_weights('ner')
+        if 'pruner' in tasks:
+            config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
         del temp_ds
 
     # Make the model
@@ -274,7 +310,7 @@ def run(
     print(config)
     print("Training commences!")
 
-    outputs = simplest_loop(
+    outputs = training_loop(
         epochs=epochs,
         trn_dl=train_ds,
         dev_dl=valid_ds,

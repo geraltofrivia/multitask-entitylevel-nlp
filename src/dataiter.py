@@ -38,6 +38,18 @@ class MultiTaskDataset(Dataset):
             tasks: Iterable[str] = (),
             rebuild_cache: bool = False,
     ):
+        """
+            Important thing to note is:
+                - it will never move tensors to GPU. Will always stick to CPU (so that we dont have a mem leak).
+                - ideally you should delete the Dataset and make a new one every time you start a new epoch.
+        :param src:
+        :param split:
+        :param config:
+        :param tokenizer:
+        :param shuffle:
+        :param tasks:
+        :param rebuild_cache:
+        """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
@@ -139,20 +151,7 @@ class MultiTaskDataset(Dataset):
                 and self.config.hidden_size == old_config.hidden_size
                 and self.config.max_span_width == old_config.max_span_width
         ):
-            # Convert every tensor to the right device
-            for i, datum in enumerate(data):
-                for k, v in datum.items():
-                    if type(v) is torch.Tensor:
-                        datum[k] = v.to(self.config.device)
-                    elif type(v) is dict:
-                        for _k, _v in v.items():
-                            if type(_v) is torch.Tensor:
-                                datum[k][_k] = _v.to(self.config.device)
-                    else:
-                        ...
-
             print(f"Pulled {len(data)} instances from {dump_fname}.")
-
             return data, True
         else:
             warnings.warn(
@@ -284,7 +283,7 @@ class MultiTaskDataset(Dataset):
         truth = torch.zeros(
             (candidate_starts.shape[0], candidate_starts.shape[0]),
             dtype=torch.long,
-            device=candidate_starts.device,
+            device='cpu',
         )
 
         for cluster_id in range(1, 1 + torch.max(labels).item()):
@@ -369,7 +368,7 @@ class MultiTaskDataset(Dataset):
                     for span in cluster
                 ],
                 dtype=torch.long,
-                device=self.config.device,
+                device="cpu",
             )  # n_gold
             gold_ends = torch.tensor(
                 [
@@ -378,7 +377,7 @@ class MultiTaskDataset(Dataset):
                     for span in cluster
                 ],
                 dtype=torch.long,
-                device=self.config.device,
+                device="cpu",
             )  # n_gold
         except KeyError as e:
             raise KeyError(
@@ -395,7 +394,7 @@ class MultiTaskDataset(Dataset):
                         for _ in range(len(cluster))
                     ],
                     dtype=torch.long,
-                    device=self.config.device,
+                    device="cpu",
                 )
                 + 1
         )  # n_gold
@@ -431,12 +430,12 @@ class MultiTaskDataset(Dataset):
         gold_starts = torch.tensor(
             [word2subword_starts[span[0]] for span in instance.ner.spans],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )  # n_gold
         gold_ends = torch.tensor(
             [word2subword_ends[span[1] - 1] for span in instance.ner.spans],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )
         gold_labels = []
         for tag in instance.ner.tags:
@@ -444,7 +443,7 @@ class MultiTaskDataset(Dataset):
                 raise AssertionError(f"Tag {tag} not found in Tag dict!")
             gold_labels.append(self.ner_tag_dict[tag])
         gold_labels = torch.tensor(
-            gold_labels, dtype=torch.long, device=self.config.device
+            gold_labels, dtype=torch.long, device="cpu"
         )
 
         # Now to superimpose this tensor on the candidate space.
@@ -519,19 +518,19 @@ class MultiTaskDataset(Dataset):
         wordid_for_subword = torch.tensor(
             [subword2word[subword_id] for subword_id in range(n_subwords)],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )
         sentid_for_subword = torch.tensor(
             [instance.sentence_map[word_id] for word_id in wordid_for_subword],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )
         # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
         #                                          for word_id in range(len(word2subword_starts))],
-        #                                         dtype=torch.long, device=self.config.device)
+        #                                         dtype=torch.long, device="cpu")
         # subwordid_for_word_end = torch.tensor([word2subword_ends[word_id]
         #                                        for word_id in range(len(word2subword_ends))],
-        #                                       dtype=torch.long, device=self.config.device)
+        #                                       dtype=torch.long, device="cpu")
 
         # 1 marks that the index is a start of a new token, 0 marks that it is not.
         word_startmap_subword = wordid_for_subword != torch.roll(wordid_for_subword, 1)
@@ -550,12 +549,12 @@ class MultiTaskDataset(Dataset):
         """
 
         candidate_starts = (
-            torch.arange(start=0, end=n_subwords, device=self.config.device)
+            torch.arange(start=0, end=n_subwords, device="cpu")
                 .unsqueeze(1)
                 .repeat(1, self.config.max_span_width)
         )  # n_subwords, max_span_width
         candidate_ends = candidate_starts + torch.arange(
-            start=0, end=self.config.max_span_width, device=self.config.device
+            start=0, end=self.config.max_span_width, device="cpu"
         ).unsqueeze(
             0
         )  # n_subwords, max_span_width
