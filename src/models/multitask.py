@@ -665,6 +665,11 @@ class BasicMTL(nn.Module):
             "ner": None,
         }
 
+        # DEBUG
+        if candidate_span_embeddings.isnan().any():
+            raise AssertionError(f"Found {candidate_span_embeddings.isnan().float().sum()} nans in Can Span Emb!"
+                                 f"\n\tAt this point there are {encoded.isnan().float().sum()} nans in encoded.")
+
         if "coref" in tasks or "pruner" in tasks:
             pruner_op = self.pruner(
                 input_ids=input_ids,
@@ -775,10 +780,14 @@ class BasicMTL(nn.Module):
 
             pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
 
-            assert not torch.isnan(pruner_loss), \
-                f"Found nan in loss. Here are some details - \n\tLogits shape: {pruner_logits.shape}, " \
-                f"\n\tLabels shape: {pruner_labels.shape}, " \
-                f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
+            # DEBUG
+            try:
+                assert not torch.isnan(pruner_loss), \
+                    f"Found nan in loss. Here are some details - \n\tLogits shape: {pruner_logits.shape}, " \
+                    f"\n\tLabels shape: {pruner_labels.shape}, " \
+                    f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
+            except AssertionError:
+                print('potato')
         else:
             pruner_loss = None
             pruner_labels = None

@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from copy import deepcopy
 from tqdm.auto import tqdm
 from mytorch.utils.goodies import Timer
 from typing import Iterable, Callable, Union, Dict
@@ -37,6 +38,14 @@ def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
     return instance
 
 
+def weighted_addition_losses(losses, tasks, scales):
+    # Sort the tasks
+    tasks = sorted(deepcopy(tasks))
+    stacked = torch.hstack([losses[task_nm] for task_nm in tasks])
+    weighted = stacked * scales
+    return torch.sum(weighted)
+
+
 def training_loop(
         epochs: int,
         tasks: Iterable[str],
@@ -46,6 +55,7 @@ def training_loop(
         trn_dl: Callable,
         dev_dl: Callable,
         eval_fns: dict,
+        loss_scales: np.ndarray
 ) -> (list, list, list):
     train_loss = {task_nm: [] for task_nm in tasks}
     train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
@@ -103,7 +113,8 @@ def training_loop(
                         per_epoch_tr_metrics[task_nm][metric_nm].append(metric_vl)
 
                 # TODO: losses need to be mixed!
-                loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
+                # loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
+                loss = weighted_addition_losses(outputs["losses"], tasks, loss_scales)
                 loss.backward()
                 opt.step()
 

@@ -1,10 +1,11 @@
+import wandb
 import click
 import torch
 import transformers
 from pathlib import Path
 from copy import deepcopy
 from functools import partial
-from typing import List, Callable, Dict
+from typing import List, Callable, Dict, Iterable
 
 # Local imports
 try:
@@ -12,7 +13,7 @@ try:
 except ImportError:
     from . import _pathfix
 from loops import training_loop
-from config import LOCATIONS as LOC
+from config import LOCATIONS as LOC, CONFIG
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
 from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision, \
@@ -47,6 +48,11 @@ def get_pretrained_dirs(nm: str):
         return nm, nm, nm
 
 
+def pick_loss_scale(options: dict, tasks: Iterable[str]):
+    key = 'loss_scales_' + '_'.join(sorted(tasks))
+    return options[key]
+
+
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
 @click.option("--tasks", "-t", type=str, default=None, multiple=True,
@@ -78,9 +84,12 @@ def get_pretrained_dirs(nm: str):
               help="If enabled, the BERTish encoder is not frozen but trains also.")
 @click.option('--ner-unweighted', is_flag=True, default=False,
               help="If True, we do not input priors of classes (estimated from the dev set) into Model -> NER CE loss.")
+@click.option('--use-wandb', '-wandb', is_flag=True, default=False,
+              help="If True, we report this run to WandB")
 def run(
         dataset: str,
         epochs: int = 10,
+        use_wandb: bool = False,
         encoder: str = "bert-base-uncased",
         tasks: List[str] = None,
         device: str = "cpu",
@@ -104,6 +113,9 @@ def run(
     config.trim = trim
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
+
+    # Assign loss scales based on task
+    config.loss_scales = pick_loss_scale(CONFIG, tasks)
 
     if 'ner' in tasks or 'pruner' in tasks:
         # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
@@ -161,6 +173,15 @@ def run(
     print(config)
     print("Training commences!")
 
+    # WandB stuff
+    if use_wandb:
+        wandb.init(project="entitymention-mtl", entity="magnet")
+        wandb.config = {
+            "learning_rate": 0.001,
+            "epochs": 100,
+            "batch_size": 128
+        }
+
     outputs = training_loop(
         epochs=epochs,
         trn_dl=train_ds,
@@ -169,7 +190,8 @@ def run(
         device=device,
         eval_fns=eval_fns,
         opt=opt,
-        tasks=tasks
+        tasks=tasks,
+        loss_scales=config.loss_scales
     )
     print("potato")
 

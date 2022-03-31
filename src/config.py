@@ -1,7 +1,8 @@
 import os
+import numpy as np
 from pathlib import Path
-from mytorch.utils.goodies import FancyDict
 from typing import Dict
+from mytorch.utils.goodies import FancyDict
 
 # Random seeds
 _SEED_ = 42
@@ -32,3 +33,14 @@ LOCATIONS: Dict[str, Path] = FancyDict(
         "manual": ROOT_LOC / "data" / "manual",
     }
 )
+
+LOSS_RATIO_CNP = [1.0 / 2000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
+LOSS_RATIO_CP = [1.0 / 2000, 1.0]  # Loss ratio to use to train coref, and pruner
+LOSS_RATIO_CN = [1.0 / 2000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
+CONFIG: dict = {
+    'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
+    'loss_scales_coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
+    'loss_scales_coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'loss_scales_coref': [1.0, ],
+    'loss_scales_ner': [1.0, ]
+}
