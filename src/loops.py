@@ -28,7 +28,7 @@ def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
     """ Go through every k, v in a dict and change its device (make it recursive) """
     for k, v in instance.items():
         if type(v) is torch.Tensor:
-            if 'device' is 'cpu':
+            if 'device' == 'cpu':
                 instance[k] = v.detach().to('cpu')
             else:
                 instance[k] = v.to(device)
@@ -55,7 +55,7 @@ def training_loop(
         trn_dl: Callable,
         dev_dl: Callable,
         eval_fns: dict,
-        loss_scales: np.ndarray
+        loss_scales: torch.tensor
 ) -> (list, list, list):
     train_loss = {task_nm: [] for task_nm in tasks}
     train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
@@ -114,7 +114,7 @@ def training_loop(
 
                 # TODO: losses need to be mixed!
                 # loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
-                loss = weighted_addition_losses(outputs["losses"], tasks, loss_scales)
+                loss = weighted_addition_losses(outputs["loss"], tasks, loss_scales)
                 loss.backward()
                 opt.step()
 

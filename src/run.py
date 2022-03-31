@@ -64,13 +64,10 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
     default=None,
     help="Which BERT model (for now) to load.",
 )
-@click.option(
-    "--epochs",
-    "-e",
-    type=int,
-    default=None,
-    help="Specify the number of epochs for which to train.",
-)
+@click.option("--epochs", "-e", type=int, default=None,
+              help="Specify the number of epochs for which to train.")
+@click.option("--learning-rate", "-lr", type=float, default=0.005,
+              help="Learning rate. Defaults to 0.005 if not specified")
 @click.option(
     "--device",
     "-dv",
@@ -89,6 +86,7 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
 def run(
         dataset: str,
         epochs: int = 10,
+        learning_rate: float = 0.005,
         use_wandb: bool = False,
         encoder: str = "bert-base-uncased",
         tasks: List[str] = None,
@@ -113,9 +111,11 @@ def run(
     config.trim = trim
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
+    config.lr = learning_rate
 
     # Assign loss scales based on task
-    config.loss_scales = pick_loss_scale(CONFIG, tasks)
+    loss_scales = pick_loss_scale(CONFIG, tasks)
+    config.loss_scales = loss_scales.tolist() if not type(loss_scales) is list else loss_scales
 
     if 'ner' in tasks or 'pruner' in tasks:
         # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
@@ -132,6 +132,9 @@ def run(
         if 'pruner' in tasks:
             config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
         del temp_ds
+    else:
+        config.ner_n_classes = 1
+        config.ner_class_weights = torch.tensor([1.0, ], device=device)
 
     # Make the model
     model = BasicMTL(dir_encoder, config=config)
@@ -155,7 +158,8 @@ def run(
     )
 
     # Make the optimizer
-    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.005, freeze_encoder=config.freeze_encoder)
+    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
+                         freeze_encoder=config.freeze_encoder)
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
     eval_fns: Dict[str, Dict[str, Callable]] = {
@@ -191,7 +195,7 @@ def run(
         eval_fns=eval_fns,
         opt=opt,
         tasks=tasks,
-        loss_scales=config.loss_scales
+        loss_scales=torch.tensor(loss_scales, dtype=torch.float, device=device)
     )
     print("potato")
 
