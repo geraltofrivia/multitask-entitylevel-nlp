@@ -151,3 +151,4 @@ cython_debug/
 /models/huggingface/
 /models/word2vec/
 /models/glove/
+/wandb/

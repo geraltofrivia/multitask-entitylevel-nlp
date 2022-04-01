@@ -164,9 +164,9 @@ def training_loop(
             if use_wandb:
                 task_specific_wandb_logs = {"loss": train_loss[task_nm][-1]}
                 train_metrics_this_epoch_wandb, valid_metrics_this_epoch_wandb = {}, {}
-                for metric_nm, metric_vl in train_metrics.items():
+                for metric_nm, metric_vl in train_metrics[task_nm].items():
                     train_metrics_this_epoch_wandb[metric_nm] = train_metrics[task_nm][metric_nm][-1]
-                for metric_nm, metric_vl in valid_metrics.items():
+                for metric_nm, metric_vl in valid_metrics[task_nm].items():
                     valid_metrics_this_epoch_wandb[metric_nm] = valid_metrics[task_nm][metric_nm][-1]
                 task_specific_wandb_logs["train"] = train_metrics_this_epoch_wandb
                 task_specific_wandb_logs["valid"] = valid_metrics_this_epoch_wandb

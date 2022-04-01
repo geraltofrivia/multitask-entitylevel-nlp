@@ -83,6 +83,10 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
               help="If True, we do not input priors of classes (estimated from the dev set) into Model -> NER CE loss.")
 @click.option('--use-wandb', '-wandb', is_flag=True, default=False,
               help="If True, we report this run to WandB")
+@click.option('--wandb-comment', '-m', type=str, default=None,
+              help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
+@click.option('--wandb-trial', '-wt', is_flag=True, default=False,
+              help="If true, the wandb run is placed in a group of 'trial' runs.")
 def run(
         dataset: str,
         epochs: int = 10,
@@ -93,7 +97,9 @@ def run(
         device: str = "cpu",
         trim: bool = False,
         train_encoder: bool = False,
-        ner_unweighted: bool = False
+        ner_unweighted: bool = False,
+        wandb_comment: str = '',
+        wandb_trial: bool = False
 ):
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
@@ -179,7 +185,8 @@ def run(
 
     # WandB stuff
     if use_wandb:
-        wandb.init(project="entitymention-mtl", entity="magnet")
+        wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
+                   group="trial" if wandb_trial or trim else "main")
         wandb.config = config.to_dict()
 
     outputs = training_loop(
