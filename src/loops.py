@@ -1,3 +1,4 @@
+import wandb
 import torch
 import numpy as np
 from copy import deepcopy
@@ -55,7 +56,8 @@ def training_loop(
         trn_dl: Callable,
         dev_dl: Callable,
         eval_fns: dict,
-        loss_scales: torch.tensor
+        loss_scales: torch.tensor,
+        use_wandb: bool = False
 ) -> (list, list, list):
     train_loss = {task_nm: [] for task_nm in tasks}
     train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
@@ -158,6 +160,17 @@ def training_loop(
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
             train_metrics = aggregate_metrics(train_metrics, per_epoch_tr_metrics)
             valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
+
+            if use_wandb:
+                task_specific_wandb_logs = {"loss": train_loss[task_nm][-1]}
+                train_metrics_this_epoch_wandb, valid_metrics_this_epoch_wandb = {}, {}
+                for metric_nm, metric_vl in train_metrics.items():
+                    train_metrics_this_epoch_wandb[metric_nm] = train_metrics[task_nm][metric_nm][-1]
+                for metric_nm, metric_vl in valid_metrics.items():
+                    valid_metrics_this_epoch_wandb[metric_nm] = valid_metrics[task_nm][metric_nm][-1]
+                task_specific_wandb_logs["train"] = train_metrics_this_epoch_wandb
+                task_specific_wandb_logs["valid"] = valid_metrics_this_epoch_wandb
+                wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         print(f"\nEpoch: {e:3d}" +
               '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +

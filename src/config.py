@@ -34,9 +34,9 @@ LOCATIONS: Dict[str, Path] = FancyDict(
     }
 )
 
-LOSS_RATIO_CNP = [1.0 / 2000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
-LOSS_RATIO_CP = [1.0 / 2000, 1.0]  # Loss ratio to use to train coref, and pruner
-LOSS_RATIO_CN = [1.0 / 2000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
+LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
+LOSS_RATIO_CP = [1.0 / 20000, 1.0]  # Loss ratio to use to train coref, and pruner
+LOSS_RATIO_CN = [1.0 / 20000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
 CONFIG: dict = {
     'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
     'loss_scales_coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),

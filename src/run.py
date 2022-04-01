@@ -180,11 +180,7 @@ def run(
     # WandB stuff
     if use_wandb:
         wandb.init(project="entitymention-mtl", entity="magnet")
-        wandb.config = {
-            "learning_rate": 0.001,
-            "epochs": 100,
-            "batch_size": 128
-        }
+        wandb.config = config.to_dict()
 
     outputs = training_loop(
         epochs=epochs,
@@ -195,7 +191,8 @@ def run(
         eval_fns=eval_fns,
         opt=opt,
         tasks=tasks,
-        loss_scales=torch.tensor(loss_scales, dtype=torch.float, device=device)
+        loss_scales=torch.tensor(loss_scales, dtype=torch.float, device=device),
+        use_wandb=use_wandb
     )
     print("potato")
 
