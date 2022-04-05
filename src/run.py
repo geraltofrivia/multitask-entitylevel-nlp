@@ -81,11 +81,11 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
               help="If enabled, the BERTish encoder is not frozen but trains also.")
 @click.option('--ner-unweighted', is_flag=True, default=False,
               help="If True, we do not input priors of classes (estimated from the dev set) into Model -> NER CE loss.")
-@click.option('--use-wandb', '-wandb', is_flag=True, default=False,
+@click.option('--use-wandb', '-wb', is_flag=True, default=False,
               help="If True, we report this run to WandB")
-@click.option('--wandb-comment', '-m', type=str, default=None,
+@click.option('--wandb-comment', '-wbm', type=str, default=None,
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
-@click.option('--wandb-trial', '-wt', is_flag=True, default=False,
+@click.option('--wandb-trial', '-wbt', is_flag=True, default=False,
               help="If true, the wandb run is placed in a group of 'trial' runs.")
 def run(
         dataset: str,
@@ -118,6 +118,7 @@ def run(
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
     config.lr = learning_rate
+    config.tasks = tasks
 
     # Assign loss scales based on task
     loss_scales = pick_loss_scale(CONFIG, tasks)
@@ -135,12 +136,15 @@ def run(
         if 'ner' in tasks:
             config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
             config.ner_class_weights = temp_ds.estimate_class_weights('ner')
+        else:
+            config.ner_n_classes = 1
+            config.ner_class_weights = [1.0, ]
         if 'pruner' in tasks:
             config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
         del temp_ds
     else:
         config.ner_n_classes = 1
-        config.ner_class_weights = torch.tensor([1.0, ], device=device)
+        config.ner_class_weights = [1.0, ]
 
     # Make the model
     model = BasicMTL(dir_encoder, config=config)
@@ -186,8 +190,7 @@ def run(
     # WandB stuff
     if use_wandb:
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
-                   group="trial" if wandb_trial or trim else "main")
-        wandb.config = config.to_dict()
+                   group="trial" if wandb_trial or trim else "main", config=config.to_dict())
 
     outputs = training_loop(
         epochs=epochs,

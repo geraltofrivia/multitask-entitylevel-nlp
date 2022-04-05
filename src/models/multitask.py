@@ -519,18 +519,25 @@ class BasicMTL(nn.Module):
         top_antecedents_per_ana_emb[top_antecedents_per_ana_ind < 0] = 0
 
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
-        top_antecedents_mask = torch.ones_like(top_antecedents_per_ana_ind)
-        top_antecedents_mask[top_antecedents_per_ana_ind < 0] = 0
-        top_antecedents_mask = torch.hstack(
+        top_antecedents_per_ana_ind = torch.hstack(
             [
-                top_antecedents_mask,
-                torch.zeros(
-                    (top_antecedents_mask.shape[0], 1),
-                    dtype=top_antecedents_mask.dtype,
-                    device=top_antecedents_mask.device,
-                ),
+                top_antecedents_per_ana_ind,
+                torch.zeros((top_antecedents_per_ana_ind.shape[0], 1),
+                            dtype=torch.int64, device=self.config.device) - 1,
             ]
         )
+        top_antecedents_mask = torch.ones_like(top_antecedents_per_ana_ind)
+        top_antecedents_mask[top_antecedents_per_ana_ind < 0] = 0
+        # top_antecedents_mask = torch.hstack(
+        #     [
+        #         top_antecedents_mask,
+        #         torch.zeros(
+        #             (top_antecedents_mask.shape[0], 1),
+        #             dtype=top_antecedents_mask.dtype,
+        #             device=self.config.device,
+        #         ),
+        #     ]
+        # )
 
         # We argsort this to yield a list of indices.
 
@@ -545,7 +552,7 @@ class BasicMTL(nn.Module):
             1
         )  # [n_ana, n_ante, span_emb]
         anaphor_emb = top_span_emb.unsqueeze(1).repeat(
-            1, self.config.max_top_antecedents, 1
+            1, min(n_top_spans, self.config.max_top_antecedents), 1
         )  # [n_ana, n_ante, span_emb]
         pair_emb = torch.cat(
             [anaphor_emb, top_antecedents_per_ana_emb, similarity_emb], 2
@@ -571,6 +578,7 @@ class BasicMTL(nn.Module):
         return {
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
+            "top_antecedents": top_antecedents_per_ana_ind
         }
 
     # noinspection PyUnusedLocal
@@ -806,22 +814,37 @@ class BasicMTL(nn.Module):
             top_span_indices = predictions["pruner"]["top_span_indices"]
             top_antecedent_scores = predictions["coref"]["top_antecedent_scores"]
             top_antecedent_mask = predictions["coref"]["top_antecedent_mask"]
+            top_antecedents = predictions["coref"]["top_antecedents"]
 
             # Some minor post processing.
             top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
 
             # Now you have a notion of which are the likeliest antecedents for every given anaphor (sorted by scores).
-            top_antecedent_indices = torch.argsort(
+            top_antecedent_indices_in_each_span_cand_space = torch.argsort(
                 top_antecedent_scores, descending=True
             )
+
+            '''
+                 The previous code (commented below) was flawed. Like, objectively wrong.
+                 Previously, top_antecedent_indices were in not in the same space, but just argsorted scores
+                    so a value of 45 in index (3, 0) would mean that 
+                    for the third span, antecedent candidate #45 is the most likely antecedent. 
+                    However, this is not 45 in top_spans .. 
+                    just 45th antecedent in the list of top 50 spans for THIS anaphor.
+                    
+                 So, that's fixed now.  
+            '''
+            top_antecedent_indices = top_antecedents.gather(index=top_antecedent_indices_in_each_span_cand_space, dim=1)
+            # top_antecedent_indices = top_antecedents[top_antecedent_indices_in_each_span_cand_space.shape[-1]].reshape(
+            #     top_antecedent_indices_in_each_span_cand_space.shape[0],
+            #     top_antecedent_indices_in_each_span_cand_space.shape[1],
+            # )
 
             # TODO: understand here onwards
             top_antecedent_cluster_ids = top_span_cluster_ids[
                 top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
             ]
-            top_antecedent_cluster_ids[
-                top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0
-                ] = 0
+            top_antecedent_cluster_ids[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
 
             # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
             top_antecedent_cluster_ids += torch.log(top_antecedent_mask.float()).int()[
@@ -846,7 +869,8 @@ class BasicMTL(nn.Module):
             coref_loss = self.coref_softmax_loss(
                 top_antecedent_scores, top_antecedent_labels
             )  # [top_cand]
-            coref_loss = torch.sum(coref_loss)
+            coref_loss = torch.mean(coref_loss)
+            # coref_loss = torch.sum(coref_loss)
 
             # predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores

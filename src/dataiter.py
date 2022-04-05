@@ -86,8 +86,6 @@ class MultiTaskDataset(Dataset):
             A sense of prior prob of predicting a class, based on the data available.
             Expect them to be extremely heavily twisted in the case of __na__ of course.
         """
-        # DEBUG!
-        print(len(self.data))
         # Create a flat (long, long) list of all labels
         y = torch.cat([datum[task]['gold_labels'] for datum in self.data]).to('cpu')
         return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
