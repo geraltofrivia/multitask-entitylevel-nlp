@@ -37,18 +37,22 @@ class MultiTaskDataset(Dataset):
             shuffle: bool = False,
             tasks: Iterable[str] = (),
             rebuild_cache: bool = False,
+            filter_candidates_threshold: int = 0
     ):
         """
             Important thing to note is:
                 - it will never move tensors to GPU. Will always stick to CPU (so that we dont have a mem leak).
                 - ideally you should delete the Dataset and make a new one every time you start a new epoch.
-        :param src:
-        :param split:
-        :param config:
-        :param tokenizer:
-        :param shuffle:
-        :param tasks:
-        :param rebuild_cache:
+        :param src: the name of the main dataset (e.g. ontonotes)
+        :param split: the name of the dataset split (e.g. 'train', or 'development')
+        :param config: the config dict (BertConfig + required params)
+        :param tokenizer: a pretrained BertTokenizer
+        :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
+        :param tasks: a list of tasks we need to process (e.g. ['ner', 'coref', 'pruner'] or ['ner',] or ['coref',]
+        :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
+        :param filter_candidates_threshold: int which if greater than zero, will remove candidate spans that
+            have one of these POS tags in them: 'VB'
+            NOTE: we now expect the instances to have POS data in them, of course
         """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
@@ -57,6 +61,7 @@ class MultiTaskDataset(Dataset):
         self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
+        self.filter_candidates_threshold = filter_candidates_threshold if filter_candidates_threshold > 0 else 10 ** 20
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
@@ -583,18 +588,38 @@ class MultiTaskDataset(Dataset):
 
         candidate_mask = (
                 filter_beyond_document & filter_different_sentences
+            # & filter_candidate_starts_midword & filter_candidate_ends_midword
         )  # & filter_candidate_starts_midword & \
         #  filter_candidate_ends_midword  # n_subwords, max_span_width
 
         # Now we flatten the candidate starts, ends and the mask and do an index select to ignore the invalid ones
         candidate_mask = candidate_mask.view(-1)  # n_subwords * max_span_width
+
+        """
+            Final Candidate filtering:
+                - if there are more than the specified num. of candidates (self.filter_candidates_threshold),
+                - look at POS tags inside the documents and for each candidate, 
+                - if the POS tag contains VB, skip it. 
+        """
+        if candidate_mask.int().sum().item() > self.filter_candidates_threshold:
+            # Get pos tags for each instance
+            pos = to_toks(instance.pos)
+            for i, (cs, ce) in enumerate(zip(candidate_starts.reshape(-1), candidate_ends.reshape(-1))):
+                if not candidate_mask[i]:
+                    continue
+                _cs = wordid_for_subword[cs]
+                _ce = wordid_for_subword[ce]
+                _pos = pos[_cs: _ce]
+                if 'VB' in _pos \
+                        or 'VBD' in _pos:
+                    candidate_mask[i] = False
+
         candidate_starts = torch.masked_select(
             candidate_starts.view(-1), candidate_mask
         )  # n_subwords*max_span_width
         candidate_ends = torch.masked_select(
             candidate_ends.view(-1), candidate_mask
         )  # n_subwords*max_span_width
-
         tasks = [task if not task.startswith("ner") else "ner" for task in self._tasks_]
 
         return_dict = {
@@ -755,6 +780,15 @@ class DataLoaderToHFTokenizer:
 
 if __name__ == "__main__":
 
+    dataset: str = 'ontonotes'
+    epochs: int = 10
+    encoder: str = "bert-base-uncased"
+    tasks: Iterable[str] = ('ner', 'pruner', 'coref')
+    device: str = "cpu"
+    trim: bool = False
+    train_encoder: bool = False
+    ner_unweighted: bool = False
+
     # # Attempt to pull from disk
     # encoder = transformers.BertModel.from_pretrained(LOC.root / 'models' / 'huggingface'
     # / 'bert-base-uncased' / 'encoder')
@@ -765,11 +799,18 @@ if __name__ == "__main__":
         LOC.root / "models" / "huggingface" / "bert-base-uncased" / "tokenizer"
     )
 
-    # tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
-    # config = tf.BertConfig('bert-base-uncased')
-    config.max_span_width = 8
-    config.device = "cpu"
-    tasks = ["ner", "coref"]
+    config.max_span_width = 5
+    config.coref_dropout = 0.3
+    config.metadata_feature_size = 20
+    config.unary_hdim = 1000
+    config.binary_hdim = 2000
+    config.top_span_ratio = 0.4
+    config.max_top_antecedents = 50
+    config.device = device
+    config.epochs = epochs
+    config.trim = trim
+    config.freeze_encoder = not train_encoder
+    config.ner_ignore_weights = ner_unweighted
 
     ds = MultiTaskDataset(
         "ontonotes",
@@ -777,7 +818,8 @@ if __name__ == "__main__":
         config=config,
         tokenizer=tokenizer,
         tasks=tasks,
-        # rebuild_cache=True,
+        rebuild_cache=True,
+        filter_candidates_threshold=50
     )
 
     # Custom fields in config
