@@ -1,5 +1,6 @@
 import wandb
 import torch
+import warnings
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import tqdm
@@ -87,11 +88,11 @@ def training_loop(
                 instance = change_device(instance, device)
 
                 # DEBUG
-                # if instance['candidate_starts'].shape[0] > 15000:
-                #     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                #                   f"Input: {instance['input_ids'].shape}.
-                #                   Spans: {instance['candidate_starts'].shape}")
-                #     continue
+                if instance['candidate_starts'].shape[0] > 10000:
+                    warnings.warn(f"Skipping {i:5d}. Too many candidates. "
+                                  f"Input: {instance['input_ids'].shape}."
+                                  f"Spans: {instance['candidate_starts'].shape}")
+                    continue
 
                 # Forward Pass
                 outputs = forward_fn(**instance)
