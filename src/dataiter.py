@@ -36,8 +36,7 @@ class MultiTaskDataset(Dataset):
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
             tasks: Iterable[str] = (),
-            rebuild_cache: bool = False,
-            filter_candidates_threshold: int = 0
+            rebuild_cache: bool = False
     ):
         """
             Important thing to note is:
@@ -50,9 +49,6 @@ class MultiTaskDataset(Dataset):
         :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
         :param tasks: a list of tasks we need to process (e.g. ['ner', 'coref', 'pruner'] or ['ner',] or ['coref',]
         :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
-        :param filter_candidates_threshold: int which if greater than zero, will remove candidate spans that
-            have one of these POS tags in them: 'VB'
-            NOTE: we now expect the instances to have POS data in them, of course
         """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
@@ -61,7 +57,8 @@ class MultiTaskDataset(Dataset):
         self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
-        self.filter_candidates_threshold = filter_candidates_threshold if filter_candidates_threshold > 0 else 10 ** 20
+        self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
+            if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
@@ -601,7 +598,7 @@ class MultiTaskDataset(Dataset):
                 - look at POS tags inside the documents and for each candidate, 
                 - if the POS tag contains VB, skip it. 
         """
-        if candidate_mask.int().sum().item() > self.filter_candidates_threshold:
+        if candidate_mask.int().sum().item() > self.filter_candidates_pos_threshold:
             # Get pos tags for each instance
             pos = to_toks(instance.pos)
             for i, (cs, ce) in enumerate(zip(candidate_starts.reshape(-1), candidate_ends.reshape(-1))):
@@ -819,7 +816,7 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         tasks=tasks,
         rebuild_cache=True,
-        filter_candidates_threshold=50
+        filter_candidates_pos_threshold=50
     )
 
     # Custom fields in config

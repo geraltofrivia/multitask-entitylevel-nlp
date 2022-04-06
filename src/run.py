@@ -87,6 +87,9 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
 @click.option('--wandb-trial', '-wbt', is_flag=True, default=False,
               help="If true, the wandb run is placed in a group of 'trial' runs.")
+@click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
+              help="If true, dataiter ignores those candidates which have verbs in them "
+                   "IF the doc has more than 10k candidates.")
 def run(
         dataset: str,
         epochs: int = 10,
@@ -99,7 +102,8 @@ def run(
         train_encoder: bool = False,
         ner_unweighted: bool = False,
         wandb_comment: str = '',
-        wandb_trial: bool = False
+        wandb_trial: bool = False,
+        filter_candidates_pos: bool = False
 ):
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
@@ -119,6 +123,7 @@ def run(
     config.ner_ignore_weights = ner_unweighted
     config.lr = learning_rate
     config.tasks = tasks
+    config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] if filter_candidates_pos else -1
 
     # Assign loss scales based on task
     loss_scales = pick_loss_scale(CONFIG, tasks)
