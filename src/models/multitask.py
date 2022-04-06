@@ -824,6 +824,13 @@ class BasicMTL(nn.Module):
                 top_antecedent_scores, descending=True
             )
 
+            # TODO: I'm not sure about this. Empirically decide.
+            # Since we're going to be using the top_antecedent_mask, need to get the mask arranged in the same fashion.
+            top_antecedent_mask = top_antecedent_mask.gather(
+                index=top_antecedent_indices_in_each_span_cand_space,
+                dim=1
+            )
+
             '''
                  The previous code (commented below) was flawed. Like, objectively wrong.
                  Previously, top_antecedent_indices were in not in the same space, but just argsorted scores
@@ -834,16 +841,21 @@ class BasicMTL(nn.Module):
                     
                  So, that's fixed now.  
             '''
-            top_antecedent_indices = top_antecedents.gather(index=top_antecedent_indices_in_each_span_cand_space, dim=1)
-            # top_antecedent_indices = top_antecedents[top_antecedent_indices_in_each_span_cand_space.shape[-1]].reshape(
-            #     top_antecedent_indices_in_each_span_cand_space.shape[0],
-            #     top_antecedent_indices_in_each_span_cand_space.shape[1],
-            # )
+            top_antecedent_indices = top_antecedents.gather(
+                index=top_antecedent_indices_in_each_span_cand_space,
+                dim=1
+            )
 
             # TODO: understand here onwards
+            # We probably drop the last element because we're one over the limit of candidates already.
             top_antecedent_cluster_ids = top_span_cluster_ids[
                 top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
             ]
+
+            # Make sure the masked candidates are suppressed.
+            # ### This again is problematic because the mask is over the top_antecedent_scores space
+            # ### But antecedent cluster IDs are a different sequence.
+            # ### That is, [2, 3] in the mask being zero does not mean that [2, 3] in cluster IDs should also be zero.
             top_antecedent_cluster_ids[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
 
             # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]

@@ -131,6 +131,10 @@ def training_loop(
 
                 for i, instance in enumerate(tqdm(dev_ds)):
 
+                    # # DEBUG
+                    # if not i == 36:
+                    #     continue
+
                     # Move the instance to the right device
                     instance = change_device(instance, device)
 
