@@ -16,8 +16,7 @@ from loops import training_loop
 from config import LOCATIONS as LOC, CONFIG
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
-from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision, \
-    pruner_p, pruner_r, _coref_ceafe_, _coref_muc_, _coref_b_cubed_
+from eval import ner_acc, ner_span_recog_pr, pruner_pr, compute_metrics
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
@@ -178,15 +177,12 @@ def run(
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
     eval_fns: Dict[str, Dict[str, Callable]] = {
-        'ner': {'acc': ner_all,
-                'acc_l': ner_only_annotated,
-                'span_p': ner_span_recog_precision,
-                'span_r': ner_span_recog_recall},
+        'ner': {'acc': ner_acc,
+                'span': ner_span_recog_pr},
         'coref': {
 
         },
-        'pruner': {'p': pruner_p,
-                   'r': pruner_r}
+        'pruner': {'spanrecog': pruner_pr}
     }
 
     print(config)
