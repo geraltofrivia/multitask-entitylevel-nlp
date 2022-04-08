@@ -14,10 +14,6 @@ except ImportError:
     from . import _pathfix
 
 
-def compute_metrics(metrics: Dict[str, Callable], logits, labels) -> Dict[str, float]:
-    return {metric_nm: metric_fn(logits=logits, labels=labels).cpu().detach().item()
-            for metric_nm, metric_fn in metrics.items()}
-
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
     for task_nm in inter_epoch.keys():
@@ -84,6 +80,9 @@ def training_loop(
                 # Reset the gradients.
                 opt.zero_grad()
 
+                # Avoid excessive computations of prepping data for evaluating coref
+                instance["prep_coref_eval"] = False
+
                 # Move all input tensors to the right devices
                 instance = change_device(instance, device)
 
@@ -106,11 +105,20 @@ def training_loop(
                     loss = outputs["loss"][task_nm]
                     per_epoch_loss[task_nm].append(loss.item())
 
-                    # For the pruner task, we don't want "logits" we want "logits_after_pruning"
-                    logits_keynm = "logits" if task_nm != "pruner" else "logits_after_pruning"
-                    instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                       logits=outputs[task_nm][logits_keynm],
-                                                       labels=outputs[task_nm]["labels"])
+                    if task_nm == 'pruner':
+                        # For the pruner task, we don't want "logits" we want "logits_after_pruning"
+                        instance_metrics = compute_metrics(eval_fns[task_nm],
+                                                           logits=outputs[task_nm]["logits_after_pruning"],
+                                                           labels=outputs[task_nm]["labels"])
+                    elif task_nm == 'ner':
+                        instance_metrics = compute_metrics(eval_fns[task_nm],
+                                                           logits=outputs[task_nm]["logits"],
+                                                           labels=outputs[task_nm]["labels"])
+                    else:
+                        continue
+
+                    # elif task_nm == 'coref':
+                    #     # we use completely different things for coref eval
 
                     for metric_nm, metric_vl in instance_metrics.items():
                         per_epoch_tr_metrics[task_nm][metric_nm].append(metric_vl)
@@ -139,18 +147,27 @@ def training_loop(
                     # Move the instance to the right device
                     instance = change_device(instance, device)
 
+                    # Ensure that data is prepped for coref eval
+                    instance["prep_coref_eval"] = True
+
                     # Forward Pass
                     outputs = forward_fn(**instance)
 
                     for task_nm in instance["tasks"]:
 
-                        # For the pruner task, we don't want "logits" we want "logits_after_pruning"
-                        logits_keynm = "logits" if task_nm != "pruner" else "logits_after_pruning"
+                        if task_nm == 'pruner':
+                            # For the pruner task, we don't want "logits" we want "logits_after_pruning"
+                            instance_metrics = compute_metrics(eval_fns[task_nm],
+                                                               logits=outputs[task_nm]["logits_after_pruning"],
+                                                               labels=outputs[task_nm]["labels"])
+                        elif task_nm == 'ner':
+                            instance_metrics = compute_metrics(eval_fns[task_nm],
+                                                               logits=outputs[task_nm]["logits"],
+                                                               labels=outputs[task_nm]["labels"])
+                        elif task_nm == 'coref':
+                            instance_metrics = compute_metrics(eval_fns[task_nm],
+                                                               **outputs['coref']['eval'])
 
-                        logits = outputs[task_nm][logits_keynm]
-                        labels = outputs[task_nm]["labels"]
-
-                        instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
                         for metric_nm, metric_vl in instance_metrics.items():
                             per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
 
