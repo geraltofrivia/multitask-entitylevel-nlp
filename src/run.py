@@ -17,7 +17,7 @@ from config import LOCATIONS as LOC, CONFIG
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
 from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision, \
-    pruner_p, pruner_r
+    pruner_p, pruner_r, _coref_ceafe_, _coref_muc_, _coref_b_cubed_
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
