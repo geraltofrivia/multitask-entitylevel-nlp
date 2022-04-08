@@ -4,6 +4,7 @@ import warnings
 import numpy as np
 from copy import deepcopy
 from tqdm.auto import tqdm
+from eval import compute_metrics
 from mytorch.utils.goodies import Timer
 from typing import Iterable, Callable, Union, Dict
 

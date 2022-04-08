@@ -16,7 +16,7 @@ from loops import training_loop
 from config import LOCATIONS as LOC, CONFIG
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
-from eval import ner_acc, ner_span_recog_pr, pruner_pr, compute_metrics
+from eval import ner_acc, ner_span_recog_pr, pruner_pr
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
