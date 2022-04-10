@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 from copy import deepcopy
 from collections import Counter
@@ -24,6 +25,28 @@ def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
         popped.append(data.pop(_id))
 
     return popped
+
+
+def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
+    """ Go through every k, v in a dict and change its device (make it recursive) """
+    for k, v in instance.items():
+        if type(v) is torch.Tensor:
+            if 'device' == 'cpu':
+                instance[k] = v.detach().to('cpu')
+            else:
+                instance[k] = v.to(device)
+        elif type(v) is dict:
+            instance[k] = change_device(v, device)
+
+    return instance
+
+
+def weighted_addition_losses(losses, tasks, scales):
+    # Sort the tasks
+    tasks = sorted(deepcopy(tasks))
+    stacked = torch.hstack([losses[task_nm] for task_nm in tasks])
+    weighted = stacked * scales
+    return torch.sum(weighted)
 
 
 @dataclass

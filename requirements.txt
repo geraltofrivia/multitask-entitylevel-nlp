@@ -11,3 +11,4 @@ thefuzz
 click
 transformers
 torch
+wandb

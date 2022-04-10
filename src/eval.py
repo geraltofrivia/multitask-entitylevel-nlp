@@ -8,6 +8,23 @@ from collections import Counter
 from typing import Dict, Callable
 from scipy.optimize import linear_sum_assignment as linear_assignment
 
+"""
+    Make a overall (macro) eval system. 
+    Configure it like you configure the training loop and throw it in the loop. Do not give it the model.
+    The model is fed every time the loop is run. 
+    
+    All the metrics below, all helper functions are situated strategically.
+    
+    At every point it can return a dict,
+        or append to a dict
+        or summarise a dict ( across epochs ) 
+    
+    and has a nice _repr_ function. This is your goal for 09/04/2022!
+    
+    In a way that can return everything that needs to be returned. At any point of time.
+    
+"""
+
 
 def compute_metrics(
         metrics: Dict[str, Callable],

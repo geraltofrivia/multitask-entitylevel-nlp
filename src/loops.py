@@ -2,18 +2,17 @@ import wandb
 import torch
 import warnings
 import numpy as np
-from copy import deepcopy
 from tqdm.auto import tqdm
 from eval import compute_metrics
 from mytorch.utils.goodies import Timer
-from typing import Iterable, Callable, Union, Dict
+from typing import Iterable, Callable, Union
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-
+from utils.misc import change_device, weighted_addition_losses
 
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
@@ -21,28 +20,6 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
         for metric_nm, metric_list in intra_epoch[task_nm].items():
             inter_epoch[task_nm][metric_nm].append(np.mean(metric_list))
     return inter_epoch
-
-
-def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
-    """ Go through every k, v in a dict and change its device (make it recursive) """
-    for k, v in instance.items():
-        if type(v) is torch.Tensor:
-            if 'device' == 'cpu':
-                instance[k] = v.detach().to('cpu')
-            else:
-                instance[k] = v.to(device)
-        elif type(v) is dict:
-            instance[k] = change_device(v, device)
-
-    return instance
-
-
-def weighted_addition_losses(losses, tasks, scales):
-    # Sort the tasks
-    tasks = sorted(deepcopy(tasks))
-    stacked = torch.hstack([losses[task_nm] for task_nm in tasks])
-    weighted = stacked * scales
-    return torch.sum(weighted)
 
 
 def training_loop(
