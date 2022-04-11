@@ -3,7 +3,7 @@ import torch
 import warnings
 import numpy as np
 from tqdm.auto import tqdm
-from eval import compute_metrics
+from eval import Evaluator
 from mytorch.utils.goodies import Timer
 from typing import Iterable, Callable, Union
 
@@ -29,147 +29,75 @@ def training_loop(
         forward_fn: Callable,
         device: Union[str, torch.device],
         trn_dl: Callable,
-        dev_dl: Callable,
-        eval_fns: dict,
+        train_eval: Evaluator,
+        dev_eval: Evaluator,
         loss_scales: torch.tensor,
         use_wandb: bool = False
 ) -> (list, list, list):
     train_loss = {task_nm: [] for task_nm in tasks}
-    train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
-    valid_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
+    train_metrics = {}
+    dev_metrics = {}
 
     # Epoch level
     for e in range(epochs):
 
         # Make data
         trn_ds = trn_dl()
-        dev_ds = dev_dl()
-
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
-        per_epoch_tr_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
-        per_epoch_vl_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
 
         # Train
         with Timer() as timer:
 
             # Train Loop
             for i, instance in enumerate(tqdm(trn_ds)):
-
                 # Reset the gradients.
                 opt.zero_grad()
 
-                # Avoid excessive computations of prepping data for evaluating coref
-                instance["prep_coref_eval"] = False
+                # TODO should we avoid excessive computations of prepping data for evaluating coref (set flag to false)
+                instance["prep_coref_eval"] = True
 
                 # Move all input tensors to the right devices
                 instance = change_device(instance, device)
 
-                # DEBUG
-                if instance['candidate_starts'].shape[0] > 10000:
-                    warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                                  f"Input: {instance['input_ids'].shape}."
-                                  f"Spans: {instance['candidate_starts'].shape}")
-                    continue
+                # # DEBUG
+                # if instance['candidate_starts'].shape[0] > 10000:
+                #     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
+                #                   f"Input: {instance['input_ids'].shape}."
+                #                   f"Spans: {instance['candidate_starts'].shape}")
+                #     continue
 
                 # Forward Pass
                 outputs = forward_fn(**instance)
-
-                """
-                    Depending on instance.tasks list, do the following:
-                        - task specific loss (added to losses)
-                        - task specific metrics (added to metrics)
-                """
-                for task_nm in instance['tasks']:
-                    loss = outputs["loss"][task_nm]
-                    per_epoch_loss[task_nm].append(loss.item())
-
-                    if task_nm == 'pruner':
-                        # For the pruner task, we don't want "logits" we want "logits_after_pruning"
-                        instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                           logits=outputs[task_nm]["logits_after_pruning"],
-                                                           labels=outputs[task_nm]["labels"])
-                    elif task_nm == 'ner':
-                        instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                           logits=outputs[task_nm]["logits"],
-                                                           labels=outputs[task_nm]["labels"])
-                    else:
-                        continue
-
-                    # elif task_nm == 'coref':
-                    #     # we use completely different things for coref eval
-
-                    for metric_nm, metric_vl in instance_metrics.items():
-                        per_epoch_tr_metrics[task_nm][metric_nm].append(metric_vl)
-
-                # TODO: losses need to be mixed!
-                # loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
                 loss = weighted_addition_losses(outputs["loss"], tasks, loss_scales)
                 loss.backward()
                 opt.step()
 
+                # Throw the outputs to the eval benchmark also
+                train_eval.update(instance=instance, outputs=outputs)
+
                 # Try to plug mem leaks
                 del loss
+                change_device(outputs, 'cpu')
                 del outputs
                 trn_ds[i] = change_device(instance, 'cpu')
-                # del instance
 
             # Val
-            with torch.no_grad():
+            dev_eval.run()
 
-                for i, instance in enumerate(tqdm(dev_ds)):
-
-                    # # DEBUG
-                    # if not i == 36:
-                    #     continue
-
-                    # Move the instance to the right device
-                    instance = change_device(instance, device)
-
-                    # Ensure that data is prepped for coref eval
-                    instance["prep_coref_eval"] = True
-
-                    # Forward Pass
-                    outputs = forward_fn(**instance)
-
-                    for task_nm in instance["tasks"]:
-
-                        if task_nm == 'pruner':
-                            # For the pruner task, we don't want "logits" we want "logits_after_pruning"
-                            instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                               logits=outputs[task_nm]["logits_after_pruning"],
-                                                               labels=outputs[task_nm]["labels"])
-                        elif task_nm == 'ner':
-                            instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                               logits=outputs[task_nm]["logits"],
-                                                               labels=outputs[task_nm]["labels"])
-                        elif task_nm == 'coref':
-                            instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                               **outputs['coref']['eval'])
-
-                        for metric_nm, metric_vl in instance_metrics.items():
-                            per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
-
-                    # Try to plug mem leaks
-                    del outputs
-                    # del instance
-
-            del trn_ds, dev_ds
+            del trn_ds
 
         # Bookkeep
         for task_nm in tasks:
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
-            train_metrics = aggregate_metrics(train_metrics, per_epoch_tr_metrics)
-            valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
+            train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
+            dev_metrics = train_eval.aggregate_reports(dev_metrics, dev_eval.report())
 
             if use_wandb:
-                task_specific_wandb_logs = {"loss": train_loss[task_nm][-1]}
-                train_metrics_this_epoch_wandb, valid_metrics_this_epoch_wandb = {}, {}
-                for metric_nm, metric_vl in train_metrics[task_nm].items():
-                    train_metrics_this_epoch_wandb[metric_nm] = train_metrics[task_nm][metric_nm][-1]
-                for metric_nm, metric_vl in valid_metrics[task_nm].items():
-                    valid_metrics_this_epoch_wandb[metric_nm] = valid_metrics[task_nm][metric_nm][-1]
-                task_specific_wandb_logs["train"] = train_metrics_this_epoch_wandb
-                task_specific_wandb_logs["valid"] = valid_metrics_this_epoch_wandb
+                task_specific_wandb_logs = {
+                    "loss": train_loss[task_nm][-1],
+                    "train": train_eval.results(),
+                    "valid": dev_eval.results()
+                }
                 wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         print(f"\nEpoch: {e:3d}" +
@@ -177,9 +105,13 @@ def training_loop(
                            ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                     for metric_nm, metric_vls in train_metrics[task_nm].items()]) + '\n\t\t' +
                            ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in valid_metrics[task_nm].items()])
+                                    for metric_nm, metric_vls in dev_metrics[task_nm].items()])
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
                            for task_nm in tasks]))
 
-    return train_metrics, valid_metrics, train_loss
+        # Reset eval benches
+        train_eval.reset()
+        dev_eval.reset()
+
+    return train_metrics, dev_metrics, train_loss

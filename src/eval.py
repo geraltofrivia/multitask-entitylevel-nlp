@@ -214,6 +214,9 @@ class Evaluator:
 
     def report(self):
 
+        if self.results:
+            return self.results
+
         for task_nm, task_metrics in self.metrics.items():
             if task_nm not in self.results:
                 self.results[task_nm] = {}
@@ -234,6 +237,20 @@ class Evaluator:
                 metric.reset()
 
         self.results = {}
+
+    @staticmethod
+    def aggregate_reports(aggregate, current):
+        """ expect every value in 'current' to also be there in the aggregate """
+        for task_nm, task_metrics in current.items():
+            if task_nm not in aggregate:
+                aggregate[task_nm] = {}
+
+            for metric_nm, metric_vl in task_metrics.items():
+                if metric_nm not in aggregate[task_nm]:
+                    aggregate[task_nm][metric_nm] = []
+                aggregate[task_nm][metric_nm].append(metric_vl)
+
+        return aggregate
 
 
 class NERAcc(Metric):

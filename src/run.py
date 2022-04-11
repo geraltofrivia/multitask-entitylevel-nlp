@@ -13,10 +13,10 @@ try:
 except ImportError:
     from . import _pathfix
 from loops import training_loop
-from config import LOCATIONS as LOC, CONFIG
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
-from eval import ner_acc, ner_span_recog_pr, pruner_pr
+from config import LOCATIONS as LOC, CONFIG
+from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
@@ -162,7 +162,7 @@ def run(
         split="train",
         tokenizer=tokenizer,
     )
-    valid_ds = partial(
+    dev_ds = partial(
         MultiTaskDataset,
         src=dataset,
         config=config,
@@ -176,14 +176,25 @@ def run(
                          freeze_encoder=config.freeze_encoder)
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
-    eval_fns: Dict[str, Dict[str, Callable]] = {
-        'ner': {'acc': ner_acc,
-                'span': ner_span_recog_pr},
-        'coref': {
-
-        },
-        'pruner': {'spanrecog': pruner_pr}
-    }
+    metrics = []
+    if 'ner' in tasks:
+        metrics += [NERAcc(), NERSpanRecognitionPR()]
+    if 'pruner' in tasks:
+        metrics += [PrunerPR()]
+    if 'coref' in tasks:
+        metrics += [CorefBCubed(), CorefMUC(), CorefCeafe()]
+    train_eval = Evaluator(
+        predict_fn=model.pred_with_labels,
+        dataset_partial=train_ds,
+        metrics=metrics,
+        device=device
+    )
+    dev_eval = Evaluator(
+        predict_fn=model.pred_with_labels,
+        dataset_partial=dev_ds,
+        metrics=metrics,
+        device=device
+    )
 
     print(config)
     print("Training commences!")
@@ -196,10 +207,10 @@ def run(
     outputs = training_loop(
         epochs=epochs,
         trn_dl=train_ds,
-        dev_dl=valid_ds,
         forward_fn=model.pred_with_labels,
         device=device,
-        eval_fns=eval_fns,
+        train_eval=train_eval,
+        dev_eval=dev_eval,
         opt=opt,
         tasks=tasks,
         loss_scales=torch.tensor(loss_scales, dtype=torch.float, device=device),
