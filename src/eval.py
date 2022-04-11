@@ -14,7 +14,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.misc import change_device, weighted_addition_losses
+from utils.misc import change_device
 
 """
     Make a overall (macro) eval system. 
@@ -47,7 +47,7 @@ class Metric(ABC):
 
     def summarise(self):
         summary = {
-            nm: torch.mean(torch.tensor(vl, dtype=torch.float, device='cpu')).item() \
+            nm: torch.mean(torch.tensor(vl, dtype=torch.float, device='cpu')).item()
             for nm, vl in self.logs.items()
         }
         if self.prefix is not None:
@@ -183,7 +183,7 @@ class Evaluator:
 
             else:
                 for metric in self.metrics[task_nm]:
-                    metric.compute(**outputs['task_nm'])
+                    metric.compute(**outputs[task_nm])
 
     def run(self):
 
@@ -205,7 +205,7 @@ class Evaluator:
                 self.update(instance, outputs)
 
                 # Try to plug mem leaks
-                outputs = change_device(outputs, 'cpu')
+                change_device(outputs, 'cpu')
                 del outputs
                 ds[i] = change_device(instance, 'cpu')
 
@@ -215,15 +215,15 @@ class Evaluator:
     def report(self):
 
         for task_nm, task_metrics in self.metrics.items():
-            if task_nm not in self.metrics:
-                self.metrics[task_nm] = {}
+            if task_nm not in self.results:
+                self.results[task_nm] = {}
 
             for metric in task_metrics:
                 summary = metric.summarise()
                 for nm, vl in summary.items():
-                    self.metrics[task_nm][nm] = vl
+                    self.results[task_nm][nm] = vl
 
-        return self.metrics
+        return self.results
 
     # def __repr__(self):
     #     raise NotImplementedError
@@ -343,6 +343,7 @@ class CorefBCubed(MacroMetric):
     def __init__(self):
         super().__init__()
         self.prefix = 'b_cubed'
+        self.task = 'coref'
 
     def compute(self, clusters, gold_clusters, mention_to_predicted, mention_to_gold, *args, **kwargs):
         pn, pd = self._compute_(clusters, mention_to_gold)
@@ -380,6 +381,7 @@ class CorefMUC(MacroMetric):
     def __init__(self):
         super().__init__()
         self.prefix = 'muc'
+        self.task = 'coref'
 
     @staticmethod
     def _compute_(clusters, mention_to_gold):
@@ -403,140 +405,3 @@ class CorefMUC(MacroMetric):
         self.p_den += pd
         self.r_num += rn
         self.r_den += rd
-
-
-def compute_metrics(
-        metrics: Dict[str, Callable],
-        logits=None,
-        labels=None,
-        clusters=None,
-        gold_clusters=None,
-        mention_to_predicted=None,
-        mention_to_gold=None
-) -> Dict[str, float]:
-    results = {}
-    for metric_nm, metric_fn in metrics.items():
-        outputs = metric_fn(
-            logits=logits,
-            labels=labels,
-            clusters=clusters,
-            gold_clusters=gold_clusters,
-            mention_to_predicted=mention_to_predicted,
-            mention_to_gold=mention_to_gold
-        )
-        for metric_suffix, metric_val in outputs.items():
-            results[metric_nm + '_' + metric_suffix] = metric_val
-
-        return results
-
-    #
-    # return {metric_nm: metric_fn(
-    #     logits=logits,
-    #     labels=labels,
-    #     clusters=clusters,
-    #     gold_clusters=gold_clusters,
-    #     mention_to_predicted=mention_to_predicted,
-    #     mention_to_gold=mention_to_gold
-    # ).cpu().detach().item()
-    #         for metric_nm, metric_fn in metrics.items()}
-
-# noinspection PyUnusedLocal
-# def ner_acc(logits, labels, *args, **kwargs):
-#     """
-#         Does not distinguish b/w invalid spans, and actually annotated spans.
-#     :param logits: n_spans, n_classes
-#     :param labels: n_spans
-#     :return: scalar
-#     """
-#     return {
-#         'acc_all': torch.mean((torch.argmax(logits, dim=1) == labels).float()),
-#         'acc_only_annotated': torch.mean((torch.argmax(logits[labels != 0], dim=1) == labels[labels != 0]).float())
-#     }
-
-
-# # noinspection PyUnusedLocal
-# def pruner_pr(logits, labels, *args, **kwargs):
-#     """
-#     :param logits: n_spans
-#     :param labels: n_spans
-#     :return: scalar
-#     """
-#     p = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
-#     r = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((logits > 0).to(float))
-#     # TODO: add f1
-#     return {'p': p, 'r': r}
-#
-#
-# # noinspection PyUnusedLocal
-# def ner_span_recog_pr(logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
-#     """
-#         Treat as binary clf. And find proportion of spans which were correctly recognized as being spans
-#         (regardless of the label).
-#     """
-#     _logits = torch.argmax(logits, dim=1)  # n_spans, 1
-#     p = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
-#     r = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((_logits > 0).to(float))
-#     return {'p': p, 'r': r}
-
-
-# # noinspection PyUnusedLocal
-# def coref_b_cubed_prf(clusters, mention_to_gold, *args, **kwargs):
-#
-#     evaluators = _coref_b_cubed_(clusters=clusters, mention_to_gold=mention_to_gold)
-
-
-# def _coref_b_cubed_(clusters, mention_to_gold):
-#     num, dem = 0, 0
-#
-#     for c in clusters:
-#         if len(c) == 1:
-#             continue
-#
-#         gold_counts = Counter()
-#         correct = 0
-#         for m in c:
-#             if m in mention_to_gold:
-#                 gold_counts[tuple(mention_to_gold[m])] += 1
-#         for c2, count in gold_counts.items():
-#             if len(c2) != 1:
-#                 correct += count * count
-#
-#         num += correct / float(len(c))
-#         dem += len(c)
-#
-#     return num, dem
-
-
-# # noinspection PyUnusedLocal
-# def _coref_muc_(clusters, mention_to_gold, *args, **kwargs):
-#     tp, p = 0, 0
-#     for c in clusters:
-#         p += len(c) - 1
-#         tp += len(c)
-#         linked = set()
-#         for m in c:
-#             if m in mention_to_gold:
-#                 linked.add(mention_to_gold[m])
-#             else:
-#                 tp -= 1
-#         tp -= len(linked)
-#     return tp, p
-#
-#
-# # noinspection PyUnusedLocal
-# def _coref_phi4_(clusters, gold_clusters, *args, **kwargs):
-#     return 2 * len([m for m in clusters if m in gold_clusters]) / float(len(clusters) + len(gold_clusters))
-#
-#
-# # noinspection PyUnusedLocal
-# def _coref_ceafe_(clusters, gold_clusters, *args, **kwargs):
-#     clusters = [c for c in clusters if len(c) != 1]
-#     scores = np.zeros((len(gold_clusters), len(clusters)))
-#     for i in range(len(gold_clusters)):
-#         for j in range(len(clusters)):
-#             scores[i, j] = _coref_phi4_(gold_clusters=gold_clusters[i], clusters=clusters[j])
-#     matching = linear_assignment(-scores)
-#     similarity = sum(scores[matching[0], matching[1]])
-#
-#     # similarity = sum(scores[matching[:, 0], matching[:, 1]])
-#     return similarity, len(clusters), similarity, len(gold_clusters)
