@@ -98,8 +98,8 @@ def training_loop(
             if use_wandb:
                 task_specific_wandb_logs = {
                     "loss": train_loss[task_nm][-1],
-                    "train": train_eval.results(),
-                    "valid": dev_eval.results()
+                    "train": train_eval.report(),
+                    "valid": dev_eval.report()
                 }
                 wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
