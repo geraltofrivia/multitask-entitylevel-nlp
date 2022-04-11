@@ -90,17 +90,14 @@ def training_loop(
             del trn_ds
 
         # Bookkeep
+        train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
+        dev_metrics = train_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
         for task_nm in tasks:
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
-            train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
-            dev_metrics = train_eval.aggregate_reports(dev_metrics, dev_eval.report())
 
             if use_wandb:
-                task_specific_wandb_logs = {
-                    "loss": train_loss[task_nm][-1],
-                    "train": train_eval.report(),
-                    "valid": dev_eval.report()
-                }
+                task_specific_wandb_logs = {"loss": train_loss[task_nm][-1]}
                 wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         print(f"\nEpoch: {e:3d}" +
