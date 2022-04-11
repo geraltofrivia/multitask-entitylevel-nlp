@@ -76,7 +76,7 @@ def training_loop(
                 train_eval.update(instance=instance, outputs=outputs)
 
                 for task_nm in instance['tasks']:
-                    loss = outputs["loss"][task_nm]
+                    per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
 
                 # Try to plug mem leaks
                 del loss
