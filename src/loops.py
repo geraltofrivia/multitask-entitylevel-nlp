@@ -59,12 +59,12 @@ def training_loop(
                 # Move all input tensors to the right devices
                 instance = change_device(instance, device)
 
-                # # DEBUG
-                # if instance['candidate_starts'].shape[0] > 10000:
-                #     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                #                   f"Input: {instance['input_ids'].shape}."
-                #                   f"Spans: {instance['candidate_starts'].shape}")
-                #     continue
+                # DEBUG
+                if instance['candidate_starts'].shape[0] > 9000:
+                    warnings.warn(f"Skipping {i:5d}. Too many candidates. "
+                                  f"Input: {instance['input_ids'].shape}."
+                                  f"Spans: {instance['candidate_starts'].shape}")
+                    continue
 
                 # Forward Pass
                 outputs = forward_fn(**instance)
