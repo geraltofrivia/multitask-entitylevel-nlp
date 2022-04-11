@@ -75,6 +75,9 @@ def training_loop(
                 # Throw the outputs to the eval benchmark also
                 train_eval.update(instance=instance, outputs=outputs)
 
+                for task_nm in instance['tasks']:
+                    loss = outputs["loss"][task_nm]
+
                 # Try to plug mem leaks
                 del loss
                 change_device(outputs, 'cpu')
