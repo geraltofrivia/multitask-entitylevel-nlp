@@ -66,7 +66,7 @@ class Metric(ABC):
         ...
 
     def reset(self):
-        self.logs = Dict[str, List] = {}
+        self.logs: Dict[str, List] = {}
 
 
 class MacroMetric(Metric, ABC):
