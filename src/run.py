@@ -5,7 +5,8 @@ import transformers
 from pathlib import Path
 from copy import deepcopy
 from functools import partial
-from typing import List, Callable, Dict, Iterable
+from mytorch.utils.goodies import mt_save_dir
+from typing import List, Callable, Iterable, Union
 
 # Local imports
 try:
@@ -52,28 +53,37 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
     return options[key]
 
 
+def get_save_parent_dir(parentdir: Path, tasks: List[str], config: Union[transformers.BertConfig, dict]) -> Path:
+    """
+        Normally returns parentdir/'_'.join(sorted(tasks)).
+        E.g. if tasks are ['coref', 'ner']:
+                parentdir/coref_ner
+            but if they are arranged like ['ner', coref'], the output would still be
+                parentdir/coref_ner
+            if tasks are ['ner', 'pruner', 'coref']:
+                parentdir/coref_ner_pruner
+
+        However, if we find that trim flag is active in config, or that the run is going to wandb-trials
+            then the output is
+                parentdir/trial/<tasks concatenated with _ in alphabetical order>
+    """
+
+    if config.trim or config.wandb_trial:
+        return parentdir / 'trial' / '_'.join(sorted(tasks))
+    else:
+        return parentdir / '_'.join(sorted(tasks))
+
+
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
 @click.option("--tasks", "-t", type=str, default=None, multiple=True,
               help="Multiple values are okay e.g. -t coref -t ner or just one of these", )
-@click.option(
-    "--encoder",
-    "-enc",
-    type=str,
-    default=None,
-    help="Which BERT model (for now) to load.",
-)
+@click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--epochs", "-e", type=int, default=None,
               help="Specify the number of epochs for which to train.")
 @click.option("--learning-rate", "-lr", type=float, default=0.005,
               help="Learning rate. Defaults to 0.005 if not specified")
-@click.option(
-    "--device",
-    "-dv",
-    type=str,
-    default=None,
-    help="The device to use: cpu, cuda, cuda:0, ...",
-)
+@click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
 @click.option('--train-encoder', is_flag=True, default=False,
@@ -89,6 +99,7 @@ def pick_loss_scale(options: dict, tasks: Iterable[str]):
 @click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
               help="If true, dataiter ignores those candidates which have verbs in them "
                    "IF the doc has more than 10k candidates.")
+@click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
 def run(
         dataset: str,
         epochs: int = 10,
@@ -102,8 +113,13 @@ def run(
         ner_unweighted: bool = False,
         wandb_comment: str = '',
         wandb_trial: bool = False,
-        filter_candidates_pos: bool = False
+        filter_candidates_pos: bool = False,
+        save: bool = False
 ):
+    # If trim is enabled, we WILL turn the wandb_trial flag on
+    if trim:
+        wandb_trial = True
+
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
@@ -123,6 +139,9 @@ def run(
     config.lr = learning_rate
     config.tasks = tasks
     config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] if filter_candidates_pos else -1
+    config.wandb = use_wandb
+    config.wandb_comment = wandb_comment
+    config.wandb_trial = wandb_trial
 
     # Assign loss scales based on task
     loss_scales = pick_loss_scale(CONFIG, tasks)
@@ -204,7 +223,15 @@ def run(
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
                    group="trial" if wandb_trial or trim else "main", config=config.to_dict())
 
+    # Saving stuff
+    if save:
+        save_dir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, config=config), _newdir=True)
+        save_params = config.to_dict()
+    else:
+        save_dir, save_params = None, None
+
     outputs = training_loop(
+        model=model,
         epochs=epochs,
         trn_dl=train_ds,
         forward_fn=model.pred_with_labels,
@@ -214,7 +241,10 @@ def run(
         opt=opt,
         tasks=tasks,
         loss_scales=torch.tensor(loss_scales, dtype=torch.float, device=device),
-        use_wandb=use_wandb
+        flag_wandb=use_wandb,
+        flag_save=save,
+        save_dir=save_dir,
+        save_params=save_params
     )
     print("potato")
 

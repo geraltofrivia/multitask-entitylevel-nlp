@@ -8,6 +8,7 @@ mkdir data/runs/ne_coref
 mkdir models
 mkdir models/glove
 mkdir models/wordtovec
+mkdir models/trained
 
 # Downloading conll formatted ontonotes skeleton files
 wget https://github.com/ontonotes/conll-formatted-ontonotes-5.0/archive/refs/tags/v12.tar.gz -P data/raw/ontonotes
