@@ -1,6 +1,7 @@
 mkdir data
 mkdir data/raw
 mkdir data/raw/ontonotes
+mkdir data/raw/scierc
 mkdir data/parsed
 mkdir data/parsed/ontonotes
 mkdir data/runs
@@ -18,6 +19,12 @@ mv data/raw/ontonotes/conll-formatted-ontonotes-5.0-12/conll-formatted-ontonotes
 mv data/raw/ontonotes/conll-2012/conll-formatted-ontonotes-5.0 data/raw/ontonotes/conll-2012/v5
 rm -r data/raw/ontonotes/conll-formatted-ontonotes-5.0-12
 
+# Downloading pre-processed SciERC dataset
+wget http://nlp.cs.washington.edu/sciIE/data/sciERC_processed.tar.gz -P data/raw/scierc
+tar -xvf data/raw/scierc/sciERC_processed.tar.gz -C data/raw/scierc
+mv data/raw/scierc/processed_data/json/* data/raw/scierc/
+rm -r data/raw/scierc/processed_data
+
 # Running scripts to convert .skel files to .conll files
 src/preproc/conll-2012/v3/scripts/skeleton2conll.sh -D data/raw/ontonotes/ontonotes-release-5.0/data/files/data data/raw/ontonotes/conll-2012
 
@@ -27,7 +34,7 @@ pip install -r requirements.txt
 # Downloading the spacy model
 python -m spacy download en_core_web_sm
 
-# Download word2vec and glove
+# Downloading glove
 wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
 unzip models/glove/glove.6B.zip -d models/glove/
 
