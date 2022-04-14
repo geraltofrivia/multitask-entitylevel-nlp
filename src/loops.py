@@ -1,5 +1,7 @@
+import json
 import wandb
 import torch
+import pickle
 import warnings
 import numpy as np
 from pathlib import Path
@@ -38,14 +40,15 @@ def training_loop(
         flag_wandb: bool = False,
         flag_save: bool = False,
         save_dir: Optional[Path] = None,
-        save_params: dict = {}
+        epochs_last_run: int = 0,
+        save_config: dict = {}
 ) -> (list, list, list):
     train_loss = {task_nm: [] for task_nm in tasks}
     train_metrics = {}
     dev_metrics = {}
 
     # Epoch level
-    for e in range(epochs):
+    for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
 
         # Make data
         trn_ds = trn_dl()
@@ -66,7 +69,7 @@ def training_loop(
                 # Move all input tensors to the right devices
                 instance = change_device(instance, device)
 
-                # DEBUG
+                # DEBUG: if there are more than 9k candidates, skip the instance. save mem.
                 if instance['candidate_starts'].shape[0] > 9000:
                     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
                                   f"Input: {instance['input_ids'].shape}."
@@ -75,8 +78,14 @@ def training_loop(
 
                 # Forward Pass
                 outputs = forward_fn(**instance)
+
+                # Calc loss
                 loss = weighted_addition_losses(outputs["loss"], tasks, loss_scales)
+
+                # Calc gradients
                 loss.backward()
+
+                # Backward Pass
                 opt.step()
 
                 # Throw the outputs to the eval benchmark also
@@ -94,6 +103,7 @@ def training_loop(
             # Evaluation (on the validation set)
             dev_eval.run()
 
+            # Try to plug mem leaks
             del trn_ds
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
@@ -123,16 +133,20 @@ def training_loop(
         if flag_save:
             # TODO: add condition to save above a certain metric
 
-            save_content = {
-                'torch_stuff': [tosave('model.torch', model.state_dict())],
-                'json_stuff': [tosave('config.json', {**save_params, **{'epoch': e}})],
-                'pickle_stuff': [tosave('traces.pkl', [train_metrics, dev_metrics, train_loss])]
-            }
+            # Save config
+            with (save_dir / 'config.json').open('w+', encoding='utf8') as f:
+                json.dump({**save_config, **{'epoch': e}}, f)
 
-            mt_save(
-                save_dir,
-                **save_content
-            )
+            # Save Traces
+            with (save_dir / 'traces.pkl').open('wb+') as f:
+                pickle.dump([train_metrics, dev_metrics, train_loss], f)
+
+            # Save Model
+            torch.save({
+                'epoch': e,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': opt.state_dict(),
+            }, Path(save_dir) / 'torch.save')
             print(f"Model saved on Epoch {e} at {save_dir}.")
 
         # Reset eval benches

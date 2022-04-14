@@ -10,3 +10,10 @@ class BadParameters(Exception):
     """
 
     pass
+
+
+class ImproperDumpDir(Exception):
+    """
+        A broad family invoked when some items are missing/improperly dumped in a dir.
+    """
+    pass
