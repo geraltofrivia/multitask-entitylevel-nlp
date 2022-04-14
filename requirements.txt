@@ -1,5 +1,6 @@
 spacy
 unidecode
+scipy
 numpy
 jsonlines
 tqdm
@@ -10,3 +11,4 @@ thefuzz
 click
 transformers
 torch
+wandb

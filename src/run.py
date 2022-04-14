@@ -1,24 +1,25 @@
+import json
+import wandb
 import click
 import torch
-import numpy as np
 import transformers
 from pathlib import Path
 from copy import deepcopy
-from tqdm.auto import tqdm
 from functools import partial
-from mytorch.utils.goodies import Timer
-from typing import List, Callable, Iterable, Dict
+from typing import List, Callable, Iterable, Union
+from mytorch.utils.goodies import mt_save_dir, tosave
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC
+from loops import training_loop
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataset
-from eval import ner_all, ner_only_annotated, ner_span_recog_recall, ner_span_recog_precision, \
-    pruner_p, pruner_r
+from config import LOCATIONS as LOC, CONFIG
+from utils.exceptions import ImproperDumpDir
+from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
 
 def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
@@ -49,160 +50,200 @@ def get_pretrained_dirs(nm: str):
         return nm, nm, nm
 
 
-def compute_metrics(metrics: Dict[str, Callable], logits, labels) -> Dict[str, float]:
-    return {metric_nm: metric_fn(logits=logits, labels=labels).cpu().detach().item()
-            for metric_nm, metric_fn in metrics.items()}
+def pick_loss_scale(options: dict, tasks: Iterable[str]):
+    key = 'loss_scales_' + '_'.join(sorted(tasks))
+    return options[key]
 
 
-def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
-    for task_nm in inter_epoch.keys():
-        for metric_nm, metric_list in intra_epoch[task_nm].items():
-            inter_epoch[task_nm][metric_nm].append(np.mean(metric_list))
-    return inter_epoch
+def get_saved_wandb_id(loc: Path):
+    with (loc / 'config.json').open('r', encoding='utf8') as f:
+        config = json.load(f)
+
+    return config['wandbid']
 
 
-def simplest_loop(
-        epochs: int,
-        tasks: Iterable[str],
-        opt: torch.optim,
-        forward_fn: Callable,
-        predict_fn: Callable,
-        trn_dl: Callable,
-        dev_dl: Callable,
-        eval_fns: dict,
-) -> (list, list, list):
-    train_loss = {task_nm: [] for task_nm in tasks}
-    train_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
-    valid_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
+def is_equal(a, b) -> bool:
+    """ if there is a str <-> int mismatch or a list/tuple mismatch, we compensate for it."""
+    if a == b:
+        return True
+    if type(a) in [int, str] and type(b) in [int, str]:
+        if str(a) == str(b):
+            return True
+    if type(a) in [list, tuple] and type(b) in [list, tuple]:
+        if tuple(a) == tuple(b):
+            return True
+    if type(a) is dict and type(b) is dict:
+        is_same = True
+        for k, v in a.items():
+            if type(k) is str:
+                try:
+                    _v = b[int(k)]
+                    if v != _v:
+                        is_same = False
+                        break
+                except ValueError:
+                    # What to do?
+                    ...
+                except KeyError:
+                    is_same = False
+                    break
+            elif type(k) is int:
+                try:
+                    _v = b[str(k)]
+                    if v != _v:
+                        is_same = False
+                        break
+                except ValueError:
+                    # What to do?
+                    ...
+                except KeyError:
+                    is_same = False
+                    break
+            else:
+                if not (k in b and v == b[k]):
+                    is_same = False
+                    break
+        if is_same:
+            return True
+    return False
 
-    # Make data
-    trn_ds = trn_dl()
-    dev_ds = dev_dl()
 
-    # Epoch level
-    for e in range(epochs):
+def check_dumped_config(config: transformers.BertConfig, loc: Path,
+                        verbose: bool = True, find_alternatives: bool = True) -> bool:
+    """
+        If the config stored in the dir mismatches the config passed as param, find out places where it does mismatch
+        And second, find alternatives in the parent dir if there are any similar ones.
+    :param config: a BertConfig object with custom fields that we're using included in there as well.
+    :param loc: the directory where we expect this config to be stored.
+    :param verbose: if true, we print out the differences in the given and stored config
+    :param find_alternatives: if True, we go through the dict and try to find if there are
+        other configs that match up the given one.
+    """
 
-        per_epoch_loss = {task_nm: [] for task_nm in tasks}
-        per_epoch_tr_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
-        per_epoch_vl_metrics = {task_nm: {metric_nm: [] for metric_nm in eval_fns[task_nm].keys()} for task_nm in tasks}
+    # Pull the old config
+    try:
+        with (loc / 'config.json').open('r', encoding='utf8') as f:
+            old_config = json.load(f)
+    except FileNotFoundError:
+        return False
 
-        # Train
-        with Timer() as timer:
+    config_d = config.to_dict()
+    mismatches = {}
+    for k, v in config_d.items():
+        if k not in old_config:
+            mismatches[k] = None
+            continue
+        if not is_equal(v, old_config[k]):
+            mismatches[k] = old_config[k]
 
-            # Train Loop
-            for instance in tqdm(trn_ds):
+    if not mismatches:
+        # They're all same!
+        # Go through all elements of old config and put it on the new one
+        for k, v in old_config.items():
+            if k not in config_d:
+                setattr(config, k, v)
+        return True
+    else:
+        # There are some discrepancies
+        if verbose:
+            print("Following are the differences found in the configs.")
+            key_maxlen = max(len(k) for k in mismatches) + 4
+            for k, v in mismatches.items():
+                print(f"Old: {k: >{key_maxlen}}: {v}")
+                print(f"New: {k: >{key_maxlen}}: {config_d[k]}")
 
-                # Reset the gradients.
-                opt.zero_grad()
+        if find_alternatives:
+            alternative_dirs = loc.parent.glob('*')
+            suitable_alternatives: List[Path] = []
+            for alternative_dir in alternative_dirs:
+                if check_dumped_config(config=config, loc=alternative_dir, verbose=False,
+                                       find_alternatives=False):
+                    suitable_alternatives.append(alternative_dir)
 
-                # Forward Pass
-                outputs = forward_fn(**instance)
+            if not suitable_alternatives:
+                # No other folder has a similar config also
+                print("No other saved runs have a similar config. You should save a new run altogether."
+                      "For that, re-run the same command but without the -resume-dir arg.")
+                return False
+            else:
+                print(f"Similar config found in directories {', '.join(dirnm.name for dirnm in suitable_alternatives)}."
+                      f"You could replace the -resume-dir with either of these if you want to resume them instead.")
+                return False
 
-                """
-                    Depending on instance.tasks list, do the following:
-                        - task specific loss (added to losses)
-                        - task specific metrics (added to metrics)
-                """
-                for task_nm in instance['tasks']:
-                    loss = outputs["loss"][task_nm]
-                    per_epoch_loss[task_nm].append(loss.item())
 
-                    # For the pruner task, we don't want "logits" we want "logits_after_pruning"
-                    logits_keynm = "logits" if task_nm != "pruner" else "logits_after_pruning"
-                    instance_metrics = compute_metrics(eval_fns[task_nm],
-                                                       logits=outputs[task_nm][logits_keynm],
-                                                       labels=outputs[task_nm]["labels"])
+def get_save_parent_dir(parentdir: Path, tasks: List[str], config: Union[transformers.BertConfig, dict]) -> Path:
+    """
+        Normally returns parentdir/'_'.join(sorted(tasks)).
+        E.g. if tasks are ['coref', 'ner']:
+                parentdir/coref_ner
+            but if they are arranged like ['ner', coref'], the output would still be
+                parentdir/coref_ner
+            if tasks are ['ner', 'pruner', 'coref']:
+                parentdir/coref_ner_pruner
 
-                    for metric_nm, metric_vl in instance_metrics.items():
-                        per_epoch_tr_metrics[task_nm][metric_nm].append(metric_vl)
+        However, if we find that trim flag is active in config, or that the run is going to wandb-trials
+            then the output is
+                parentdir/trial/<tasks concatenated with _ in alphabetical order>
+    """
 
-                # TODO: losses need to be mixed!
-                loss = torch.sum(torch.hstack([outputs["loss"][task_nm] for task_nm in instance['tasks']]))
-                loss.backward()
-                opt.step()
-                del loss
-                del outputs
-
-            # Val
-            with torch.no_grad():
-
-                for instance in tqdm(dev_ds):
-                    outputs = forward_fn(**instance)
-
-                    for task_nm in instance["tasks"]:
-
-                        # For the pruner task, we don't want "logits" we want "logits_after_pruning"
-                        logits_keynm = "logits" if task_nm != "pruner" else "logits_after_pruning"
-
-                        logits = outputs[task_nm][logits_keynm]
-                        labels = outputs[task_nm]["labels"]
-
-                        instance_metrics = compute_metrics(eval_fns[task_nm], logits=logits, labels=labels)
-                        for metric_nm, metric_vl in instance_metrics.items():
-                            per_epoch_vl_metrics[task_nm][metric_nm].append(metric_vl)
-
-                    del outputs
-
-        # Bookkeep
-        for task_nm in tasks:
-            train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
-            train_metrics = aggregate_metrics(train_metrics, per_epoch_tr_metrics)
-            valid_metrics = aggregate_metrics(valid_metrics, per_epoch_vl_metrics)
-
-        print(f"\nEpoch: {e:3d}" +
-              ''.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}" +
-                       ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                for metric_nm, metric_vls in train_metrics[task_nm].items()]) +
-                       ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                for metric_nm, metric_vls in valid_metrics[task_nm].items()])
-                       # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
-                       # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
-                       for task_nm in tasks]))
-
-    return train_metrics, valid_metrics, train_loss
+    if config.trim or config.wandb_trial:
+        return parentdir / 'trial' / '_'.join(sorted(tasks))
+    else:
+        return parentdir / '_'.join(sorted(tasks))
 
 
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
+@click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
+@click.option("--learning-rate", "-lr", type=float, default=0.005, help="Learning rate. Defaults to 0.005.")
+@click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tasks", "-t", type=str, default=None, multiple=True,
               help="Multiple values are okay e.g. -t coref -t ner or just one of these", )
-@click.option(
-    "--encoder",
-    "-enc",
-    type=str,
-    default=None,
-    help="Which BERT model (for now) to load.",
-)
-@click.option(
-    "--epochs",
-    "-e",
-    type=int,
-    default=None,
-    help="Specify the number of epochs for which to train.",
-)
-@click.option(
-    "--device",
-    "-dv",
-    type=str,
-    default=None,
-    help="The device to use: cpu, cuda, cuda:0, ...",
-)
+@click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
 @click.option('--ner-unweighted', is_flag=True, default=False,
               help="If True, we do not input priors of classes (estimated from the dev set) into Model -> NER CE loss.")
+@click.option('--use-wandb', '-wb', is_flag=True, default=False,
+              help="If True, we report this run to WandB")
+@click.option('--wandb-comment', '-wbm', type=str, default=None,
+              help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
+@click.option('--wandb-trial', '-wbt', is_flag=True, default=False,
+              help="If true, the wandb run is placed in a group of 'trial' runs.")
+@click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
+              help="If true, dataiter ignores those candidates which have verbs in them "
+                   "IF the doc has more than 10k candidates.")
+@click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
+@click.option('--resume-dir', default=-1, type=int,
+              help="In case you want to continue from where we left off, give the folder number. "
+                   "The lookup will go like /models/<task combination>/<resume_dir>/model.torch.")
 def run(
         dataset: str,
         epochs: int = 10,
+        learning_rate: float = 0.005,
         encoder: str = "bert-base-uncased",
         tasks: List[str] = None,
         device: str = "cpu",
         trim: bool = False,
         train_encoder: bool = False,
-        ner_unweighted: bool = False
+        ner_unweighted: bool = False,
+        use_wandb: bool = False,
+        wandb_comment: str = '',
+        wandb_trial: bool = False,
+        filter_candidates_pos: bool = False,
+        save: bool = False,
+        resume_dir: int = -1
 ):
+    # If trim is enabled, we WILL turn the wandb_trial flag on
+    if trim:
+        wandb_trial = True
+
+    # If we are to "resume" training things from somewhere, we should also have the save flag enabled
+    if resume_dir >= 0:
+        save = True
+
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
@@ -219,6 +260,16 @@ def run(
     config.trim = trim
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
+    config.lr = learning_rate
+    config.tasks = tasks
+    config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] if filter_candidates_pos else -1
+    config.wandb = use_wandb
+    config.wandb_comment = wandb_comment
+    config.wandb_trial = wandb_trial
+
+    # Assign loss scales based on task
+    loss_scales = pick_loss_scale(CONFIG, tasks)
+    config.loss_scales = loss_scales.tolist() if not type(loss_scales) is list else loss_scales
 
     if 'ner' in tasks or 'pruner' in tasks:
         # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
@@ -229,13 +280,22 @@ def run(
             split="development",
             tokenizer=tokenizer,
         )
-        config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
-        config.ner_class_weights = temp_ds.estimate_class_weights('ner')
-        config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
+        if 'ner' in tasks:
+            config.ner_n_classes = deepcopy(temp_ds.ner_tag_dict.__len__())
+            config.ner_class_weights = temp_ds.estimate_class_weights('ner')
+        else:
+            config.ner_n_classes = 1
+            config.ner_class_weights = [1.0, ]
+        if 'pruner' in tasks:
+            config.pruner_class_weights = temp_ds.estimate_class_weights('pruner')
         del temp_ds
+    else:
+        config.ner_n_classes = 1
+        config.ner_class_weights = [1.0, ]
 
     # Make the model
     model = BasicMTL(dir_encoder, config=config)
+    print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
     # Load the data
     train_ds = partial(
@@ -246,7 +306,7 @@ def run(
         split="train",
         tokenizer=tokenizer,
     )
-    valid_ds = partial(
+    dev_ds = partial(
         MultiTaskDataset,
         src=dataset,
         config=config,
@@ -256,33 +316,105 @@ def run(
     )
 
     # Make the optimizer
-    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=0.005, freeze_encoder=config.freeze_encoder)
+    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
+                         freeze_encoder=config.freeze_encoder)
 
     # Make the evaluation suite (may compute multiple metrics corresponding to the tasks)
-    eval_fns: Dict[str, Dict[str, Callable]] = {
-        'ner': {'acc': ner_all,
-                'acc_l': ner_only_annotated,
-                'span_p': ner_span_recog_precision,
-                'span_r': ner_span_recog_recall},
-        'coref': {
-
-        },
-        'pruner': {'p': pruner_p,
-                   'r': pruner_r}
-    }
+    metrics = []
+    if 'ner' in tasks:
+        metrics += [NERAcc(), NERSpanRecognitionPR()]
+    if 'pruner' in tasks:
+        metrics += [PrunerPR()]
+    if 'coref' in tasks:
+        metrics += [CorefBCubed(), CorefMUC(), CorefCeafe()]
+    train_eval = Evaluator(
+        predict_fn=model.pred_with_labels,
+        dataset_partial=train_ds,
+        metrics=metrics,
+        device=device
+    )
+    dev_eval = Evaluator(
+        predict_fn=model.pred_with_labels,
+        dataset_partial=dev_ds,
+        metrics=metrics,
+        device=device
+    )
 
     print(config)
     print("Training commences!")
 
-    outputs = simplest_loop(
+    # Saving stuff
+    if save:
+        savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config)
+        savedir.mkdir(parents=True, exist_ok=True)
+
+        if resume_dir >= 0:
+            # We already know which dir to save the model to.
+            savedir = savedir / str(resume_dir)
+            assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
+        else:
+            # This is a new run and we should just save the model in a new place
+            savedir = mt_save_dir(parentdir=savedir, _newdir=True)
+
+        save_config = config.to_dict()
+        # save_objs = [tosave('tokenizer.pkl', tokenizer), tosave('config.pkl', )]
+    else:
+        savedir, save_config, save_objs = None, None, None
+
+    # Resuming stuff
+    if resume_dir >= 0:
+        # We are resuming the model
+        savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, config=config), _newdir=False)
+
+        """
+            First check if the config matches. If not, then
+                - report the mismatches
+                - try to find other saved models which have the same config.
+            
+            Get the WandB ID (if its there, and if WandB is enabled.)
+            Second, pull the model weights and put them on the model.            
+         """
+
+        # Check config
+        if not check_dumped_config(config, savedir):
+            raise ImproperDumpDir(f"No config.json file found in {savedir}. Exiting.")
+
+        # See WandB stuff
+        if use_wandb:
+            # Try to find WandB ID in saved stuff
+            config.wandbid = get_saved_wandb_id(savedir)
+
+        # Pull checkpoint and update opt, model
+        checkpoint = torch.load(savedir / 'torch.save')
+        model.load_state_dict(checkpoint['model_state_dict'])
+        opt.load_state_dict(checkpoint['optimizer_state_dict'])
+        print(f"Successfully resuming training from Epoch {config.epoch}")
+
+    # WandB stuff
+    if use_wandb:
+        if not 'wandbid' in config.to_dict():
+            config.wandbid = wandb.util.generate_id()
+
+        wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
+                   id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
+        wandb.config.update(config.to_dict(), allow_val_change=True)
+
+    outputs = training_loop(
+        model=model,
         epochs=epochs,
         trn_dl=train_ds,
-        dev_dl=valid_ds,
         forward_fn=model.pred_with_labels,
-        predict_fn=model.forward,
-        eval_fns=eval_fns,
+        device=device,
+        train_eval=train_eval,
+        dev_eval=dev_eval,
         opt=opt,
-        tasks=tasks
+        tasks=tasks,
+        loss_scales=torch.tensor(loss_scales, dtype=torch.float, device=device),
+        flag_wandb=use_wandb,
+        flag_save=save,
+        save_dir=savedir,
+        save_config=save_config,
+        epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0
     )
     print("potato")
 

@@ -441,6 +441,22 @@ class BasicMTL(nn.Module):
             n_top_spans: int,
             *args, **kwargs
     ):
+        """
+
+        :param encoded:
+        :param top_span_emb:
+        :param top_span_mention_scores:
+        :param n_top_spans:
+        :param args:
+        :param kwargs:
+        :return:
+            {
+                "top_antecedents": tensor: indices in top span candidates of top antecedents for each mention
+                ...
+                # TODO: fill this
+            }
+        """
+
         # opp = self.coarse_to_fine_pruning(
         #     top_span_emb, top_span_mention_scores, self.config.max_top_antecedents
         # )
@@ -519,18 +535,25 @@ class BasicMTL(nn.Module):
         top_antecedents_per_ana_emb[top_antecedents_per_ana_ind < 0] = 0
 
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
-        top_antecedents_mask = torch.ones_like(top_antecedents_per_ana_ind)
-        top_antecedents_mask[top_antecedents_per_ana_ind < 0] = 0
-        top_antecedents_mask = torch.hstack(
+        top_antecedents_per_ana_ind = torch.hstack(
             [
-                top_antecedents_mask,
-                torch.zeros(
-                    (top_antecedents_mask.shape[0], 1),
-                    dtype=top_antecedents_mask.dtype,
-                    device=top_antecedents_mask.device,
-                ),
+                top_antecedents_per_ana_ind,
+                torch.zeros((top_antecedents_per_ana_ind.shape[0], 1),
+                            dtype=torch.int64, device=self.config.device) - 1,
             ]
         )
+        top_antecedents_mask = torch.ones_like(top_antecedents_per_ana_ind)
+        top_antecedents_mask[top_antecedents_per_ana_ind < 0] = 0
+        # top_antecedents_mask = torch.hstack(
+        #     [
+        #         top_antecedents_mask,
+        #         torch.zeros(
+        #             (top_antecedents_mask.shape[0], 1),
+        #             dtype=top_antecedents_mask.dtype,
+        #             device=self.config.device,
+        #         ),
+        #     ]
+        # )
 
         # We argsort this to yield a list of indices.
 
@@ -545,7 +568,7 @@ class BasicMTL(nn.Module):
             1
         )  # [n_ana, n_ante, span_emb]
         anaphor_emb = top_span_emb.unsqueeze(1).repeat(
-            1, self.config.max_top_antecedents, 1
+            1, min(n_top_spans, self.config.max_top_antecedents), 1
         )  # [n_ana, n_ante, span_emb]
         pair_emb = torch.cat(
             [anaphor_emb, top_antecedents_per_ana_emb, similarity_emb], 2
@@ -565,12 +588,41 @@ class BasicMTL(nn.Module):
             [top_antecedent_scores, dummy_scores], dim=1
         )  # [n_ana, n_ante + 1]
 
-        # TODO: still need to understand Coref in its entirety.
+        # Now we transpose some things back from the space of individual span's candidates to the space of pruned spans
+
+        # Now you have a notion of which are the likeliest antecedents for every given anaphor (sorted by scores).
+        top_antecedent_indices_in_each_span_cand_space = torch.argsort(
+            top_antecedent_scores, descending=True
+        )  # [n_ana, n_ante + 1]
+
+        # TODO: I'm not sure about this. Empirically decide.
+        # Since we're going to be using the top_antecedent_mask, need to get the mask arranged in the same fashion.
+        top_antecedent_mask = top_antecedents_mask.gather(
+            index=top_antecedent_indices_in_each_span_cand_space,
+            dim=1
+        )  # [n_ana, n_ante + 1]
+
+        '''
+             The previous code (commented below) was flawed. Like, objectively wrong.
+             Previously, top_antecedent_indices were in not in the same space, but just argsorted scores
+                so a value of 45 in index (3, 0) would mean that 
+                for the third span, antecedent candidate #45 is the most likely antecedent. 
+                However, this is not 45 in top_spans .. 
+                just 45th antecedent in the list of top 50 spans for THIS anaphor.
+                
+             So, that's fixed now.  
+        '''
+        top_antecedent_indices = top_antecedents_per_ana_ind.gather(
+            index=top_antecedent_indices_in_each_span_cand_space,
+            dim=1
+        )  # [n_ana, n_ante + 1]
 
         # Now we just return them.top_antecedents_per_ana_emb
         return {
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
+            "top_antecedents": top_antecedent_indices,
+            "antecedent_map": top_antecedents_per_ana_ind
         }
 
     # noinspection PyUnusedLocal
@@ -665,6 +717,11 @@ class BasicMTL(nn.Module):
             "ner": None,
         }
 
+        # DEBUG
+        if candidate_span_embeddings.isnan().any():
+            raise AssertionError(f"Found {candidate_span_embeddings.isnan().float().sum()} nans in Can Span Emb!"
+                                 f"\n\tAt this point there are {encoded.isnan().float().sum()} nans in encoded.")
+
         if "coref" in tasks or "pruner" in tasks:
             pruner_op = self.pruner(
                 input_ids=input_ids,
@@ -722,7 +779,8 @@ class BasicMTL(nn.Module):
             tasks: Iterable[str],
             coref: dict = None,
             ner: dict = None,
-            pruner: dict = None
+            pruner: dict = None,
+            prep_coref_eval: bool = True
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -753,6 +811,8 @@ class BasicMTL(nn.Module):
             gold_labels: 0/1 arr indicating which of all the candidate spans are named entities
                 which are coreferent (in the case of ontonotes),
                 or just valid mentions (singletons + coreferent) for other datasets.
+        :param prep_coref_eval: if true, we run the coref outputs (and inputs) through a bunch of post processing,
+            making it possible that we can use b-cubed, muc etc functions to actually eval coref.
         """
         predictions = self.forward(
             input_ids=input_ids,
@@ -764,10 +824,10 @@ class BasicMTL(nn.Module):
             n_subwords=n_subwords,
             candidate_starts=candidate_starts,
             candidate_ends=candidate_ends,
-            tasks=tasks,
+            tasks=tasks
         )
 
-        if "pruner" in tasks or "coref" in tasks:
+        if "pruner" in tasks:
             # Unpack pruner specific args (y labels)
             pruner_logits = predictions["pruner"]["logits"]
             pruner_logits_after_pruning = predictions["pruner"]["logits_after_pruning"]
@@ -775,10 +835,14 @@ class BasicMTL(nn.Module):
 
             pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
 
-            assert not torch.isnan(pruner_loss), \
-                f"Found nan in loss. Here are some details - \n\tLogits shape: {pruner_logits.shape}, " \
-                f"\n\tLabels shape: {pruner_labels.shape}, " \
-                f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
+            # DEBUG
+            try:
+                assert not torch.isnan(pruner_loss), \
+                    f"Found nan in loss. Here are some details - \n\tLogits shape: {pruner_logits.shape}, " \
+                    f"\n\tLabels shape: {pruner_labels.shape}, " \
+                    f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
+            except AssertionError:
+                print('potato')
         else:
             pruner_loss = None
             pruner_labels = None
@@ -792,27 +856,27 @@ class BasicMTL(nn.Module):
             gold_cluster_ids_on_candidates = coref["gold_cluster_ids_on_candidates"]
 
             # Unpack Coref specific model predictions
-            # top_span_starts = predictions["pruner"]["top_span_starts"]
-            # top_span_ends = predictions["pruner"]["top_span_ends"]
+            top_span_starts = predictions["pruner"]["top_span_starts"]
+            top_span_ends = predictions["pruner"]["top_span_ends"]
             top_span_indices = predictions["pruner"]["top_span_indices"]
             top_antecedent_scores = predictions["coref"]["top_antecedent_scores"]
             top_antecedent_mask = predictions["coref"]["top_antecedent_mask"]
+            top_antecedents = predictions["coref"]["top_antecedents"]
 
             # Some minor post processing.
             top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
 
-            # Now you have a notion of which are the likeliest antecedents for every given anaphor (sorted by scores).
-            top_antecedent_indices = torch.argsort(
-                top_antecedent_scores, descending=True
-            )
-
             # TODO: understand here onwards
+            # We probably drop the last element because we're one over the limit of candidates already.
             top_antecedent_cluster_ids = top_span_cluster_ids[
-                top_antecedent_indices[:, : top_antecedent_indices.shape[1] - 1]
+                top_antecedents[:, : top_antecedents.shape[1] - 1]
             ]
-            top_antecedent_cluster_ids[
-                top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0
-                ] = 0
+
+            # Make sure the masked candidates are suppressed.
+            # ### This again is problematic because the mask is over the top_antecedent_scores space
+            # ### But antecedent cluster IDs are a different sequence.
+            # ### That is, [2, 3] in the mask being zero does not mean that [2, 3] in cluster IDs should also be zero.
+            top_antecedent_cluster_ids[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
 
             # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
             top_antecedent_cluster_ids += torch.log(top_antecedent_mask.float()).int()[
@@ -831,21 +895,98 @@ class BasicMTL(nn.Module):
             dummy_labels = torch.logical_not(
                 pairwise_labels.any(1, keepdims=True)
             )  # [top_cand, 1]
+            # TODO: might have to concatenate it the other way round (pairwise first, dummy second)
             top_antecedent_labels = torch.cat(
                 [dummy_labels, pairwise_labels], 1
             )  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(
                 top_antecedent_scores, top_antecedent_labels
             )  # [top_cand]
-            coref_loss = torch.sum(coref_loss)
+            coref_loss = torch.mean(coref_loss)
+            # coref_loss = torch.sum(coref_loss)
 
             # predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
             coref_labels = top_antecedent_labels
+
+            if prep_coref_eval:
+
+                """
+                     Prepping things for evaluation (muc, b-cubed etc).
+                     Appropriating the second last cell of 
+                        https://gitlab.inria.fr/magnet/mangoes/-/blob/master/notebooks/BERT%20for%20Co-reference%20Resolution%20-%20Ontonotes.ipynb
+                """
+                # We go for each cluster id. That's not too difficult
+                gold_clusters = {}
+                for i, val in enumerate(coref['gold_cluster_ids']):
+                    cluster_id = val.item()
+
+                    # Populate the dict
+                    gold_clusters[cluster_id] = gold_clusters.get(cluster_id, []) + \
+                                                [(coref['gold_starts'][i].item(), coref['gold_ends'][i].item())]
+
+                gold_clusters = [tuple(v) for v in gold_clusters.values()]
+                mention_to_gold = {}
+                for c in gold_clusters:
+                    for mention in c:
+                        mention_to_gold[mention] = c
+
+                ids = input_ids
+                top_span_starts = top_span_starts
+                top_span_ends = top_span_ends
+                mention_indices = []
+                antecedent_indices = []
+                for i in range(len(top_span_ends)):
+                    # If ith span is predicted to be related to an actual antecedent
+                    if top_antecedents[:, 0][i].item() > 0:
+                        mention_indices.append(i)
+                        antecedent_indices.append(top_antecedents[:, 0][i].item())
+
+                cluster_sets = []
+                for i in range(len(mention_indices)):
+                    new_cluster = True
+                    for j in range(len(cluster_sets)):
+                        if mention_indices[i] in cluster_sets[j] or antecedent_indices[i] in cluster_sets[j]:
+                            cluster_sets[j].add(mention_indices[i])
+                            cluster_sets[j].add(antecedent_indices[i])
+                            new_cluster = False
+                            break
+                    if new_cluster:
+                        cluster_sets.append({mention_indices[i], antecedent_indices[i]})
+
+                cluster_dicts = []
+                clusters = []
+                for i in range(len(cluster_sets)):
+                    cluster_mentions = sorted(list(cluster_sets[i]))
+                    current_ids = []
+                    current_start_end = []
+                    for mention_index in cluster_mentions:
+                        current_ids.append(ids[top_span_starts[mention_index]:top_span_ends[mention_index] + 1])
+                        current_start_end.append(
+                            (top_span_starts[mention_index].item(), top_span_ends[mention_index].item()))
+                    cluster_dicts.append({"cluster_ids": current_ids})
+                    clusters.append(tuple(current_start_end))
+
+                mention_to_predicted = {}
+                for c in clusters:
+                    for mention in c:
+                        mention_to_predicted[mention] = c
+
+                coref_eval = {
+                    "clusters": clusters,
+                    "gold_clusters": gold_clusters,
+                    "mention_to_predicted": mention_to_predicted,
+                    "mention_to_gold": mention_to_gold
+                }
+
+            else:
+                coref_eval = None
+
         else:
             coref_loss = None
             coref_labels = None
             coref_logits = None
+            coref_eval = None
 
         if "ner" in tasks:
             ner_labels = ner["gold_labels"]  # n_spans, 1
@@ -866,7 +1007,7 @@ class BasicMTL(nn.Module):
         outputs = {
             "loss": {"coref": coref_loss, "ner": ner_loss, "pruner": pruner_loss},
             "ner": {"logits": ner_logits, "labels": ner_labels},
-            "coref": {"logits": coref_logits, "labels": coref_labels},
+            "coref": {"logits": coref_logits, "labels": coref_labels, "eval": coref_eval},
             "pruner": {"logits": pruner_logits, "labels": pruner_labels,
                        "logits_after_pruning": pruner_logits_after_pruning}
         }

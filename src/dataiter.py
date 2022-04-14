@@ -36,8 +36,20 @@ class MultiTaskDataset(Dataset):
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
             tasks: Iterable[str] = (),
-            rebuild_cache: bool = False,
+            rebuild_cache: bool = False
     ):
+        """
+            Important thing to note is:
+                - it will never move tensors to GPU. Will always stick to CPU (so that we dont have a mem leak).
+                - ideally you should delete the Dataset and make a new one every time you start a new epoch.
+        :param src: the name of the main dataset (e.g. ontonotes)
+        :param split: the name of the dataset split (e.g. 'train', or 'development')
+        :param config: the config dict (BertConfig + required params)
+        :param tokenizer: a pretrained BertTokenizer
+        :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
+        :param tasks: a list of tasks we need to process (e.g. ['ner', 'coref', 'pruner'] or ['ner',] or ['coref',]
+        :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
+        """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
@@ -45,6 +57,8 @@ class MultiTaskDataset(Dataset):
         self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
+        self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
+            if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
@@ -74,8 +88,6 @@ class MultiTaskDataset(Dataset):
             A sense of prior prob of predicting a class, based on the data available.
             Expect them to be extremely heavily twisted in the case of __na__ of course.
         """
-        # DEBUG!
-        print(len(self.data))
         # Create a flat (long, long) list of all labels
         y = torch.cat([datum[task]['gold_labels'] for datum in self.data]).to('cpu')
         return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
@@ -139,20 +151,7 @@ class MultiTaskDataset(Dataset):
                 and self.config.hidden_size == old_config.hidden_size
                 and self.config.max_span_width == old_config.max_span_width
         ):
-            # Convert every tensor to the right device
-            for i, datum in enumerate(data):
-                for k, v in datum.items():
-                    if type(v) is torch.Tensor:
-                        datum[k] = v.to(self.config.device)
-                    elif type(v) is dict:
-                        for _k, _v in v.items():
-                            if type(_v) is torch.Tensor:
-                                datum[k][_k] = _v.to(self.config.device)
-                    else:
-                        ...
-
             print(f"Pulled {len(data)} instances from {dump_fname}.")
-
             return data, True
         else:
             warnings.warn(
@@ -167,6 +166,9 @@ class MultiTaskDataset(Dataset):
 
     def __getitem__(self, item):
         return self.data[item]
+
+    def __setitem__(self, i, item):
+        self.data[i] = item
 
     def process(self):
         self.data = []
@@ -284,7 +286,7 @@ class MultiTaskDataset(Dataset):
         truth = torch.zeros(
             (candidate_starts.shape[0], candidate_starts.shape[0]),
             dtype=torch.long,
-            device=candidate_starts.device,
+            device='cpu',
         )
 
         for cluster_id in range(1, 1 + torch.max(labels).item()):
@@ -369,7 +371,7 @@ class MultiTaskDataset(Dataset):
                     for span in cluster
                 ],
                 dtype=torch.long,
-                device=self.config.device,
+                device="cpu",
             )  # n_gold
             gold_ends = torch.tensor(
                 [
@@ -378,7 +380,7 @@ class MultiTaskDataset(Dataset):
                     for span in cluster
                 ],
                 dtype=torch.long,
-                device=self.config.device,
+                device="cpu",
             )  # n_gold
         except KeyError as e:
             raise KeyError(
@@ -395,7 +397,7 @@ class MultiTaskDataset(Dataset):
                         for _ in range(len(cluster))
                     ],
                     dtype=torch.long,
-                    device=self.config.device,
+                    device="cpu",
                 )
                 + 1
         )  # n_gold
@@ -431,12 +433,12 @@ class MultiTaskDataset(Dataset):
         gold_starts = torch.tensor(
             [word2subword_starts[span[0]] for span in instance.ner.spans],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )  # n_gold
         gold_ends = torch.tensor(
             [word2subword_ends[span[1] - 1] for span in instance.ner.spans],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )
         gold_labels = []
         for tag in instance.ner.tags:
@@ -444,7 +446,7 @@ class MultiTaskDataset(Dataset):
                 raise AssertionError(f"Tag {tag} not found in Tag dict!")
             gold_labels.append(self.ner_tag_dict[tag])
         gold_labels = torch.tensor(
-            gold_labels, dtype=torch.long, device=self.config.device
+            gold_labels, dtype=torch.long, device="cpu"
         )
 
         # Now to superimpose this tensor on the candidate space.
@@ -519,19 +521,19 @@ class MultiTaskDataset(Dataset):
         wordid_for_subword = torch.tensor(
             [subword2word[subword_id] for subword_id in range(n_subwords)],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )
         sentid_for_subword = torch.tensor(
             [instance.sentence_map[word_id] for word_id in wordid_for_subword],
             dtype=torch.long,
-            device=self.config.device,
+            device="cpu",
         )
         # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
         #                                          for word_id in range(len(word2subword_starts))],
-        #                                         dtype=torch.long, device=self.config.device)
+        #                                         dtype=torch.long, device="cpu")
         # subwordid_for_word_end = torch.tensor([word2subword_ends[word_id]
         #                                        for word_id in range(len(word2subword_ends))],
-        #                                       dtype=torch.long, device=self.config.device)
+        #                                       dtype=torch.long, device="cpu")
 
         # 1 marks that the index is a start of a new token, 0 marks that it is not.
         word_startmap_subword = wordid_for_subword != torch.roll(wordid_for_subword, 1)
@@ -550,12 +552,12 @@ class MultiTaskDataset(Dataset):
         """
 
         candidate_starts = (
-            torch.arange(start=0, end=n_subwords, device=self.config.device)
+            torch.arange(start=0, end=n_subwords, device="cpu")
                 .unsqueeze(1)
                 .repeat(1, self.config.max_span_width)
         )  # n_subwords, max_span_width
         candidate_ends = candidate_starts + torch.arange(
-            start=0, end=self.config.max_span_width, device=self.config.device
+            start=0, end=self.config.max_span_width, device="cpu"
         ).unsqueeze(
             0
         )  # n_subwords, max_span_width
@@ -583,18 +585,38 @@ class MultiTaskDataset(Dataset):
 
         candidate_mask = (
                 filter_beyond_document & filter_different_sentences
+            # & filter_candidate_starts_midword & filter_candidate_ends_midword
         )  # & filter_candidate_starts_midword & \
         #  filter_candidate_ends_midword  # n_subwords, max_span_width
 
         # Now we flatten the candidate starts, ends and the mask and do an index select to ignore the invalid ones
         candidate_mask = candidate_mask.view(-1)  # n_subwords * max_span_width
+
+        """
+            Final Candidate filtering:
+                - if there are more than the specified num. of candidates (self.filter_candidates_threshold),
+                - look at POS tags inside the documents and for each candidate, 
+                - if the POS tag contains VB, skip it. 
+        """
+        if candidate_mask.int().sum().item() > self.filter_candidates_pos_threshold:
+            # Get pos tags for each instance
+            pos = to_toks(instance.pos)
+            for i, (cs, ce) in enumerate(zip(candidate_starts.reshape(-1), candidate_ends.reshape(-1))):
+                if not candidate_mask[i]:
+                    continue
+                _cs = wordid_for_subword[cs]
+                _ce = wordid_for_subword[ce]
+                _pos = pos[_cs: _ce]
+                if 'VB' in _pos \
+                        or 'VBD' in _pos:
+                    candidate_mask[i] = False
+
         candidate_starts = torch.masked_select(
             candidate_starts.view(-1), candidate_mask
         )  # n_subwords*max_span_width
         candidate_ends = torch.masked_select(
             candidate_ends.view(-1), candidate_mask
         )  # n_subwords*max_span_width
-
         tasks = [task if not task.startswith("ner") else "ner" for task in self._tasks_]
 
         return_dict = {
@@ -755,6 +777,15 @@ class DataLoaderToHFTokenizer:
 
 if __name__ == "__main__":
 
+    dataset: str = 'ontonotes'
+    epochs: int = 10
+    encoder: str = "bert-base-uncased"
+    tasks: Iterable[str] = ('ner', 'pruner', 'coref')
+    device: str = "cpu"
+    trim: bool = False
+    train_encoder: bool = False
+    ner_unweighted: bool = False
+
     # # Attempt to pull from disk
     # encoder = transformers.BertModel.from_pretrained(LOC.root / 'models' / 'huggingface'
     # / 'bert-base-uncased' / 'encoder')
@@ -765,11 +796,18 @@ if __name__ == "__main__":
         LOC.root / "models" / "huggingface" / "bert-base-uncased" / "tokenizer"
     )
 
-    # tokenizer = tf.BertTokenizer.from_pretrained('bert-base-uncased')
-    # config = tf.BertConfig('bert-base-uncased')
-    config.max_span_width = 8
-    config.device = "cpu"
-    tasks = ["ner", "coref"]
+    config.max_span_width = 5
+    config.coref_dropout = 0.3
+    config.metadata_feature_size = 20
+    config.unary_hdim = 1000
+    config.binary_hdim = 2000
+    config.top_span_ratio = 0.4
+    config.max_top_antecedents = 50
+    config.device = device
+    config.epochs = epochs
+    config.trim = trim
+    config.freeze_encoder = not train_encoder
+    config.ner_ignore_weights = ner_unweighted
 
     ds = MultiTaskDataset(
         "ontonotes",
@@ -777,7 +815,8 @@ if __name__ == "__main__":
         config=config,
         tokenizer=tokenizer,
         tasks=tasks,
-        # rebuild_cache=True,
+        rebuild_cache=True,
+        filter_candidates_pos_threshold=50
     )
 
     # Custom fields in config
