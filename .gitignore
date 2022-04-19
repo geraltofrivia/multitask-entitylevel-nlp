@@ -153,3 +153,7 @@ cython_debug/
 /models/trained/
 /models/glove/
 /wandb/
+/data/raw/scierc/dev.json
+/data/raw/scierc/sciERC_processed.tar.gz
+/data/raw/scierc/test.json
+/data/raw/scierc/train.json

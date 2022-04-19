@@ -20,7 +20,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.nlp import to_toks, match_subwords_to_words
-from config import LOCATIONS as LOC, NPRSEED
+from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS
 from utils.warnings import NoValidAnnotations
 from utils.data import Document
 
@@ -98,7 +98,6 @@ class MultiTaskDataset(Dataset):
         File names could be:
              MultiTaskDatasetDump_coref.pkl
              MultiTaskDatasetDump_ner.pkl
-             MultiTaskDatasetDump_ner_spacy.pkl
              MultiTaskDatasetDump_coref_ner.pkl
         """
         # Prep the file name
@@ -112,12 +111,11 @@ class MultiTaskDataset(Dataset):
 
     def load_from_disk(self, ignore_cache: bool) -> (list, bool):
         """
-            Look for MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
-            File names could be:
-                 MultiTaskDatasetDump_coref.pkl
-                 MultiTaskDatasetDump_ner.pkl
-                 MultiTaskDatasetDump_ner_spacy.pkl
-                 MultiTaskDatasetDump_coref_ner.pkl
+        Look for MultiTaskDatasetDump_<task1>_<task2>[ad infinitum].pkl in /data/parsed/self._src_/self._split_
+        File names could be:
+             MultiTaskDatasetDump_coref.pkl
+             MultiTaskDatasetDump_ner.pkl
+             MultiTaskDatasetDump_coref_ner.pkl
         :return: a list of processed dicts (optional) and
             a bool indicating whether we successfully pulled sthing from the disk or not
         """
@@ -661,7 +659,6 @@ class RawDataset(Dataset):
             You can configure it to filter out instances which do not have annotations for a particular thing e.g.,
                 - coref by passing tasks=('coref',) (all instances w/o coref annotations will be skipped)
                 - ner by passing tasks=('ner',)
-                - ner (silver std) by passing tasks=('ner_spacy',)
                 - or both by tasks=('coref', 'ner') etc etc
 
 
@@ -675,13 +672,13 @@ class RawDataset(Dataset):
 
         # Sanity check params
         for task in tasks:
-            if task not in ["coref", "ner", "ner_spacy", "pruner"]:
+            if task not in KNOWN_TASKS:
                 raise AssertionError(
                     f"An unrecognized task name sent: {task}. "
-                    "So far, we work with 'coref', 'ner', 'ner_spacy'."
+                    f"So far, we can work with {KNOWN_TASKS}."
                 )
-            if "ner" in task and "ner_spacy" in task:
-                raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
+            # if "ner" in task and "ner_spacy" in task:
+            #     raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
 
         # super().__init__()
         self._src_ = src
@@ -718,9 +715,6 @@ class RawDataset(Dataset):
                     continue
 
                 if "ner" in self._tasks and instance.ner.isempty:
-                    continue
-
-                if "ner_spacy" in self._tasks and instance.ner_spacy.isempty:
                     continue
 
                 self.data.append(instance)

@@ -13,49 +13,51 @@ import re
 import json
 import click
 import spacy
-import pickle
 import warnings
 import unidecode
 from pathlib import Path
 from tqdm.auto import tqdm
 from spacy.tokens import Token
 from copy import deepcopy
-from typing import Iterable, Union, List, Tuple, Dict
+from typing import Iterable, Union, List
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.data import Document, Clusters, NamedEntities
-from config import LOCATIONS as LOC
-from utils.nlp import to_toks, NullTokenizer
+from utils.data import Document, Clusters, NamedEntities, TypedRelations
 from utils.misc import NERAnnotationBlockStack
+from utils.nlp import to_toks, NullTokenizer
+from preproc.commons import GenericParser
+from config import LOCATIONS as LOC
 
 
-class CoNLLOntoNotesParser:
+class CoNLLOntoNotesParser(GenericParser):
+
     def __init__(
             self,
-            ontonotes_dir: Path,
+            raw_dir: Path,
             splits: Iterable[str] = (),
             ignore_empty_documents: bool = False,
     ):
         """
-        :param ontonotes_dir: Path to the folder containing `development`, `train`, `test` subfolders.
-        :param splits: a tuple of which subfolders should we process
+        :param raw_dir: Path to the folder containing `development`, `train`, `test` subfolders.
+        :param splits: a tuple of which sub folders should we process
         :param ignore_empty_documents: flag which if true
             will prevent documents with no coref clusters from being included
         """
-        self.dir: Path = ontonotes_dir
-        self.parsed: dict = {split_nm: [] for split_nm in splits}
+        super().__init__(raw_dir=raw_dir, splits=splits, ignore_empty_documents=ignore_empty_documents)
+        self.dir: Path = raw_dir
         self.splits = (
             ["train", "development", "test", "conll-2012-test"]
-            if not splits
-            else splits
+            if not self.splits
+            else self.splits
         )
+        self.parsed: dict = {split_nm: [] for split_nm in self.splits}
 
         self.flag_ignore_empty_documents: bool = ignore_empty_documents
-        self.write_dir = LOC.parsed / "ontonotes"
+        self.write_dir = self.write_dir / "ontonotes"
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
 
@@ -67,74 +69,6 @@ class CoNLLOntoNotesParser:
         # This tokenizer DOES not tokenize documents.
         # Use this is the document is already tokenized.
         self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
-
-    def get_span_heads(
-            self, document: spacy.tokens.Doc, spans: List[List[int]]
-    ) -> Dict[Tuple[int], List[int]]:
-        """Return a dict where every original span has its corresponding head found out"""
-        return {
-            tuple(span): self._spacy_get_span_heads_(span, document) for span in spans
-        }
-
-    def _spacy_get_span_heads_(
-            self, span: List[int], doc: spacy.tokens.Doc
-    ) -> List[int]:
-        """Get the spacy Span, get its root and return its word index (_, _+1)"""
-        root = doc[span[0]: span[1]].root
-        stop_list = ["det", "num", "adp", "DET", "NUM", "ADP"]
-        if (
-                root.pos_ in stop_list
-        ):  # det can't be a root. So a hack to make sure that det can't be a det.
-            if span[1] - span[0] == 1:
-                # return the same thing
-                assert root.i >= 0
-                return [root.i, root.i + 1]
-            elif span[1] - span[0] == 2:
-                # return the other word
-                root = doc[span[0] + 1]
-                assert root.i >= 0
-                return [root.i, root.i + 1]
-            elif doc[span[0]].pos_ in stop_list:
-                # remove the span[0] and call get_span_head
-                return self._spacy_get_span_heads_([span[0] + 1, span[1]], doc)
-            elif doc[span[1]].pos_ in stop_list:
-                # remove the last one and call get_span_head again
-                return self._spacy_get_span_heads_([span[0], span[1] - 1], doc)
-            else:
-                # root is somewhere in somewhere between span.
-                assert root.i >= 0
-
-                return [root.i, root.i + 1]
-        else:
-            return [root.i, root.i + 1]
-
-    def delete_preprocessed_files(self, split: Union[str, Path]):
-        """Since we are going to write things to the disk,
-        it makes sense to delete all the processed gunk from this dir"""
-
-        write_dir = self.write_dir / split
-
-        if not write_dir.exists():
-            return
-
-        for fname in write_dir.glob("*.pkl"):
-            fname.unlink()
-
-    def write_to_disk(self, split: Union[str, Path], instances: List[Document]):
-        """Write a (large) list of documents to disk"""
-
-        # Assert that folder exists
-        write_dir = self.write_dir / split
-        write_dir.mkdir(parents=True, exist_ok=True)
-
-        with (write_dir / "dump.pkl").open("wb+") as f:
-            pickle.dump(instances, f)
-
-        # with (write_dir / 'dump.jsonl').open('w+', encoding='utf8') as f:
-        #     with jsonlines.Writer(f) as writer:
-        #         writer.write_all([asdict(instance) for instance in instances])
-
-        print(f"Successfully written {len(instances)} at {write_dir}.")
 
     def run(self):
 
@@ -159,12 +93,12 @@ class CoNLLOntoNotesParser:
         folder_dir: Path = folder_dir / "data" / "english" / "annotations"
 
         n_files = len([0 for _ in folder_dir.rglob("*.gold_conll")])
-        for doc_id, fname in enumerate(
+        for doc_id, f_name in enumerate(
                 tqdm(folder_dir.rglob("*.gold_conll"), total=n_files)
         ):
 
             # Iterate through all the files in this dir
-            genre: str = str(fname).split("/")[-4]
+            genre: str = str(f_name).split("/")[-4]
             (
                 documents,
                 clusters,
@@ -173,7 +107,7 @@ class CoNLLOntoNotesParser:
                 doc_parts,
                 doc_pos,
                 doc_ner_raw,
-            ) = self._parse_document_(path=fname)
+            ) = self._parse_document_(path=f_name)
 
             # Check if we want to ignore empty documents
             if self.flag_ignore_empty_documents:
@@ -197,7 +131,7 @@ class CoNLLOntoNotesParser:
 
                 documents = ne_documents
                 clusters = ne_clusters
-                speakers = ne_speakers
+                # speakers = ne_speakers
                 doc_names = ne_docnames
                 doc_parts = ne_docparts
 
@@ -213,6 +147,7 @@ class CoNLLOntoNotesParser:
 
                 # Convert cluster spans to text
                 flat_doc = to_toks(documents[i])
+                # noinspection PyTypeChecker
                 spacy_doc = self.nlp(flat_doc)
                 clusters_ = []
                 for cluster_id, cluster in enumerate(clusters[i]):
@@ -229,23 +164,24 @@ class CoNLLOntoNotesParser:
                     ner_gold_words,
                     ner_gold_tags,
                 ) = self._onto_process_ner_tags_(doc_ner_raw[i], documents[i])
-                (
-                    ner_spacy_spans,
-                    ner_spacy_words,
-                    ner_spacy_tags,
-                ) = self._spacy_process_ner_tags_(spacy_doc)
+                # (
+                #     ner_spacy_spans,
+                #     ner_spacy_words,
+                #     ner_spacy_tags,
+                # ) = self._spacy_process_ner_tags_(spacy_doc)
 
                 # Make NER objects
                 ner_gold = NamedEntities(
                     spans=ner_gold_spans, tags=ner_gold_tags, words=ner_gold_words
                 )
-                ner_spacy = NamedEntities(
-                    spans=ner_spacy_spans, tags=ner_spacy_tags, words=ner_spacy_words
-                )
+                # ner_spacy = NamedEntities(
+                #     spans=ner_spacy_spans, tags=ner_spacy_tags, words=ner_spacy_words
+                # )
 
                 # Span heads calculation
                 span_heads = self.get_span_heads(
-                    spacy_doc, ner_gold_spans + ner_spacy_spans + coref.get_all_spans()
+                    spacy_doc, ner_gold_spans + coref.get_all_spans()
+                    # spacy_doc, ner_gold_spans + ner_spacy_spans + coref.get_all_spans()
                 )
 
                 # Add span heads, words, and pos in NER and Coref objects
@@ -257,9 +193,9 @@ class CoNLLOntoNotesParser:
                 ner_gold.add_words(documents[i])
                 ner_gold.add_pos(doc_pos[i])
 
-                ner_spacy.allocate_span_heads(span_heads=span_heads)
-                ner_spacy.add_words(documents[i])
-                ner_spacy.add_pos(doc_pos[i])
+                # ner_spacy.allocate_span_heads(span_heads=span_heads)
+                # ner_spacy.add_words(documents[i])
+                # ner_spacy.add_pos(doc_pos[i])
 
                 doc = Document(
                     document=documents[i],
@@ -269,8 +205,9 @@ class CoNLLOntoNotesParser:
                     genre=genre,
                     docpart=doc_parts[i],
                     ner=ner_gold,
-                    ner_spacy=ner_spacy,
+                    # ner_spacy=ner_spacy,
                     coref=coref,
+                    rel=TypedRelations([], [])
                 )
                 outputs.append(doc)
 
@@ -326,7 +263,7 @@ class CoNLLOntoNotesParser:
         cur_sentence_speaker_ids = []
         cur_sentence_pos_tags = []
         cur_sentence_ner_tags = []
-        current_clusters = []
+        # current_clusters = []
         docs = 0
         parts: List[int] = []
         with open(path, "r") as input_file:
@@ -463,7 +400,7 @@ class CoNLLOntoNotesParser:
 
             # End condition
             for match in re.findall(self.re_ner_tags, tag):
-                if not ")" in match:
+                if ")" not in match:
                     continue
                 ner_span, ner_text, ner_tag = stack.pop(word_id + 1)
                 finalised_annotations_span.append(ner_span)

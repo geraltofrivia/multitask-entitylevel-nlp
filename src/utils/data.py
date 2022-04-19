@@ -1,8 +1,7 @@
-from dataclasses import dataclass, field
+from typing import List
 from functools import cached_property
-from typing import List, Iterable, Tuple, Dict, Union
+from dataclasses import dataclass, field
 
-from utils.warnings import SpanHeadNotFoundError
 from utils.nlp import to_toks
 
 
@@ -91,6 +90,43 @@ class Clusters:
 
 
 @dataclass
+class TypedRelations:
+    """
+        Another data class obj containing all the things needed for smoothly using typed relations in a document
+    """
+    spans: List[List[List[int]]]  # Looks like [ [[112, 113], [155, 159]], [[2, 6], [11, 13]], ... ]
+    tags: List[str]  # Looks like [ 'meronym',  'lives-in' ... ]
+    words: List[List[List[str]]] = field(default_factory=list)  # Looks like [ [['the', 'neighbor'], ['a', 'boy']], ..]
+    pos: List[List[List[str]]] = field(default_factory=list)  # Looks same as words
+    spans_head: List[List[List[int]]] = field(default_factory=list)
+    words_head: List[List[List[str]]] = field(default_factory=list)
+    pos_heads: List[List[List[str]]] = field(default_factory=list)
+
+    def __len__(self):
+        return len(self.spans)
+
+    @property
+    def isempty(self):
+        return len(self.spans) == 0
+
+    def allocate_span_heads(self, span_heads: dict):
+        """Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
+        output = []
+        for i, pair in enumerate(self.spans):
+            output_pair = []
+            for span in pair:
+                output_pair.append(list(span_heads[tuple(span)]))
+            output.append(output_pair)
+
+        self.spans_head = output
+
+    def get_all(self, tag: str, src: str) -> list:
+        if src not in ["spans", "words", "pos", "spans_head", "words_head", "pos_head"]:
+            raise AssertionError(f"Data source {src} not understood.")
+        return [getattr(self, src)[i] for i, _tag in self.tags if _tag == tag]
+
+
+@dataclass
 class NamedEntities:
     """
     Another data class obj containing all the things needed for smoothly using named entity information in a doc
@@ -123,11 +159,11 @@ class NamedEntities:
 
     def allocate_span_heads(self, span_heads: dict):
         """Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
-        spans_head = []
+        output = []
         for i, span in enumerate(self.spans):
-            spans_head.append(list(span_heads[tuple(span)]))
+            output.append(list(span_heads[tuple(span)]))
 
-        self.spans_head = spans_head
+        self.spans_head = output
 
     def add_words(self, doc: List[List[str]]):
         """
@@ -165,7 +201,6 @@ class NamedEntities:
 
 @dataclass
 class Document:
-
     # The text of the document, broken down as list of sentence. Each sentence is a list of words
     document: List[List[str]]
 
@@ -174,18 +209,22 @@ class Document:
 
     # Docname corresponds to the ontonotes doc
     docname: str
-    docpart: int  # In some cases, ontonotes documents are divided into parts.
-    genre: str  # The ontonotes doc will belong to certain genre. Good to keep track.
 
-    # A clusters object storing all things about coreference
+    # A clusters object storing all things about coreference, empty is fine.
     coref: Clusters
 
-    # Named Entity objects storing spacy and gold named entities (if found)
+    # Named Entity objects storing gold named entities (if found), empty is fine.
     ner: NamedEntities
-    ner_spacy: NamedEntities
+
+    # Typed Relation object storing gold typed relations (if found), empty is fine.
+    rel: TypedRelations
 
     # Split (ontonotes split: train;test;development; conll-2012-test
     split: str = field(default_factory=str)
+
+    # More Ontonotes specific stuff
+    genre: str = field(default_factory=str)  # The ontonotes doc will belong to certain genre. Good to keep track.
+    docpart: int = field(default_factory=int)  # In some cases, ontonotes documents are divided into parts.
 
     # TODO: also add entity linking stuff
 

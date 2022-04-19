@@ -13,18 +13,9 @@ ROOT_LOC: Path = Path("..") if str(Path().cwd()).split("/")[-1] == "src" else Pa
 LOCATIONS: Dict[str, Path] = FancyDict(
     **{
         "root": ROOT_LOC,
-        "ontonotes_raw": ROOT_LOC
-                         / "data"
-                         / "raw"
-                         / "ontonotes"
-                         / "ontonotes-release-5.0",
-        "ontonotes_conll": ROOT_LOC
-                           / "data"
-                           / "raw"
-                           / "ontonotes"
-                           / "conll-2012"
-                           / "v5"
-                           / "data",
+        "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
+        "ontonotes_conll": ROOT_LOC / "data" / "raw" / "ontonotes" / "conll-2012" / "v5" / "data",
+        "scierc": ROOT_LOC / "data" / "raw" / "scierc",
         "raw": ROOT_LOC / "data" / "raw",
         "runs": ROOT_LOC / "data" / "runs",
         "parsed": ROOT_LOC / "data" / "parsed",
@@ -34,6 +25,8 @@ LOCATIONS: Dict[str, Path] = FancyDict(
         "models": ROOT_LOC / "models" / "trained"
     }
 )
+
+KNOWN_TASKS = ["coref", "ner", "ner_spacy", "pruner"]
 
 # LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
 # changed CNP ratio now that coref is normalised to 1
