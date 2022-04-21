@@ -1,5 +1,8 @@
+import json
 import torch
 import numpy as np
+import transformers
+from pathlib import Path
 from copy import deepcopy
 from collections import Counter
 from dataclasses import dataclass, field
@@ -14,7 +17,7 @@ def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
     popped: list = []
 
     ids = sorted(ids, reverse=True)
-    # Fix dtype of ids
+    # Fix datatype of ids
     ids = [int(x) for x in ids]
 
     assert ids[0] < len(
@@ -250,3 +253,118 @@ class ClusterAnnotationBlockStack:
         self.blocks += to_add
 
         return popped
+
+
+def is_equal(a, b) -> bool:
+    """ if there is a str <-> int mismatch or a list/tuple mismatch, we compensate for it."""
+    if a == b:
+        return True
+    if type(a) in [int, str] and type(b) in [int, str]:
+        if str(a) == str(b):
+            return True
+    if type(a) in [list, tuple] and type(b) in [list, tuple]:
+        if tuple(a) == tuple(b):
+            return True
+    if type(a) is dict and type(b) is dict:
+        is_same = True
+        for k, v in a.items():
+            if type(k) is str:
+                try:
+                    _v = b[int(k)]
+                    if v != _v:
+                        is_same = False
+                        break
+                except ValueError:
+                    # What to do?
+                    ...
+                except KeyError:
+                    is_same = False
+                    break
+            elif type(k) is int:
+                try:
+                    _v = b[str(k)]
+                    if v != _v:
+                        is_same = False
+                        break
+                except ValueError:
+                    # What to do?
+                    ...
+                except KeyError:
+                    is_same = False
+                    break
+            else:
+                if not (k in b and v == b[k]):
+                    is_same = False
+                    break
+        if is_same:
+            return True
+    return False
+
+
+def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path],
+                        verbose: bool = True, find_alternatives: bool = True) -> bool:
+    """
+        If the config stored in the dir mismatches the config passed as param, find out places where it does mismatch
+        And second, find alternatives in the parent dir if there are any similar ones.
+    :param config: a BertConfig object with custom fields that we're using included in there as well.
+    :param old: the directory where we expect this config to be stored OR the actual dict pulled already.
+    :param verbose: if true, we print out the differences in the given and stored config
+    :param find_alternatives: if True, we go through the dict and try to find if there are
+        other configs that match up the given one.
+    """
+
+    # If old is a dict, we don't need to pull
+    if type(old) is dict:
+        old_config = old
+    else:
+        # Pull the old config
+        try:
+            with (old / 'config.json').open('r', encoding='utf8') as f:
+                old_config = json.load(f)
+        except FileNotFoundError:
+            return False
+
+    config_d = config.to_dict()
+    mismatches = {}
+    for k, v in config_d.items():
+        if k not in old_config:
+            mismatches[k] = None
+            continue
+        if not is_equal(v, old_config[k]):
+            mismatches[k] = old_config[k]
+
+    if not mismatches:
+        # They're all same!
+        # Go through all elements of old config and put it on the new one
+        for k, v in old_config.items():
+            if k not in config_d:
+                setattr(config, k, v)
+        return True
+    else:
+        # There are some discrepancies
+        if verbose:
+            print("Following are the differences found in the configs.")
+            key_maxlen = max(len(k) for k in mismatches) + 4
+            for k, v in mismatches.items():
+                print(f"Old: {k: >{key_maxlen}}: {v}")
+                print(f"New: {k: >{key_maxlen}}: {config_d[k]}")
+
+        if find_alternatives:
+            alternative_dirs = old.parent.glob('*')
+            suitable_alternatives: List[Path] = []
+            for alternative_dir in alternative_dirs:
+                if check_dumped_config(config=config, old=alternative_dir, verbose=False,
+                                       find_alternatives=False):
+                    suitable_alternatives.append(alternative_dir)
+
+            if not suitable_alternatives:
+                # No other folder has a similar config also
+                print("No other saved runs have a similar config. You should save a new run altogether."
+                      "For that, re-run the same command but without the -resume-dir arg.")
+                return False
+            else:
+                print(f"Similar config found in directories {', '.join(dirnm.name for dirnm in suitable_alternatives)}."
+                      f"You could replace the -resume-dir with either of these if you want to resume them instead.")
+                return False
+        else:
+            return False

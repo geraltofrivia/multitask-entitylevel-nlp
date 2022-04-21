@@ -19,9 +19,10 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.nlp import to_toks, match_subwords_to_words
+from utils.warnings import NoValidAnnotations, LabelDictNotFound
 from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS
-from utils.warnings import NoValidAnnotations
+from utils.nlp import to_toks, match_subwords_to_words
+from utils.misc import check_dumped_config
 from utils.data import Document
 
 np.random.seed(NPRSEED)
@@ -64,18 +65,29 @@ class MultiTaskDataset(Dataset):
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
-        with (LOC.manual / f"ner_{self._src_}_tag_dict.json").open("r") as f:
-            self.ner_tag_dict = json.load(f)
+        if 'ner' in self._tasks_:
+            # We need a tag dictionary
 
-        (
-            self.data,
-            flag_successfully_pulled_from_disk,
-        ) = self.load_from_disk(rebuild_cache)
+            try:
+                with (LOC.manual / f"ner_{self._src_}_tag_dict.json").open("r") as f:
+                    self.ner_tag_dict = json.load(f)
+            except FileNotFoundError:
+                # The tag dictionary does not exist. Report and quit.
+                raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
+
+        if 'rel' in self._tasks_:
+
+            try:
+                with (LOC.manual / f"rel_{self._src_}_tag_dict.json").open("r") as f:
+                    self.rel_tag_dict = json.load(f)
+            except FileNotFoundError:
+                # The tag dictionary does not exist. Report and quit.
+                raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
+
+        (self.data, flag_successfully_pulled_from_disk) = self.load_from_disk(rebuild_cache)
 
         if not flag_successfully_pulled_from_disk:
-            self.dataset = RawDataset(
-                src=src, split=split, tasks=self._tasks_, shuffle=shuffle
-            )
+            self.dataset = DocumentReader(src=src, split=split, tasks=self._tasks_, shuffle=shuffle)
             self.process()
             self.write_to_disk()
 
@@ -143,12 +155,7 @@ class MultiTaskDataset(Dataset):
             data, old_config = pickle.load(f)
 
         # Check if config matches
-        # TODO: we need a way to iterate over all fields of the config somehow
-        if (
-                self.config.vocab_size == old_config.vocab_size
-                and self.config.hidden_size == old_config.hidden_size
-                and self.config.max_span_width == old_config.max_span_width
-        ):
+        if check_dumped_config(self.config, old=old_config, find_alternatives=False, verbose=False):
             print(f"Pulled {len(data)} instances from {dump_fname}.")
             return data, True
         else:
@@ -648,7 +655,7 @@ class MultiTaskDataset(Dataset):
         return return_dict
 
 
-class RawDataset(Dataset):
+class DocumentReader(Dataset):
     def __init__(
             self, src: str, split: str, shuffle: bool = False, tasks: Iterable[str] = ()
     ):
@@ -694,7 +701,7 @@ class RawDataset(Dataset):
         return [fnm for fnm in (LOC.parsed / dataset / split).glob("dump*.pkl")]
 
     def pull_from_disk(self):
-        """RIP ur mem"""
+        """RIP ur mem lol"""
 
         filenames = self.get_fnames(self._src_, self._split_)
         if self._shuffle_:
@@ -717,6 +724,9 @@ class RawDataset(Dataset):
                 if "ner" in self._tasks and instance.ner.isempty:
                     continue
 
+                if "rel" in self._tasks and instance.rel.isempty:
+                    continue
+
                 self.data.append(instance)
 
     def __len__(self):
@@ -737,7 +747,7 @@ class DataLoaderToHFTokenizer:
     Usage snippet:
 
     # Training a tokenizer from scratch
-    ds = RawDataset('ontonotes', split, tasks=('coref',))
+    ds = DocumentReader('ontonotes', split, tasks=('coref',))
     docstrings = DataLoaderToHFTokenizer(dataloader=ds)
     tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
     if uncased:
@@ -752,7 +762,7 @@ class DataLoaderToHFTokenizer:
     tokenizer.train_from_iterator(docstrings, trainer=trainer)
     """
 
-    def __init__(self, dataset: RawDataset):
+    def __init__(self, dataset: DocumentReader):
         self.ds = dataset
 
     @staticmethod
@@ -802,6 +812,7 @@ if __name__ == "__main__":
     config.trim = trim
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
+    config.filter_candidates_pos_threshold = 50
 
     ds = MultiTaskDataset(
         "ontonotes",
@@ -810,7 +821,6 @@ if __name__ == "__main__":
         tokenizer=tokenizer,
         tasks=tasks,
         rebuild_cache=True,
-        filter_candidates_pos_threshold=50
     )
 
     # Custom fields in config

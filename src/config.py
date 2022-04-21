@@ -26,7 +26,11 @@ LOCATIONS: Dict[str, Path] = FancyDict(
     }
 )
 
-KNOWN_TASKS = ["coref", "ner", "ner_spacy", "pruner"]
+KNOWN_TASKS = ["coref", "ner", "ner_spacy", "pruner", "rel"]
+KNOWN_SPLITS = FancyDict(**{
+    'scierc': ['train', 'dev', 'test'],
+    'ontonotes': ['train', 'development', 'test']
+})
 
 # LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
 # changed CNP ratio now that coref is normalised to 1

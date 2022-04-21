@@ -25,7 +25,7 @@ from typing import List, Tuple, Dict, Union
 
 from utils.misc import pop
 from utils.data import Document
-from dataiter import RawDataset
+from dataiter import DocumentReader
 from config import LOCATIONS as LOC
 from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
 
@@ -529,7 +529,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
     # This tokenizer DOES not tokenize documents.
     # Use this is the document is already tokenized.
     nlp.tokenizer = NullTokenizer(nlp.vocab)
-    ds = RawDataset("ontonotes", split, tasks=("coref",))
+    ds = DocumentReader("ontonotes", split, tasks=("coref",))
 
     assert entity_source in ["spacy", "gold"], f"Unknown entity source: {entity_source}"
     ent_src = f"ner_{entity_source}"
