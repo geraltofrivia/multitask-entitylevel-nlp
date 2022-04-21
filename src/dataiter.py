@@ -14,7 +14,7 @@ from transformers import BertConfig
 from torch.utils.data import Dataset
 from mytorch.utils.goodies import FancyDict
 from sklearn.utils import compute_class_weight
-from typing import List, Iterable, Union, Optional, Callable
+from typing import List, Iterable, Union, Optional, Callable, Dict, Tuple
 
 # Local imports
 try:
@@ -779,6 +779,100 @@ class DataLoaderToHFTokenizer:
 
     def __len__(self) -> int:
         return self.ds.__len__()
+
+
+class DataIterCombiner(Dataset):
+    def __init__(
+            self,
+            srcs: List[Callable],
+            sampling_ratio: Optional[Iterable[float]] = None
+
+    ):
+        """
+            A data iter that should be given multiple data iter callables.
+            Sampling ratio, if specified will oversample or undersample based on the ratio.
+
+            Usage:
+
+            ```py
+            ontonotes_di_partial = partial(MultiTaskDataIter, src='ontonotes', split='train', ...)
+            scierc_di_partial = partial(MultiTaskDataIter, src='scierc', split='train', ...)
+
+            dic = DataIterCombiner(src=[ontonotes_di_partial, scierc_di_partial])
+            for inst in dic:
+                # sometime you get instances from ontonotes, sometimes from scierc
+                ...
+            ```
+
+        :param srcs: partials set up to init a dataiter whenever needed
+        :param sampling_ratio: list of weights for each dataiter. e.g. [0.5, 0.5] implies we sample equally from both.
+        """
+
+        # Init all data iters.
+        self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
+
+        """
+            Set dataset sampling indices.
+            The list should be roughly the same size as combined length of all dataiters.
+        """
+        self.source_indices = []
+        self.source_pointers = [-1] * len(self.dataiters)
+        if not sampling_ratio:
+            sampling_ratio = [1] * len(self.dataiters)
+
+        # Normalise sampling_ratios, weighted by aggregate length of all dataiters
+        weights = [int(x * len(self) / float(sum(sampling_ratio))) for x in sampling_ratio]
+
+        # Create a list of ints based on these weights which dictate which iter to choose the next sample from
+
+        for i, dataset_specific_weight in enumerate(weights):
+            self.source_indices += [i] * dataset_specific_weight
+
+        # Now shuffle these
+        np.random.shuffle(self.source_indices)
+
+        # Maintain a history so __getitem__ is deterministic
+        # ie. {0: [0, 0], 1: [1,0]} -> combined_ds[0] -> data source 0, item 0; combined_ds[1] -> data source 1, item 0
+        self.history: Dict[int, Tuple[int, int]] = {}
+
+    def __len__(self):
+        return sum(len(dataiter) for dataiter in self.dataiters)
+
+    def __iter__(self):
+        for dataiter_index in self.source_indices:
+            self.source_pointers[dataiter_index] += 1
+            di = self.dataiters[dataiter_index]
+            yield di[self.source_pointers[dataiter_index] % len(di)]
+
+    def __getitem__(self, item) -> dict:
+
+        if item in self.history:
+            dataiter_index, pointer_index = self.history[item]
+            return self.dataiters[dataiter_index][pointer_index]
+
+        else:
+            # This item is being asked for the first time.
+            # Select the data source, and then based on the last seem item in that data source,
+            # ### ask for the next item.
+
+            # Which source to sample from
+            dataiter_index = self.source_indices[item]
+            di = self.dataiters[dataiter_index]
+
+            # Which item to yield
+            pointer_index = self.source_pointers[dataiter_index]
+            pointer_index += 1
+
+            # Pull the index
+            instance = di[pointer_index % len(di)]
+
+            # Update pointer registry
+            self.source_pointers[dataiter_index] = pointer_index
+
+            # Update the history
+            self.history[item] = (dataiter_index, pointer_index)
+
+            return instance
 
 
 if __name__ == "__main__":
