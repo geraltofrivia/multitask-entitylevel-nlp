@@ -15,7 +15,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from dataiter import MultiTaskDataset
+from dataiter import MultiTaskDataIter
 
 
 class BasicMTL(nn.Module):
@@ -1032,7 +1032,7 @@ if __name__ == "__main__":
     tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
 
     # Get the dataset up and running
-    ds = MultiTaskDataset(
+    ds = MultiTaskDataIter(
         "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
     )
     config.ner_n_classes = ds.ner_tag_dict.__len__()

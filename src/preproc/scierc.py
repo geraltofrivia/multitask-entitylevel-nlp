@@ -139,12 +139,14 @@ def create_label_dict():
 
     # Turn them into dicts and dump them as json
     with (LOC.manual / 'ner_scierc_tag_dict.json').open('w+', encoding='utf8') as f:
-        ner_labels = {i: tag for i, tag in enumerate(ner_labels)}
+        ner_labels = {tag: i for i, tag in enumerate(ner_labels)}
         json.dump(ner_labels, f)
+        print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_scierc_tag_dict.json')}")
 
     with (LOC.manual / 'rel_scierc_tag_dict.json').open('w+', encoding='utf8') as f:
-        rel_labels = {i: tag for i, tag in enumerate(rel_labels)}
+        rel_labels = {tag: i for i, tag in enumerate(rel_labels)}
         json.dump(rel_labels, f)
+        print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_scierc_tag_dict.json')}")
 
 
 @click.command()
@@ -165,6 +167,9 @@ def run(split: str, ignore_empty: bool, collect_labels: bool):
             splits = [split, ]
         parser = SciERCParser(LOC.scierc, splits=splits, ignore_empty_documents=ignore_empty)
         parser.run()
+
+        if split == 'all':
+            create_label_dict()
 
 
 if __name__ == "__main__":

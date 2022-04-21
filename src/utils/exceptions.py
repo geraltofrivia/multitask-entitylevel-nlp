@@ -17,3 +17,8 @@ class ImproperDumpDir(Exception):
         A broad family invoked when some items are missing/improperly dumped in a dir.
     """
     pass
+
+
+class UnknownTaskException(ValueError):
+    """ Raised when a given task in a set of tasks is unknown. """
+    pass

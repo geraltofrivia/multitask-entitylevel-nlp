@@ -5,6 +5,7 @@ import transformers
 from pathlib import Path
 from copy import deepcopy
 from collections import Counter
+from transformers import BertConfig
 from dataclasses import dataclass, field
 from typing import List, Union, Tuple, Optional, Iterable
 
@@ -301,11 +302,14 @@ def is_equal(a, b) -> bool:
     return False
 
 
-def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path],
+def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, BertConfig],
                         verbose: bool = True, find_alternatives: bool = True) -> bool:
     """
         If the config stored in the dir mismatches the config passed as param, find out places where it does mismatch
         And second, find alternatives in the parent dir if there are any similar ones.
+
+        Some keys we're okay to be different. e.g. trim.
+
     :param config: a BertConfig object with custom fields that we're using included in there as well.
     :param old: the directory where we expect this config to be stored OR the actual dict pulled already.
     :param verbose: if true, we print out the differences in the given and stored config
@@ -313,9 +317,13 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path],
         other configs that match up the given one.
     """
 
+    keys_to_ignore: List[str] = ['trim', ]
+
     # If old is a dict, we don't need to pull
     if type(old) is dict:
         old_config = old
+    elif type(old) is BertConfig:
+        old_config = old.to_dict()
     else:
         # Pull the old config
         try:
@@ -332,6 +340,11 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path],
             continue
         if not is_equal(v, old_config[k]):
             mismatches[k] = old_config[k]
+
+    # Ignore some mismatches
+    for key in keys_to_ignore:
+        if key in mismatches:
+            mismatches.pop(key)
 
     if not mismatches:
         # They're all same!

@@ -1,8 +1,8 @@
 {
-  "0": "Method",
-  "1": "Material",
-  "2": "Task",
-  "3": "Metric",
-  "4": "Generic",
-  "5": "OtherScientificTerm"
+  "Method": 0,
+  "Metric": 1,
+  "Generic": 2,
+  "Task": 3,
+  "OtherScientificTerm": 4,
+  "Material": 5
 }

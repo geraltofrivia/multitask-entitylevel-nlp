@@ -1,8 +1,14 @@
-from typing import List
+"""
+    Contain multiple dataclasses and types to control the chaos that is a large python codebase.
+"""
+
 from functools import cached_property
 from dataclasses import dataclass, field
+from typing import List, NewType, Union, Tuple
 
 from utils.nlp import to_toks
+from config import KNOWN_TASKS
+from utils.exceptions import UnknownTaskException
 
 
 @dataclass
@@ -259,3 +265,23 @@ class Document:
             sentence_map
         )  # len(to_toks(self.document)) == len(sentence_map)
         return sentence_map
+
+
+Tasks = NewType('Tasks', Union[List[str], Tuple[str]])
+
+
+def init_tasks(tasks: Union[List[str], Tuple[str]]) -> Tasks:
+    """
+        Usage:
+            l = ['ner', 'coref']
+            print(init_tasks(l))
+            print(type(init_tasks(l)) is list)   # is true
+    """
+    for item in tasks:
+        if not (type(item) is str and item in KNOWN_TASKS):
+            raise UnknownTaskException(f"{item} is not a known task.")
+
+    # We want them to be alphabetical
+    tasks = sorted(tasks)
+
+    return Tasks(tasks)

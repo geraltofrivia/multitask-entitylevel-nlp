@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Dict
 from mytorch.utils.goodies import FancyDict
 
+# No local imports (is a good idea)
+
 # Random seeds
 _SEED_ = 42
 NPRSEED: int = _SEED_

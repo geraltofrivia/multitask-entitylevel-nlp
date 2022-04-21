@@ -16,7 +16,7 @@ except ImportError:
     from . import _pathfix
 from loops import training_loop
 from models.multitask import BasicMTL
-from dataiter import MultiTaskDataset
+from dataiter import MultiTaskDataIter
 from utils.misc import check_dumped_config
 from config import LOCATIONS as LOC, CONFIG
 from utils.exceptions import ImproperDumpDir
@@ -165,7 +165,7 @@ def run(
 
     if 'ner' in tasks or 'pruner' in tasks:
         # Need to figure out the number of classes. Load a DL. Get the number. Delete the DL.
-        temp_ds = MultiTaskDataset(
+        temp_ds = MultiTaskDataIter(
             src=dataset,
             config=config,
             tasks=tasks,
@@ -191,7 +191,7 @@ def run(
 
     # Load the data
     train_ds = partial(
-        MultiTaskDataset,
+        MultiTaskDataIter,
         src=dataset,
         config=config,
         tasks=tasks,
@@ -199,7 +199,7 @@ def run(
         tokenizer=tokenizer,
     )
     dev_ds = partial(
-        MultiTaskDataset,
+        MultiTaskDataIter,
         src=dataset,
         config=config,
         tasks=tasks,

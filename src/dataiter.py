@@ -7,33 +7,35 @@ import torch
 import pickle
 import warnings
 import numpy as np
-from pathlib import Path
 import transformers
+from pathlib import Path
 from tqdm.auto import tqdm
-from typing import List, Iterable
+from transformers import BertConfig
 from torch.utils.data import Dataset
+from mytorch.utils.goodies import FancyDict
 from sklearn.utils import compute_class_weight
+from typing import List, Iterable, Union, Optional, Callable
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
+from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG
 from utils.warnings import NoValidAnnotations, LabelDictNotFound
-from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS
 from utils.nlp import to_toks, match_subwords_to_words
+from utils.data import Document, Tasks, init_tasks
 from utils.misc import check_dumped_config
-from utils.data import Document
 
 np.random.seed(NPRSEED)
 
 
-class MultiTaskDataset(Dataset):
+class MultiTaskDataIter(Dataset):
     def __init__(
             self,
             src: str,
             split: str,
-            config,
+            config: Union[FancyDict, BertConfig],
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
             tasks: Iterable[str] = (),
@@ -129,7 +131,7 @@ class MultiTaskDataset(Dataset):
              MultiTaskDatasetDump_ner.pkl
              MultiTaskDatasetDump_coref_ner.pkl
         :return: a list of processed dicts (optional) and
-            a bool indicating whether we successfully pulled sthing from the disk or not
+            a bool indicating whether we successfully pulled something from the disk or not
         """
         success = False
 
@@ -781,14 +783,15 @@ class DataLoaderToHFTokenizer:
 
 if __name__ == "__main__":
 
-    dataset: str = 'ontonotes'
+    dataset: str = 'scierc'
     epochs: int = 10
     encoder: str = "bert-base-uncased"
-    tasks: Iterable[str] = ('ner', 'pruner', 'coref')
+    tasks: Tasks = init_tasks(('ner',))
     device: str = "cpu"
-    trim: bool = False
+    trim: bool = True
     train_encoder: bool = False
     ner_unweighted: bool = False
+    filter_candidates_pos = True
 
     # # Attempt to pull from disk
     # encoder = transformers.BertModel.from_pretrained(LOC.root / 'models' / 'huggingface'
@@ -812,10 +815,11 @@ if __name__ == "__main__":
     config.trim = trim
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
-    config.filter_candidates_pos_threshold = 50
+    config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] \
+        if filter_candidates_pos else -1
 
-    ds = MultiTaskDataset(
-        "ontonotes",
+    ds = MultiTaskDataIter(
+        dataset,
         "train",
         config=config,
         tokenizer=tokenizer,
