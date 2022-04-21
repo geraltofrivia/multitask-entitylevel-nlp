@@ -18,8 +18,8 @@ from loops import training_loop
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataIter
 from utils.misc import check_dumped_config
-from config import LOCATIONS as LOC, CONFIG
 from utils.exceptions import ImproperDumpDir
+from config import LOCATIONS as LOC, CONFIG, KNOWN_SPLITS
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
 
@@ -169,7 +169,7 @@ def run(
             src=dataset,
             config=config,
             tasks=tasks,
-            split="development",
+            split=KNOWN_SPLITS[dataset].dev,
             tokenizer=tokenizer,
         )
         if 'ner' in tasks:
@@ -195,7 +195,7 @@ def run(
         src=dataset,
         config=config,
         tasks=tasks,
-        split="train",
+        split=KNOWN_SPLITS[dataset].train,
         tokenizer=tokenizer,
     )
     dev_ds = partial(
@@ -203,7 +203,7 @@ def run(
         src=dataset,
         config=config,
         tasks=tasks,
-        split="development",
+        split=KNOWN_SPLITS[dataset].dev,
         tokenizer=tokenizer,
     )
 

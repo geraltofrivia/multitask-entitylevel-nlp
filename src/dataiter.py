@@ -838,11 +838,11 @@ class DataIterCombiner(Dataset):
     def __len__(self):
         return sum(len(dataiter) for dataiter in self.dataiters)
 
-    def __iter__(self):
-        for dataiter_index in self.source_indices:
-            self.source_pointers[dataiter_index] += 1
-            di = self.dataiters[dataiter_index]
-            yield di[self.source_pointers[dataiter_index] % len(di)]
+    # def __iter__(self):
+    #     for dataiter_index in self.source_indices:
+    #         self.source_pointers[dataiter_index] += 1
+    #         di = self.dataiters[dataiter_index]
+    #         yield di[self.source_pointers[dataiter_index] % len(di)]
 
     def __getitem__(self, item) -> dict:
 
