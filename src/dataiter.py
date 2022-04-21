@@ -157,7 +157,7 @@ class MultiTaskDataIter(Dataset):
             data, old_config = pickle.load(f)
 
         # Check if config matches
-        if check_dumped_config(self.config, old=old_config, find_alternatives=False, verbose=False):
+        if check_dumped_config(self.config, old=old_config, find_alternatives=False, verbose=True):
             print(f"Pulled {len(data)} instances from {dump_fname}.")
             return data, True
         else:

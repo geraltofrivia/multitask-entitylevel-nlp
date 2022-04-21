@@ -268,7 +268,7 @@ def run(
          """
 
         # Check config
-        if not check_dumped_config(config, old=savedir):
+        if not check_dumped_config(config, old=savedir, verbose=True):
             raise ImproperDumpDir(f"No config.json file found in {savedir}. Exiting.")
 
         # See WandB stuff
