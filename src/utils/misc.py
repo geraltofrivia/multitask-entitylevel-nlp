@@ -322,10 +322,12 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'epochs',
         'lr',
         'ner_class_weights'
+        'device',
         'wandb',
         'wandb_comment',
         'wandb_trial',
-        'wandbid']
+        'wandbid'
+    ]
 
     # If old is a dict, we don't need to pull
     if type(old) is dict:
