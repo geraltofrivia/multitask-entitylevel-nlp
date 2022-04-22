@@ -286,6 +286,7 @@ def run(
     if use_wandb:
         if 'wandbid' not in config.to_dict():
             config.wandbid = wandb.util.generate_id()
+            save_config = config.to_dict()
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
