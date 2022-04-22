@@ -317,8 +317,9 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         other configs that match up the given one.
     """
 
-    keys_to_ignore: List[str] = ['trim', 'loss_scales', 'epochs', 'lr',
-                                 'wandb', 'wandb_comment', 'wandb_trial', 'wandbid']
+    keys_to_ignore: List[str] = ['trim', 'loss_scales', 'epochs', 'lr', 'ner_class_weights'
+                                                                        'wandb', 'wandb_comment', 'wandb_trial',
+                                 'wandbid']
 
     # If old is a dict, we don't need to pull
     if type(old) is dict:

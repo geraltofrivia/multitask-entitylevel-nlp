@@ -211,18 +211,10 @@ class BasicMTL(nn.Module):
             cand_start = candidate_starts[ind].item()
             cand_end = candidate_ends[ind].item()
             for j in range(cand_start, cand_end + 1):
-                if (
-                        j > cand_start
-                        and j in start_to_latest_end
-                        and start_to_latest_end[j] > cand_end
-                ):
+                if j > cand_start and j in start_to_latest_end and start_to_latest_end[j] > cand_end:
                     any_crossing = True
                     break
-                if (
-                        j < cand_end
-                        and j in end_to_earliest_start
-                        and end_to_earliest_start[j] < cand_start
-                ):
+                if j < cand_end and j in end_to_earliest_start and end_to_earliest_start[j] < cand_start:
                     any_crossing = True
                     break
             if not any_crossing:
