@@ -875,10 +875,10 @@ class DataIterCombiner(Dataset):
     #         di = self.dataiters[dataiter_index]
     #         yield di[self.source_pointers[dataiter_index] % len(di)]
 
-    def __getitem__(self, item) -> dict:
+    def __getitem__(self, i) -> dict:
 
-        if item in self.history:
-            dataiter_index, pointer_index = self.history[item]
+        if i in self.history:
+            dataiter_index, pointer_index = self.history[i]
             return self.dataiters[dataiter_index][pointer_index]
 
         else:
@@ -887,7 +887,7 @@ class DataIterCombiner(Dataset):
             # ### ask for the next item.
 
             # Which source to sample from
-            dataiter_index = self.source_indices[item]
+            dataiter_index = self.source_indices[i]
             di = self.dataiters[dataiter_index]
 
             # Which item to yield
@@ -901,9 +901,16 @@ class DataIterCombiner(Dataset):
             self.source_pointers[dataiter_index] = pointer_index
 
             # Update the history
-            self.history[item] = (dataiter_index, pointer_index)
+            self.history[i] = (dataiter_index, pointer_index)
 
             return instance
+
+    def __setitem__(self, i, item):
+        try:
+            dataiter_index, pointer_index = self.history[i]
+            self.dataiters[dataiter_index][pointer_index] = i
+        except KeyError:
+            raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
 
 
 if __name__ == "__main__":
