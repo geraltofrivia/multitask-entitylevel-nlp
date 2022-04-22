@@ -211,10 +211,15 @@ class BasicMTL(nn.Module):
             cand_start = candidate_starts[ind].item()
             cand_end = candidate_ends[ind].item()
             for j in range(cand_start, cand_end + 1):
-                if j > cand_start and j in start_to_latest_end and start_to_latest_end[j] > cand_end:
+                """
+                    Making a change here:
+                        if 338-340 has been seen, we would not block out 338-339 since previously,
+                            we were concerned with only hard subsumption. Now, this one will get filtered out as well.
+                """
+                if j >= cand_start and j in start_to_latest_end and start_to_latest_end[j] > cand_end:
                     any_crossing = True
                     break
-                if j < cand_end and j in end_to_earliest_start and end_to_earliest_start[j] < cand_start:
+                if j <= cand_end and j in end_to_earliest_start and end_to_earliest_start[j] < cand_start:
                     any_crossing = True
                     break
             if not any_crossing:
@@ -365,6 +370,8 @@ class BasicMTL(nn.Module):
             *args, **kwargs
     ):
         """
+            Debugging notes: this seems reasonably correct. Manually went through it thrice or more.
+
             This takes span repr vectors and passes them through a unary classifier, scores them and returns
                 1. logits - score for every span ( #n_cand, )
                 1. top_span_indices: based on num of selected spans  ( #top_cand,)
@@ -478,64 +485,87 @@ class BasicMTL(nn.Module):
         """
         # Create an antecedent mask: lower triangular matrix =e, rest 0 indicating the candidates for each span
         # [n_ana, n_ana]
-        top_antecedents_per_ana_ind = torch.ones(
+        top_antecedents_mask__filtered = torch.ones(
             n_top_spans, n_top_spans, device=encoded.device
-        ).tril()
-        top_antecedents_per_ana_ind = top_antecedents_per_ana_ind - torch.eye(
-            top_antecedents_per_ana_ind.shape[0],
-            top_antecedents_per_ana_ind.shape[1],
-            dtype=top_antecedents_per_ana_ind.dtype,
-            device=top_antecedents_per_ana_ind.device,
-        )
+        ).tril()  # Lower triangular mat with filled diagonal
+        top_antecedents_mask__filtered = top_antecedents_mask__filtered - torch.eye(
+            top_antecedents_mask__filtered.shape[0],
+            top_antecedents_mask__filtered.shape[1],
+            dtype=top_antecedents_mask__filtered.dtype,
+            device=top_antecedents_mask__filtered.device,
+        )  # torch.eye is a diagonal. This op simply makes it so the mat has zeros in diagonals
 
-        # Argsort mention scores for each span, cognizant of the fact that the choice for each should be
-        top_antecedents_per_ana_ind = torch.argsort(
-            top_span_mention_scores + torch.log(top_antecedents_per_ana_ind),
+        """
+            At this point, this mask looks like:
+            [[0., 0., 0.,  ..., 0., 0., 0.],
+            [1., 0., 0.,  ..., 0., 0., 0.],
+            [1., 1., 0.,  ..., 0., 0., 0.],
+            ...,
+            [1., 1., 1.,  ..., 0., 0., 0.],
+            [1., 1., 1.,  ..., 1., 0., 0.],
+            [1., 1., 1.,  ..., 1., 1., 0.]]
+            
+            
+            Because when we take a log of it (used in argsort below) it will look like:
+            [[-inf, -inf, -inf,  ..., -inf, -inf, -inf],
+            [0., -inf, -inf,  ..., -inf, -inf, -inf],
+            [0., 0., -inf,  ..., -inf, -inf, -inf],
+            ...,
+            [0., 0., 0.,  ..., -inf, -inf, -inf],
+            [0., 0., 0.,  ..., 0., -inf, -inf],
+            [0., 0., 0.,  ..., 0., 0., -inf]]
+        
+        """
+
+        # Argsort mention scores for each span but ignored masked instances.
+        top_antecedents_ind__filtered = torch.argsort(
+            top_span_mention_scores + torch.log(top_antecedents_mask__filtered),
             descending=True,
             dim=1,
         )  # [n_ana, n_ana]
 
-        # Add 1 to indices (temporarily, to distinguish between index '0', and ignoring an index '_'
-        #   (in the matrix in code comments above), and take its lower triangular as well
-        top_antecedents_per_ana_ind = (
-                top_antecedents_per_ana_ind + 1
-        ).tril()  # [n_ana, n_ana]
+        # Add 1 to indices (temporarily, to distinguish between index '0',
+        #   and ignoring an index '_' (in the matrix in code comments above),
+        #   and the multiply it with the mask.
+        top_antecedents_ind__filtered = (top_antecedents_ind__filtered + 1) * \
+                                        top_antecedents_mask__filtered  # [n_ana, n_ana]
+
+        # Finally we subtract 1
+        # and hereon negative values indicates things which we don't want
+        top_antecedents_ind__filtered = (top_antecedents_ind__filtered - 1).to(
+            torch.long
+        )  # [n_ana, n_ante]
 
         # The [n_ana, n_ana] lower triangular mat now has sorted span indices.
         # We further need to clamp them to k.
-        # For that, we just crop top_antecedents_per_ana_ind
-        top_antecedents_per_ana_ind = top_antecedents_per_ana_ind[
-                                      :, : self.config.max_top_antecedents
-                                      ]  # [n_ana, n_ante]
+        # For that, we just crop top_antecedents_ind__filtered
+        top_antecedents_ind__filtered = top_antecedents_ind__filtered[:, : self.config.max_top_antecedents]
+        # [n_ana, n_ante]
+
         # # Below is garbage, ignore
         # # For that, a simple col mul. will suffice
         # column_mask = torch.zeros((num_top_mentions,), device=encoded.device, dtype=torch.float)
         # column_mask[:config.max_top_antecedents] = 1
-        # top_antecedents_per_ana_ind = top_antecedents_per_ana_ind*column_mask
+        # top_antecedents_ind__filtered = top_antecedents_ind__filtered*column_mask
 
-        # Finally we subtract 1 (and negative indicates things which we don't want)
-        top_antecedents_per_ana_ind = (top_antecedents_per_ana_ind - 1).to(
-            torch.long
-        )  # [n_ana, n_ante]
-
-        # At this point, top_antecedents_per_ana_ind has -1 representing masked out things,
+        # At this point, top_antecedents_ind__filtered has -1 representing masked out things,
         #   and 0+ int to repr. actual indices
-        top_antecedents_per_ana_emb = top_span_emb[
-            top_antecedents_per_ana_ind
+        top_antecedents_emb__filtered = top_span_emb[
+            top_antecedents_ind__filtered
         ]  # [n_ana, n_ante, span_emb]
-        # This mask is needed to ignore the antecedents which occur after the anaphor
-        top_antecedents_per_ana_emb[top_antecedents_per_ana_ind < 0] = 0
+        # This mask is needed to ignore the antecedents which occur after the anaphor (in span embeddings mat)
+        top_antecedents_emb__filtered[top_antecedents_ind__filtered < 0] = 0
 
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
-        top_antecedents_per_ana_ind = torch.hstack(
+        top_antecedents_ind__filtered = torch.hstack(
             [
-                top_antecedents_per_ana_ind,
-                torch.zeros((top_antecedents_per_ana_ind.shape[0], 1),
+                top_antecedents_ind__filtered,
+                torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
                             dtype=torch.int64, device=self.config.device) - 1,
             ]
         )
-        top_antecedents_mask = torch.ones_like(top_antecedents_per_ana_ind)
-        top_antecedents_mask[top_antecedents_per_ana_ind < 0] = 0
+        top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
+        top_antecedents_mask[top_antecedents_ind__filtered < 0] = 0
         # top_antecedents_mask = torch.hstack(
         #     [
         #         top_antecedents_mask,
@@ -556,14 +586,15 @@ class BasicMTL(nn.Module):
                 - a (n_anaphor, max_antecedents, span_emb) mat repr antecedents for each anaphor
                 - a (n_anaphor, max_antecedents, span_emb) mat repr element wise mul b/w the two.
         """
-        similarity_emb = top_antecedents_per_ana_emb * top_span_emb.unsqueeze(
+        # TODO DEBUG; this is where we need to resume from
+        similarity_emb = top_antecedents_emb__filtered * top_span_emb.unsqueeze(
             1
         )  # [n_ana, n_ante, span_emb]
         anaphor_emb = top_span_emb.unsqueeze(1).repeat(
             1, min(n_top_spans, self.config.max_top_antecedents), 1
         )  # [n_ana, n_ante, span_emb]
         pair_emb = torch.cat(
-            [anaphor_emb, top_antecedents_per_ana_emb, similarity_emb], 2
+            [anaphor_emb, top_antecedents_emb__filtered, similarity_emb], 2
         )  # [n_ana], n_ante, 3*span_emb]
 
         # Finally, pass it through the params and get the scores
@@ -604,17 +635,17 @@ class BasicMTL(nn.Module):
                 
              So, that's fixed now.  
         '''
-        top_antecedent_indices = top_antecedents_per_ana_ind.gather(
+        top_antecedent_indices = top_antecedents_ind__filtered.gather(
             index=top_antecedent_indices_in_each_span_cand_space,
             dim=1
         )  # [n_ana, n_ante + 1]
 
-        # Now we just return them.top_antecedents_per_ana_emb
+        # Now we just return them.top_antecedents_emb__filtered
         return {
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
             "top_antecedents": top_antecedent_indices,
-            "antecedent_map": top_antecedents_per_ana_ind
+            "antecedent_map": top_antecedents_ind__filtered
         }
 
     # noinspection PyUnusedLocal
