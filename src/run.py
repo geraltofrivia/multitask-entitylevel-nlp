@@ -14,6 +14,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
+from utils.data import Tasks
 from loops import training_loop
 from models.multitask import BasicMTL
 from dataiter import MultiTaskDataIter
@@ -51,7 +52,7 @@ def get_pretrained_dirs(nm: str):
         return nm, nm, nm
 
 
-def pick_loss_scale(options: dict, tasks: Iterable[str]):
+def pick_loss_scale(options: dict, tasks: Tasks):
     key = 'loss_scales_' + '_'.join(sorted(tasks))
     return options[key]
 
@@ -63,7 +64,7 @@ def get_saved_wandb_id(loc: Path):
     return config['wandbid']
 
 
-def get_save_parent_dir(parentdir: Path, tasks: List[str], config: Union[transformers.BertConfig, dict]) -> Path:
+def get_save_parent_dir(parentdir: Path, tasks: Tasks, config: Union[transformers.BertConfig, dict]) -> Path:
     """
         Normally returns parentdir/'_'.join(sorted(tasks)).
         E.g. if tasks are ['coref', 'ner']:
@@ -79,18 +80,21 @@ def get_save_parent_dir(parentdir: Path, tasks: List[str], config: Union[transfo
     """
 
     if config.trim or config.wandb_trial:
-        return parentdir / 'trial' / '_'.join(sorted(tasks))
+        return parentdir / 'trial' / '_'.join(tasks)
     else:
-        return parentdir / '_'.join(sorted(tasks))
+        return parentdir / '_'.join(tasks)
 
 
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
+@click.option("--tasks", "-t", type=str, multiple=True,
+              help="Multiple values are okay e.g. -t coref -t ner or just one of these", )
+@click.option("--dataset-2", "-d2", type=str, help="The name of dataset e.g. ontonotes etc for a secondary thing.")
+@click.option("--tasks_2", "-t2", type=str, default=None, multiple=True,
+              help="Multiple values are okay e.g. -t2 coref -t2 ner or just one of these", )
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
 @click.option("--learning-rate", "-lr", type=float, default=0.005, help="Learning rate. Defaults to 0.005.")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
-@click.option("--tasks", "-t", type=str, default=None, multiple=True,
-              help="Multiple values are okay e.g. -t coref -t ner or just one of these", )
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
@@ -113,10 +117,12 @@ def get_save_parent_dir(parentdir: Path, tasks: List[str], config: Union[transfo
                    "The lookup will go like /models/<task combination>/<resume_dir>/model.torch.")
 def run(
         dataset: str,
+        tasks: List[str],
+        dataset_2: str,
+        tasks_2: List[str] = None,
         epochs: int = 10,
         learning_rate: float = 0.005,
         encoder: str = "bert-base-uncased",
-        tasks: List[str] = None,
         device: str = "cpu",
         trim: bool = False,
         train_encoder: bool = False,
@@ -136,6 +142,12 @@ def run(
     if resume_dir >= 0:
         save = True
 
+    # Convert task args to a proper tasks obj
+    tasks = Tasks(tasks)
+    tasks_2 = Tasks(tasks_2)
+
+    # TODO: take care of d2 t2 thing
+
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
@@ -153,7 +165,6 @@ def run(
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
     config.lr = learning_rate
-    config.tasks = tasks
     config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
     config.wandb_comment = wandb_comment

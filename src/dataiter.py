@@ -24,7 +24,7 @@ except ImportError:
 from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG
 from utils.warnings import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
-from utils.data import Document, Tasks, init_tasks
+from utils.data import Document, Tasks
 from utils.misc import check_dumped_config
 
 np.random.seed(NPRSEED)
@@ -880,7 +880,7 @@ if __name__ == "__main__":
     dataset: str = 'scierc'
     epochs: int = 10
     encoder: str = "bert-base-uncased"
-    tasks: Tasks = init_tasks(('ner',))
+    tasks: Tasks = Tasks('ner', )
     device: str = "cpu"
     trim: bool = True
     train_encoder: bool = False
