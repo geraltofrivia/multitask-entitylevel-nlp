@@ -190,7 +190,8 @@ def run(
         wandb_trial: bool = False,
         filter_candidates_pos: bool = False,
         save: bool = False,
-        resume_dir: int = -1
+        resume_dir: int = -1,
+        use_pretrained_model: str = None
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
