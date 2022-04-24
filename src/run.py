@@ -367,7 +367,7 @@ def run(
         train_eval=train_eval,
         dev_eval=dev_eval,
         opt=opt,
-        tasks=tasks,
+        tasks=tasks + tasks_2,  # This is used only for bookkeeping. We're assuming empty entries in logs are fine.
         flag_wandb=use_wandb,
         flag_save=save,
         save_dir=savedir,
