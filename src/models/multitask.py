@@ -913,7 +913,8 @@ class BasicMTL(nn.Module):
             # ### This again is problematic because the mask is over the top_antecedent_scores space
             # ### But antecedent cluster IDs are a different sequence.
             # ### That is, [2, 3] in the mask being zero does not mean that [2, 3] in cluster IDs should also be zero.
-            gold_cluster_ids_on_antecedents[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
+            gold_cluster_ids_on_antecedents[top_antecedent_mask[:, 1:] == 0] = 0
+            # gold_cluster_ids_on_antecedents[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
 
             # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
             gold_cluster_ids_on_antecedents += torch.log(top_antecedent_mask.float()).int()[
