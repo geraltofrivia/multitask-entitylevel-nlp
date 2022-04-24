@@ -564,23 +564,20 @@ class BasicMTL(nn.Module):
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
         top_antecedents_ind__filtered = torch.hstack(
             [
-                top_antecedents_ind__filtered,
                 torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
                             dtype=torch.int64, device=self.config.device) - 1,
+                top_antecedents_ind__filtered
             ]
-        )  # TODO: try putting dummies to left and taking care of the rest of the code
+        )
+        # top_antecedents_ind__filtered = torch.hstack(
+        #     [
+        #         top_antecedents_ind__filtered,
+        #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
+        #                     dtype=torch.int64, device=self.config.device) - 1,
+        #     ]
+        # )  # TODO: try putting dummies to left and taking care of the rest of the code
         top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
         top_antecedents_mask[top_antecedents_ind__filtered < 0] = 0
-        # top_antecedents_mask = torch.hstack(
-        #     [
-        #         top_antecedents_mask,
-        #         torch.zeros(
-        #             (top_antecedents_mask.shape[0], 1),
-        #             dtype=top_antecedents_mask.dtype,
-        #             device=self.config.device,
-        #         ),
-        #     ]
-        # )
 
         # We argsort this to yield a list of indices.
 
@@ -908,7 +905,8 @@ class BasicMTL(nn.Module):
 
             # We next bring it to the antecedents space (which is different for every span)
             gold_cluster_ids_on_antecedents = gold_cluster_ids_on_pruned[
-                antecedents_space_map[:, : antecedents_space_map.shape[1] - 1]
+                antecedents_space_map[:, 1:]
+                # antecedents_space_map[:, : antecedents_space_map.shape[1] - 1]
             ]
 
             # Make sure the masked candidates are suppressed.
@@ -919,7 +917,8 @@ class BasicMTL(nn.Module):
 
             # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
             gold_cluster_ids_on_antecedents += torch.log(top_antecedent_mask.float()).int()[
-                                               :, : top_antecedent_mask.shape[1] - 1
+                                               :, 1:
+                                               # :, : top_antecedent_mask.shape[1] - 1
                                                ]  # [top_cand, top_ant]
             same_cluster_indicator = torch.eq(
                 gold_cluster_ids_on_antecedents, gold_cluster_ids_on_pruned.unsqueeze(1)
@@ -942,8 +941,8 @@ class BasicMTL(nn.Module):
             coref_loss = self.coref_softmax_loss(
                 top_antecedent_scores, top_antecedent_labels
             )  # [top_cand]
-            # coref_loss = torch.mean(coref_loss)
-            coref_loss = torch.sum(coref_loss)
+            coref_loss = torch.mean(coref_loss)
+            # coref_loss = torch.sum(coref_loss)
 
             # predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
