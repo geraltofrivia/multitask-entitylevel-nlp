@@ -319,7 +319,7 @@ def run(
         # save_objs = [tosave('tokenizer.pkl', tokenizer), tosave('config.pkl', )]
     else:
         savedir, save_config, save_objs = None, None, None
-    config.savedir = savedir
+    config.savedir = str(savedir)
 
     # Resuming stuff
     if resume_dir >= 0:
