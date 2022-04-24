@@ -670,19 +670,18 @@ class MultiTaskDataIter(Dataset):
             "loss_scales": self.loss_scales
         }
 
-        if "coref" in self._tasks_:
-            return_dict["coref"] = self.process_coref(
+        if "coref" in self._tasks_ or "pruner" in self._tasks_:
+
+            coref_op = self.process_coref(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
+            if "coref" in self._tasks_:
+                return_dict["coref"] = coref_op
+
             if "pruner" in self._tasks_:
                 return_dict["pruner"] = self.process_pruner(
-                    instance, return_dict, return_dict["coref"]
-                )
-        else:
-            if "pruner" in self._tasks_:
-                return_dict["pruner"] = self.process_pruner(
-                    instance, return_dict, return_dict["coref"]
+                    instance, return_dict, coref_op
                 )
 
         if "ner" in self._tasks_:
