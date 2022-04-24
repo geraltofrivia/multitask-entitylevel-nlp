@@ -167,8 +167,11 @@ def get_dataiter_partials(
                    "IF the doc has more than 10k candidates.")
 @click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
 @click.option('--resume-dir', default=-1, type=int,
-              help="In case you want to continue from where we left off, give the folder number. "
-                   "The lookup will go like /models/<task combination>/<resume_dir>/model.torch.")
+              help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
+                   "/models/trained/<datasetcombinatio>/<task combination>/<resume_dir>/model.torch.")
+@click.option('--use-pretrained-model', default=None, type=str,
+              help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
+                   "maybe from another run for e.g., you want to specify the directory here.")
 def run(
         dataset: str,
         tasks: List[str],
@@ -191,6 +194,7 @@ def run(
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
+    # TODO: implement soft loading the model parameters somehow.
 
     # If trim is enabled, we WILL turn the wandb_trial flag on
     if trim:

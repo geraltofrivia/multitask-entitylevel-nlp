@@ -326,7 +326,8 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'wandb_comment',
         'wandb_trial',
         'wandbid',
-        'savedir'
+        'savedir',
+        'tasks'
     ]
 
     # If old is a dict, we don't need to pull
