@@ -64,5 +64,6 @@ CONFIG: dict = {
     'loss_scales_coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
     'loss_scales_coref': [1.0, ],
     'loss_scales_ner': [1.0, ],
+    'loss_scales_pruner': [1.0, ],
     'filter_candidates_pos_threshold': 2000
 }
