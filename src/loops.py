@@ -36,7 +36,6 @@ def training_loop(
         trn_dl: Callable,
         train_eval: Evaluator,
         dev_eval: Evaluator,
-        loss_scales: torch.tensor,
         flag_wandb: bool = False,
         flag_save: bool = False,
         save_dir: Optional[Path] = None,
@@ -80,7 +79,7 @@ def training_loop(
                 outputs = forward_fn(**instance)
 
                 # Calc loss
-                loss = weighted_addition_losses(outputs["loss"], tasks, loss_scales)
+                loss = weighted_addition_losses(outputs["loss"], tasks, instance['loss_scales'])
 
                 # Calc gradients
                 loss.backward()

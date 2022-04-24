@@ -308,5 +308,8 @@ class Tasks(list):
     def insert(self, ii, val):
         raise ValueError("Es Ist Verboten !!")
 
+    def pop(self, *args, **kwargs):
+        raise ValueError("Es Ist Verboten !!")
+
     def append(self, val):
         raise ValueError("Es Ist Verboten !!")

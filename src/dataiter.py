@@ -21,8 +21,8 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG
-from utils.warnings import NoValidAnnotations, LabelDictNotFound
+from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG, unalias_split
+from utils.exceptions import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
 from utils.misc import check_dumped_config
@@ -39,6 +39,7 @@ class MultiTaskDataIter(Dataset):
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
             tasks: Iterable[str] = (),
+            loss_scales: Optional[np.ndarray] = None,
             rebuild_cache: bool = False
     ):
         """
@@ -62,6 +63,8 @@ class MultiTaskDataIter(Dataset):
         self.config = config
         self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
             if config.filter_candidates_pos_threshold > 0 else 10 ** 20
+
+        self.loss_scales = loss_scales
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
@@ -96,6 +99,19 @@ class MultiTaskDataIter(Dataset):
         if self.config.trim:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
             self.data = self.data[:50]
+
+        # Finally, for all specified tasks, estimate class weights
+        # If split == 'test', weights should be 1.0/n_classes for all classes.
+        self.task_weights = {}
+        if unalias_split(self._split_) == 'test':
+            for task_nm in self._tasks_:
+                if task_nm in ['ner', 'pruner']:
+                    weights = self.estimate_class_weights(task_nm)
+                    self.task_weights[task_nm] = torch.ones(len(weights), dtype=torch.float) / len(weights)
+        else:
+            for task_nm in self._tasks_:
+                if task_nm in ['ner', 'pruner']:
+                    self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm), dtype=torch.float)
 
     def estimate_class_weights(self, task: str) -> List[float]:
         """
@@ -348,6 +364,7 @@ class MultiTaskDataIter(Dataset):
 
         pruner_specific = {  # Pred stuff
             "gold_labels": gold_labels,
+            "weights": self.task_weights['pruner']
         }
 
         return pruner_specific
@@ -467,6 +484,7 @@ class MultiTaskDataIter(Dataset):
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
             "gold_labels": gold_labels,
+            "weights": self.task_weights['ner']
         }
 
         # Finally, check if gold_labels are empty (maybe all spans are larger than max span width or something)
@@ -637,6 +655,7 @@ class MultiTaskDataIter(Dataset):
             "n_subwords": n_subwords,
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
+            "loss_scales": self.loss_scales
         }
 
         if "coref" in self._tasks_:

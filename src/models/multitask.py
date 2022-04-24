@@ -19,12 +19,13 @@ from dataiter import MultiTaskDataIter
 
 
 class BasicMTL(nn.Module):
-    def __init__(self, enc_modelnm: str, config: transformers.BertConfig):
+    def __init__(self, enc_modelnm: str, config: transformers.BertConfig, n_classes_ner: int = 0):
         super().__init__()
 
         self.config = config
         self.n_max_len: int = self.config.max_position_embeddings
         self.n_hid_dim: int = self.config.hidden_size
+        self.n_classes_ner = n_classes_ner
 
         # Encoder responsible for giving contextual vectors to subword tokens
         self.encoder = transformers.BertModel.from_pretrained(enc_modelnm).to(config.device)
@@ -62,7 +63,7 @@ class BasicMTL(nn.Module):
             nn.Linear(span_embedding_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, config.ner_n_classes),
+            nn.Linear(config.unary_hdim, n_classes_ner),
         ).to(config.device)
 
         # TODO: delete
@@ -71,23 +72,16 @@ class BasicMTL(nn.Module):
         ).to(config.device)
 
         # Initialising Losses
+        self.ner_loss = nn.functional.cross_entropy
+        self.pruner_loss = nn.functional.binary_cross_entropy_with_logits
         try:
-            if self.config.ner_ignore_weights:
-                self.ner_loss = nn.CrossEntropyLoss()
-            else:
-                self.ner_loss = nn.CrossEntropyLoss(weight=torch.tensor(config.ner_class_weights, device=config.device))
+            self.ner_ignore_weights = self.config.ner_ignore_weights
         except AttributeError:
-            # Simply put, NER ignore weights has not been defined.
-            self.ner_loss = nn.CrossEntropyLoss()
-
+            self.ner_ignore_weights = False
         try:
-            if self.config.pruner_ignore_weights:
-                self.pruner_loss = nn.BCEWithLogitsLoss()
-            else:
-                self.pruner_loss = nn.BCEWithLogitsLoss(weight=torch.tensor(config.pruner_class_weights,
-                                                                            device=config.device))
+            self.pruner_ignore_weights = self.config.pruner_ignore_weights
         except AttributeError:
-            self.pruner_loss = nn.BCEWithLogitsLoss()
+            self.pruner_ignore_weights = False
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
@@ -204,6 +198,7 @@ class BasicMTL(nn.Module):
         start_to_latest_end = {}
         selected_spans = []
         current_span_index = 0
+        # noinspection PyArgumentList
         while len(selected_spans) < num_top_mentions and \
                 current_span_index < candidate_starts.size(0):
             ind = top_span_indices[current_span_index]
@@ -596,7 +591,7 @@ class BasicMTL(nn.Module):
 
         '''
              The previous code (commented below) was flawed. Like, objectively wrong.
-             Previously, top_antecedent_indices were in not in the same space, but just argsorted scores
+             Previously, top_antecedent_indices were in not in the same space, but just argsort-ed scores
                 so a value of 45 in index (3, 0) would mean that 
                 for the third span, antecedent candidate #45 is the most likely antecedent. 
                 However, this is not 45 in top_spans .. 
@@ -825,7 +820,10 @@ class BasicMTL(nn.Module):
             pruner_logits_after_pruning = predictions["pruner"]["logits_after_pruning"]
             pruner_labels = pruner["gold_labels"]
 
-            pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
+            if self.pruner_ignore_weights:
+                pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
+            else:
+                pruner_loss = self.pruner_loss(pruner_logits, pruner_labels, weight=pruner["weights"])
 
             # DEBUG
             try:
@@ -985,7 +983,10 @@ class BasicMTL(nn.Module):
             ner_logits = predictions["ner"]["logits"]  # n_spans, n_classes
 
             # Calculating the loss
-            ner_loss = self.ner_loss(ner_logits, ner_labels)
+            if self.ner_ignore_weights:
+                ner_loss = self.ner_loss(ner_logits, ner_labels)
+            else:
+                ner_loss = self.ner_loss(ner_logits, ner_labels, weight=ner["weights"])
 
             assert not torch.isnan(ner_loss), \
                 f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
@@ -1027,7 +1028,6 @@ if __name__ == "__main__":
     ds = MultiTaskDataIter(
         "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
     )
-    config.ner_n_classes = ds.ner_tag_dict.__len__()
 
     # Make the model
     model = BasicMTL("bert-base-uncased", config=config)

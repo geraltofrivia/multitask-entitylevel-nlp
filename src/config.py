@@ -3,6 +3,7 @@ import numpy as np
 from pathlib import Path
 from typing import Dict
 from mytorch.utils.goodies import FancyDict
+from utils.exceptions import UnknownDataSplitException
 
 # No local imports (is a good idea)
 
@@ -41,6 +42,16 @@ KNOWN_SPLITS = FancyDict(**{
         'test': 'test'
     })
 })
+
+
+def unalias_split(split: str) -> str:
+    for ds, ds_splits in KNOWN_SPLITS:
+        for split_alias, split_vl in ds_splits:
+            if split_vl == split:
+                return split_alias
+
+    raise UnknownDataSplitException(f"The split: {split} is unknown.")
+
 
 # LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
 # changed CNP ratio now that coref is normalised to 1
