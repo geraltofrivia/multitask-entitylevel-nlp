@@ -937,8 +937,8 @@ class BasicMTL(nn.Module):
             )  # [top_cand, 1]
             # TODO: might have to concatenate it the other way round (pairwise first, dummy second)
             top_antecedent_labels = torch.cat(
-                [pairwise_labels, dummy_labels], 1
-                # [dummy_labels, pairwise_labels], 1
+                # [pairwise_labels, dummy_labels], 1
+                [dummy_labels, pairwise_labels], 1
             )  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(
                 top_antecedent_scores, top_antecedent_labels
