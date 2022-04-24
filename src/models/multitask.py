@@ -423,7 +423,7 @@ class BasicMTL(nn.Module):
 
         # Make another field which is one hot in cand. space, indicating the top_span_indices
         logits_after_pruning = torch.zeros_like(candidate_starts, device=self.config.device, dtype=torch.float)
-        logits_after_pruning[top_span_indices] = top_span_mention_scores
+        logits_after_pruning[top_span_indices] = 1
 
         return {
             "logits": candidate_span_scores,
