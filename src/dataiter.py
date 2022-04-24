@@ -679,6 +679,11 @@ class MultiTaskDataIter(Dataset):
                 return_dict["pruner"] = self.process_pruner(
                     instance, return_dict, return_dict["coref"]
                 )
+        else:
+            if "pruner" in self._tasks_:
+                return_dict["pruner"] = self.process_pruner(
+                    instance, return_dict, return_dict["coref"]
+                )
 
         if "ner" in self._tasks_:
             return_dict["ner"] = self.process_ner(
@@ -752,6 +757,9 @@ class DocumentReader(Dataset):
 
                 # See if the instance fits the criteria set in self._tasks
                 if "coref" in self._tasks and instance.coref.isempty:
+                    continue
+
+                if "pruner" in self._tasks and instance.coref.isempty:
                     continue
 
                 if "ner" in self._tasks and instance.ner.isempty:
