@@ -562,11 +562,18 @@ class BasicMTL(nn.Module):
         top_antecedents_emb__filtered[top_antecedents_ind__filtered < 0] = 0
 
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
+        # top_antecedents_ind__filtered = torch.hstack(
+        #     [
+        #         top_antecedents_ind__filtered,
+        #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
+        #                     dtype=torch.int64, device=self.config.device) - 1,
+        #     ]
+        # )
         top_antecedents_ind__filtered = torch.hstack(
             [
-                top_antecedents_ind__filtered,
                 torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
                             dtype=torch.int64, device=self.config.device) - 1,
+                top_antecedents_ind__filtered
             ]
         )
         top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
@@ -613,8 +620,8 @@ class BasicMTL(nn.Module):
         )  # [n_ana, 1]
 
         top_antecedent_scores = torch.cat(
-            # [dummy_scores, top_antecedent_scores], dim=1
-            [top_antecedent_scores, dummy_scores], dim=1
+            [dummy_scores, top_antecedent_scores], dim=1
+            # [top_antecedent_scores, dummy_scores], dim=1
         )  # [n_ana, n_ante + 1]
 
         # Now we transpose some things back from the space of individual span's candidates to the space of pruned spans
