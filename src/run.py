@@ -269,11 +269,11 @@ def run(
 
     # Collect all metrics
     metrics = []
-    if 'ner' in tasks:
+    if 'ner' in tasks + tasks_2:
         metrics += [NERAcc(), NERSpanRecognitionPR()]
-    if 'pruner' in tasks:
+    if 'pruner' in tasks + tasks_2:
         metrics += [PrunerPR()]
-    if 'coref' in tasks:
+    if 'coref' in tasks + tasks_2:
         metrics += [CorefBCubed(), CorefMUC(), CorefCeafe()]
 
     if dataset_2 and tasks_2:
