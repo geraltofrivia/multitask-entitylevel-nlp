@@ -562,18 +562,11 @@ class BasicMTL(nn.Module):
         top_antecedents_emb__filtered[top_antecedents_ind__filtered < 0] = 0
 
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
-        # top_antecedents_ind__filtered = torch.hstack(
-        #     [
-        #         top_antecedents_ind__filtered,
-        #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
-        #                     dtype=torch.int64, device=self.config.device) - 1,
-        #     ]
-        # )
         top_antecedents_ind__filtered = torch.hstack(
             [
+                top_antecedents_ind__filtered,
                 torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
                             dtype=torch.int64, device=self.config.device) - 1,
-                top_antecedents_ind__filtered
             ]
         )
         top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
@@ -631,34 +624,34 @@ class BasicMTL(nn.Module):
             top_antecedent_scores, descending=True
         )  # [n_ana, n_ante + 1]
 
-        # TODO: I'm not sure about this. Empirically decide.
-        # Since we're going to be using the top_antecedent_mask, need to get the mask arranged in the same fashion.
-        top_antecedent_mask = top_antecedents_mask.gather(
-            index=top_antecedent_indices_in_each_span_cand_space,
-            dim=1
-        )  # [n_ana, n_ante + 1]
-
-        '''
-             The previous code (commented below) was flawed. Like, objectively wrong.
-             Previously, top_antecedent_indices were in not in the same space, but just argsort-ed scores
-                so a value of 45 in index (3, 0) would mean that 
-                for the third span, antecedent candidate #45 is the most likely antecedent. 
-                However, this is not 45 in top_spans .. 
-                just 45th antecedent in the list of top 50 spans for THIS anaphor.
-                
-             So, that's fixed now.  
-        '''
-        top_antecedent_indices = top_antecedents_ind__filtered.gather(
-            index=top_antecedent_indices_in_each_span_cand_space,
-            dim=1
-        )  # [n_ana, n_ante + 1]
+        # # TODO: I'm not sure about this. Empirically decide.
+        # # Since we're going to be using the top_antecedent_mask, need to get the mask arranged in the same fashion.
+        # top_antecedent_mask = top_antecedents_mask.gather(
+        #     index=top_antecedent_indices_in_each_span_cand_space,
+        #     dim=1
+        # )  # [n_ana, n_ante + 1]
+        #
+        # '''
+        #      The previous code (commented below) was flawed. Like, objectively wrong.
+        #      Previously, top_antecedent_indices were in not in the same space, but just argsort-ed scores
+        #         so a value of 45 in index (3, 0) would mean that
+        #         for the third span, antecedent candidate #45 is the most likely antecedent.
+        #         However, this is not 45 in top_spans ..
+        #         just 45th antecedent in the list of top 50 spans for THIS anaphor.
+        #
+        #      So, that's fixed now.
+        # '''
+        # top_antecedent_indices = top_antecedents_ind__filtered.gather(
+        #     index=top_antecedent_indices_in_each_span_cand_space,
+        #     dim=1
+        # )  # [n_ana, n_ante + 1]
 
         # Now we just return them.top_antecedents_emb__filtered
         return {
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
-            "top_antecedents": top_antecedent_indices,
-            "antecedent_map": top_antecedents_ind__filtered
+            "top_antecedents": top_antecedents_ind__filtered,  # this was top_antecedent_indices
+            "antecedent_map": top_antecedents_ind__filtered  # this mask brings things from 461x461 to 461x51 space
         }
 
     # noinspection PyUnusedLocal
