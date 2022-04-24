@@ -613,7 +613,8 @@ class BasicMTL(nn.Module):
         )  # [n_ana, 1]
 
         top_antecedent_scores = torch.cat(
-            [top_antecedent_scores, dummy_scores], dim=1
+            [dummy_scores, top_antecedent_scores], dim=1
+            # [top_antecedent_scores, dummy_scores], dim=1
         )  # [n_ana, n_ante + 1]
 
         # Now we transpose some things back from the space of individual span's candidates to the space of pruned spans
