@@ -892,34 +892,40 @@ class BasicMTL(nn.Module):
             # Unpack Coref specific model predictions
             top_span_starts = predictions["pruner"]["top_span_starts"]
             top_span_ends = predictions["pruner"]["top_span_ends"]
-            top_span_indices = predictions["pruner"]["top_span_indices"]
+            pruned_space_map = predictions["pruner"]["top_span_indices"]  # mapping from 5383 -> 461
             top_antecedent_scores = predictions["coref"]["top_antecedent_scores"]
             top_antecedent_mask = predictions["coref"]["top_antecedent_mask"]
             top_antecedents = predictions["coref"]["top_antecedents"]
+            antecedents_space_map = predictions["coref"]["antecedent_map"]  # mapping from 461 -> 51
 
-            # Some minor post processing.
-            top_span_cluster_ids = gold_cluster_ids_on_candidates[top_span_indices]
+            """
+                Gold cluster ID on candidate is a vector in original candidate space (~5k)
+                    where each position is a candidate, and its value represents cluster ID. 
+                It's mostly zero.
+                
+                In the first step, we bring this to the space of pruned candidates
+            """
+            gold_cluster_ids_on_pruned = gold_cluster_ids_on_candidates[pruned_space_map]
 
-            # TODO: understand here onwards
-            # We probably drop the last element because we're one over the limit of candidates already.
-            top_antecedent_cluster_ids = top_span_cluster_ids[
-                top_antecedents[:, : top_antecedents.shape[1] - 1]
+            # We next bring it to the antecedents space (which is different for every span)
+            gold_cluster_ids_on_antecedents = gold_cluster_ids_on_pruned[
+                antecedents_space_map[:, : antecedents_space_map.shape[1] - 1]
             ]
 
             # Make sure the masked candidates are suppressed.
             # ### This again is problematic because the mask is over the top_antecedent_scores space
             # ### But antecedent cluster IDs are a different sequence.
             # ### That is, [2, 3] in the mask being zero does not mean that [2, 3] in cluster IDs should also be zero.
-            top_antecedent_cluster_ids[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
+            gold_cluster_ids_on_antecedents[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
 
             # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
-            top_antecedent_cluster_ids += torch.log(top_antecedent_mask.float()).int()[
-                                          :, : top_antecedent_mask.shape[1] - 1
-                                          ]  # [top_cand, top_ant]
+            gold_cluster_ids_on_antecedents += torch.log(top_antecedent_mask.float()).int()[
+                                               :, : top_antecedent_mask.shape[1] - 1
+                                               ]  # [top_cand, top_ant]
             same_cluster_indicator = torch.eq(
-                top_antecedent_cluster_ids, top_span_cluster_ids.unsqueeze(1)
+                gold_cluster_ids_on_antecedents, gold_cluster_ids_on_pruned.unsqueeze(1)
             )  # [top_cand, top_ant]
-            non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(
+            non_dummy_indicator = (gold_cluster_ids_on_pruned > 0).unsqueeze(
                 1
             )  # [top_cand, 1]
             pairwise_labels = torch.logical_and(
@@ -931,7 +937,8 @@ class BasicMTL(nn.Module):
             )  # [top_cand, 1]
             # TODO: might have to concatenate it the other way round (pairwise first, dummy second)
             top_antecedent_labels = torch.cat(
-                [dummy_labels, pairwise_labels], 1
+                [pairwise_labels, dummy_labels], 1
+                # [dummy_labels, pairwise_labels], 1
             )  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(
                 top_antecedent_scores, top_antecedent_labels
