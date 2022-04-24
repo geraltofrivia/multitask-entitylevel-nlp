@@ -88,7 +88,7 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
                 parentdir/trial/dataset+dataset2/'_'.join(sorted(tasks+tasks_2)).
     """
     # if dataset_2 is alphabetically before dataset, start with it
-    if dataset_2[0] < dataset[0]:
+    if dataset_2 and dataset_2[0] < dataset[0]:
         dataset_2, dataset = dataset, dataset_2
         tasks_2, tasks = tasks, tasks_2
 
@@ -317,6 +317,7 @@ def run(
         # save_objs = [tosave('tokenizer.pkl', tokenizer), tosave('config.pkl', )]
     else:
         savedir, save_config, save_objs = None, None, None
+    config.savedir = savedir
 
     # Resuming stuff
     if resume_dir >= 0:
