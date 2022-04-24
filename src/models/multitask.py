@@ -646,7 +646,7 @@ class BasicMTL(nn.Module):
         return {
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
-            "top_antecedents": top_antecedents_ind__filtered,  # this was top_antecedent_indices
+            "top_antecedents": top_antecedent_indices,  # this was top_antecedent_indices
             "antecedent_map": top_antecedents_ind__filtered  # this mask brings things from 461x461 to 461x51 space
         }
 
