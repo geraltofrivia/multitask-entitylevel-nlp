@@ -908,7 +908,7 @@ class DataIterCombiner(Dataset):
     def __setitem__(self, i, item):
         try:
             dataiter_index, pointer_index = self.history[i]
-            self.dataiters[dataiter_index][pointer_index] = i
+            self.dataiters[dataiter_index][pointer_index] = item
         except KeyError:
             raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
 
