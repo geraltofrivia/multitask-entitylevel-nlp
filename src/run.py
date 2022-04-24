@@ -208,6 +208,9 @@ def run(
             raise BadParameters(f"Unknown dataset: {dataset_2}.")
     if dataset not in KNOWN_SPLITS:
         raise BadParameters(f"Unknown dataset: {dataset}.")
+    # If there is overlap in tasks and tasks_2
+    if set(tasks).intersection(tasks_2):
+        raise BadParameters("Tasks are overlapping between the two sources. That should not happen.")
 
     # Convert task args to a proper tasks obj
     tasks = Tasks(tasks)
@@ -236,8 +239,14 @@ def run(
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
 
+    # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
+    if 'ner' in tasks:
+        n_classes_ner = get_n_classes(task='ner', dataset=dataset)
+    if 'ner' in tasks_2:
+        n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
+
     # Make the model
-    model = BasicMTL(dir_encoder, config=config)
+    model = BasicMTL(dir_encoder, config=config, n_classes_ner=n_classes_ner)
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
     # Make the optimizer
@@ -270,36 +279,22 @@ def run(
     if dataset_2 and tasks_2:
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer)
         # Make combined iterators since we have two sets of datasets and tasks
-        train_ds_combined = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
-        dev_ds_combined = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])
+        train_ds = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
+        dev_ds = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])
 
-        # Make evaluators
-        train_eval = Evaluator(
-            predict_fn=model.pred_with_labels,
-            dataset_partial=train_ds_combined,
-            metrics=metrics,
-            device=device
-        )
-        dev_eval = Evaluator(
-            predict_fn=model.pred_with_labels,
-            dataset_partial=dev_ds_combined,
-            metrics=metrics,
-            device=device
-        )
-    else:
-        # Make evaluators
-        train_eval = Evaluator(
-            predict_fn=model.pred_with_labels,
-            dataset_partial=train_ds,
-            metrics=metrics,
-            device=device
-        )
-        dev_eval = Evaluator(
-            predict_fn=model.pred_with_labels,
-            dataset_partial=dev_ds,
-            metrics=metrics,
-            device=device
-        )
+    # Make evaluators
+    train_eval = Evaluator(
+        predict_fn=model.pred_with_labels,
+        dataset_partial=train_ds,
+        metrics=metrics,
+        device=device
+    )
+    dev_eval = Evaluator(
+        predict_fn=model.pred_with_labels,
+        dataset_partial=dev_ds,
+        metrics=metrics,
+        device=device
+    )
 
     print(config)
     print("Training commences!")

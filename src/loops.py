@@ -79,7 +79,7 @@ def training_loop(
                 outputs = forward_fn(**instance)
 
                 # Calc loss
-                loss = weighted_addition_losses(outputs["loss"], tasks, instance['loss_scales'])
+                loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
 
                 # Calc gradients
                 loss.backward()

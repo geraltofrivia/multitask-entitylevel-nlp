@@ -47,7 +47,6 @@ def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
 
 def weighted_addition_losses(losses, tasks, scales):
     # Sort the tasks
-    tasks = sorted(deepcopy(tasks))
     stacked = torch.hstack([losses[task_nm] for task_nm in tasks])
     weighted = stacked * scales
     return torch.sum(weighted)

@@ -64,7 +64,7 @@ class MultiTaskDataIter(Dataset):
         self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
             if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 
-        self.loss_scales = loss_scales
+        self.loss_scales = torch.tensor(loss_scales, dtype=torch.float)
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
@@ -90,28 +90,40 @@ class MultiTaskDataIter(Dataset):
                 raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
 
         (self.data, flag_successfully_pulled_from_disk) = self.load_from_disk(rebuild_cache)
+        self.task_weights = {}
 
         if not flag_successfully_pulled_from_disk:
+
+            # Init the list of documents (pull it from disk)
             self.dataset = DocumentReader(src=src, split=split, tasks=self._tasks_, shuffle=shuffle)
+
+            # Temporarily set class weights for all tasks as [0.5, 0.5]
+            for task_nm in self._tasks_:
+                if task_nm in ['ner', 'pruner']:
+                    self.task_weights[task_nm] = torch.ones(2, dtype=torch.float) / 2
+
+            # Process the dataset
             self.process()
+
+            # Calculate actual class weights
+            if not unalias_split(self._split_) == 'test':
+                for task_nm in self._tasks_:
+                    if task_nm in ['ner', 'pruner']:
+                        self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
+                                                                  dtype=torch.float)
+            # Update self.data
+            for i, item in enumerate(self.data):
+                if 'ner' in item:
+                    self.data[i]['ner']['weights'] = self.task_weights['ner']
+                if 'pruner' in item:
+                    self.data[i]['pruner']['weights'] = self.task_weights['pruner']
+
+            # Write this to disk
             self.write_to_disk()
 
         if self.config.trim:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
             self.data = self.data[:50]
-
-        # Finally, for all specified tasks, estimate class weights
-        # If split == 'test', weights should be 1.0/n_classes for all classes.
-        self.task_weights = {}
-        if unalias_split(self._split_) == 'test':
-            for task_nm in self._tasks_:
-                if task_nm in ['ner', 'pruner']:
-                    weights = self.estimate_class_weights(task_nm)
-                    self.task_weights[task_nm] = torch.ones(len(weights), dtype=torch.float) / len(weights)
-        else:
-            for task_nm in self._tasks_:
-                if task_nm in ['ner', 'pruner']:
-                    self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm), dtype=torch.float)
 
     def estimate_class_weights(self, task: str) -> List[float]:
         """

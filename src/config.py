@@ -45,8 +45,8 @@ KNOWN_SPLITS = FancyDict(**{
 
 
 def unalias_split(split: str) -> str:
-    for ds, ds_splits in KNOWN_SPLITS:
-        for split_alias, split_vl in ds_splits:
+    for ds, ds_splits in KNOWN_SPLITS.items():
+        for split_alias, split_vl in ds_splits.items():
             if split_vl == split:
                 return split_alias
 

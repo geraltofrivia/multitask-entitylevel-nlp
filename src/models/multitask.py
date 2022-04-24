@@ -8,7 +8,7 @@ import torch
 import transformers
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Iterable
+from typing import List, Iterable, Optional
 
 # Local imports
 try:
@@ -73,7 +73,7 @@ class BasicMTL(nn.Module):
 
         # Initialising Losses
         self.ner_loss = nn.functional.cross_entropy
-        self.pruner_loss = nn.functional.binary_cross_entropy_with_logits
+        self.pruner_loss = self.rescaling_weights_bce_loss
         try:
             self.ner_ignore_weights = self.config.ner_ignore_weights
         except AttributeError:
@@ -82,6 +82,16 @@ class BasicMTL(nn.Module):
             self.pruner_ignore_weights = self.config.pruner_ignore_weights
         except AttributeError:
             self.pruner_ignore_weights = False
+
+    @staticmethod
+    def rescaling_weights_bce_loss(logits, labels, weight: Optional[torch.Tensor] = None):
+        # if weights are provided, scale them based on labels
+        if weight is not None:
+            _weight = torch.zeros_like(labels, dtype=torch.float) + weight[0]
+            _weight[labels == 1] = weight[1]
+            return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
+        else:
+            return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
@@ -767,7 +777,8 @@ class BasicMTL(nn.Module):
             coref: dict = None,
             ner: dict = None,
             pruner: dict = None,
-            prep_coref_eval: bool = True
+            prep_coref_eval: bool = True,
+            *args, **kwargs
     ):
         """
         :param input_ids: tensor, shape (number of subsequences, max length), output of tokenizer, reshaped
@@ -814,6 +825,8 @@ class BasicMTL(nn.Module):
             tasks=tasks
         )
 
+        outputs = {"loss": {}}
+
         if "pruner" in tasks:
             # Unpack pruner specific args (y labels)
             pruner_logits = predictions["pruner"]["logits"]
@@ -833,11 +846,10 @@ class BasicMTL(nn.Module):
                     f"\n\tNonZero lbls: {pruner_labels[pruner_labels != 0].shape}"
             except AssertionError:
                 print('potato')
-        else:
-            pruner_loss = None
-            pruner_labels = None
-            pruner_logits = None
-            pruner_logits_after_pruning = None
+
+            outputs["loss"]["pruner"] = pruner_loss
+            outputs["pruner"] = {"logits": pruner_logits, "labels": pruner_labels,
+                                 "logits_after_pruning": pruner_logits_after_pruning}
 
         if "coref" in tasks:
             # Unpack Coref specific args (y labels)
@@ -972,11 +984,8 @@ class BasicMTL(nn.Module):
             else:
                 coref_eval = None
 
-        else:
-            coref_loss = None
-            coref_labels = None
-            coref_logits = None
-            coref_eval = None
+            outputs["loss"]["coref"] = coref_loss
+            outputs["coref"] = {"logits": coref_logits, "labels": coref_labels, "eval": coref_eval}
 
         if "ner" in tasks:
             ner_labels = ner["gold_labels"]  # n_spans, 1
@@ -992,18 +1001,9 @@ class BasicMTL(nn.Module):
                 f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
                 f"\n\tLabels shape: {ner_labels.shape}, " \
                 f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
-        else:
-            ner_loss = None
-            ner_logits = None
-            ner_labels = None
 
-        outputs = {
-            "loss": {"coref": coref_loss, "ner": ner_loss, "pruner": pruner_loss},
-            "ner": {"logits": ner_logits, "labels": ner_labels},
-            "coref": {"logits": coref_logits, "labels": coref_labels, "eval": coref_eval},
-            "pruner": {"logits": pruner_logits, "labels": pruner_labels,
-                       "logits_after_pruning": pruner_logits_after_pruning}
-        }
+            outputs["loss"]["ner"] = ner_loss
+            outputs["ner"] = {"logits": ner_logits, "labels": ner_labels}
 
         return outputs
 
