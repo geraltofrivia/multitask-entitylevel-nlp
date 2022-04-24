@@ -52,9 +52,13 @@ def get_pretrained_dirs(nm: str):
         return nm, nm, nm
 
 
-def pick_loss_scale(options: dict, tasks: Tasks):
+def pick_loss_scale(options: dict, tasks: Tasks, ignore_task: str):
     key = 'loss_scales_' + '_'.join(sorted(tasks))
-    return options[key]
+    scales = options[key]
+    if ignore_task:
+        ignore_index = tasks.index(ignore_task)
+        scales[ignore_index] = 0
+    return scales
 
 
 def get_saved_wandb_id(loc: Path):
@@ -108,10 +112,11 @@ def get_dataiter_partials(
         config: Union[dict, transformers.BertConfig],
         tasks: Tasks,
         dataset: str,
-        tokenizer: transformers.BertTokenizer
+        tokenizer: transformers.BertTokenizer,
+        ignore_task: str
 ):
     # Assign loss scales based on task
-    loss_scales = pick_loss_scale(CONFIG, tasks)
+    loss_scales = pick_loss_scale(CONFIG, tasks, ignore_task=ignore_task)
     # loss_scales = loss_scales.tolist() if not type(loss_scales) is list else loss_scales
 
     # Load the data
@@ -156,6 +161,10 @@ def get_dataiter_partials(
               help="If True, we do not input priors of classes into Model -> NER CE loss.")
 @click.option('--pruner-unweighted', is_flag=True, default=False,
               help="If True, we do not input priors of classes into Model -> Pruner BCEwL loss.")
+@click.option('--t1-ignore-task', default=None, type=str,
+              help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
+@click.option('--t2-ignore-task', default=None, type=str,
+              help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
 @click.option('--use-wandb', '-wb', is_flag=True, default=False,
               help="If True, we report this run to WandB")
 @click.option('--wandb-comment', '-wbm', type=str, default=None,
@@ -185,6 +194,8 @@ def run(
         train_encoder: bool = False,
         ner_unweighted: bool = False,
         pruner_unweighted: bool = False,
+        t1_ignore_task: str = None,
+        t2_ignore_task: str = None,
         use_wandb: bool = False,
         wandb_comment: str = '',
         wandb_trial: bool = False,
@@ -272,7 +283,8 @@ def run(
         
     """
 
-    train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer)
+    train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
+                                             ignore_task=t1_ignore_task)
 
     # Collect all metrics
     metrics = []
@@ -284,7 +296,8 @@ def run(
         metrics += [CorefBCubed(), CorefMUC(), CorefCeafe()]
 
     if dataset_2 and tasks_2:
-        train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer)
+        train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,
+                                                     ignore_task=t2_ignore_task)
         # Make combined iterators since we have two sets of datasets and tasks
         train_ds = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
         dev_ds = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])

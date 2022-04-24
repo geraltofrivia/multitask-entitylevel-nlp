@@ -568,7 +568,7 @@ class BasicMTL(nn.Module):
                 torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
                             dtype=torch.int64, device=self.config.device) - 1,
             ]
-        )
+        )  # TODO: try putting dummies to left and taking care of the rest of the code
         top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
         top_antecedents_mask[top_antecedents_ind__filtered < 0] = 0
         # top_antecedents_mask = torch.hstack(
@@ -591,7 +591,6 @@ class BasicMTL(nn.Module):
                 - a (n_anaphor, max_antecedents, span_emb) mat repr antecedents for each anaphor
                 - a (n_anaphor, max_antecedents, span_emb) mat repr element wise mul b/w the two.
         """
-        # TODO DEBUG; this is where we need to resume from
         similarity_emb = top_antecedents_emb__filtered * top_span_emb.unsqueeze(
             1
         )  # [n_ana, n_ante, span_emb]
@@ -943,8 +942,8 @@ class BasicMTL(nn.Module):
             coref_loss = self.coref_softmax_loss(
                 top_antecedent_scores, top_antecedent_labels
             )  # [top_cand]
-            coref_loss = torch.mean(coref_loss)
-            # coref_loss = torch.sum(coref_loss)
+            # coref_loss = torch.mean(coref_loss)
+            coref_loss = torch.sum(coref_loss)
 
             # predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
