@@ -244,6 +244,8 @@ def run(
         n_classes_ner = get_n_classes(task='ner', dataset=dataset)
     if 'ner' in tasks_2:
         n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
+    else:
+        n_classes_ner = 1
 
     # Make the model
     model = BasicMTL(dir_encoder, config=config, n_classes_ner=n_classes_ner)
