@@ -562,20 +562,20 @@ class BasicMTL(nn.Module):
         top_antecedents_emb__filtered[top_antecedents_ind__filtered < 0] = 0
 
         # Create a mask repr the -1 in top_antecedent_per_ana_ind
-        top_antecedents_ind__filtered = torch.hstack(
-            [
-                torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
-                            dtype=torch.int64, device=self.config.device) - 1,
-                top_antecedents_ind__filtered
-            ]
-        )
         # top_antecedents_ind__filtered = torch.hstack(
         #     [
-        #         top_antecedents_ind__filtered,
         #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
         #                     dtype=torch.int64, device=self.config.device) - 1,
+        #         top_antecedents_ind__filtered
         #     ]
-        # )  # TODO: try putting dummies to left and taking care of the rest of the code
+        # )
+        top_antecedents_ind__filtered = torch.hstack(
+            [
+                top_antecedents_ind__filtered,
+                torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
+                            dtype=torch.int64, device=self.config.device) - 1,
+            ]
+        )  # TODO: try putting dummies to left and taking care of the rest of the code
         top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
         top_antecedents_mask[top_antecedents_ind__filtered < 0] = 0
 
