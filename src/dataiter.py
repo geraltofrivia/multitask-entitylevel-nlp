@@ -908,10 +908,8 @@ class DataIterCombiner(Dataset):
     def __setitem__(self, i, item):
         try:
             dataiter_index, pointer_index = self.history[i]
-            if pointer_index > self.dataiters[dataiter_index].__len__() - 1:
-                print(i, pointer_index, dataiter_index)
-                raise ValueError("We can't set things which don't exist.")
-            self.dataiters[dataiter_index][pointer_index] = item
+            di = self.dataiters[dataiter_index]
+            self.dataiters[dataiter_index][pointer_index % len(di)] = item
         except KeyError:
             raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
 
