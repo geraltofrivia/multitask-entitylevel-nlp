@@ -267,21 +267,49 @@ class Document:
         return sentence_map
 
 
-Tasks = NewType('Tasks', Union[List[str], Tuple[str]])
-
-
-def init_tasks(tasks: Union[List[str], Tuple[str]]) -> Tasks:
+class Tasks(list):
     """
-        Usage:
-            l = ['ner', 'coref']
-            print(init_tasks(l))
-            print(type(init_tasks(l)) is list)   # is true
+        Custom list which has restricted values.
+        Also, you can't delete things from it :]
+
+        Can use it like
+            Tasks('coref', 'ner')
+        or
+            Tasks(['coref', 'ner'])
     """
-    for item in tasks:
-        if not (type(item) is str and item in KNOWN_TASKS):
-            raise UnknownTaskException(f"{item} is not a known task.")
 
-    # We want them to be alphabetical
-    tasks = sorted(tasks)
+    def __init__(self, *args, **kwargs):
 
-    return Tasks(tasks)
+        # First you want to allow for both forms of addressing (in comments above)
+        if type(args[0]) in [list, tuple]:
+            if len(args) != 1:
+                raise ValueError("You both provide a list in args[0] and provide other args? Please don't.")
+            args = args[0]
+
+        # Check Values
+        if len(set(args)) != len(args):
+            raise ValueError("Duplicates were passed in args. Please don't.")
+
+        for val in args:
+            if not type(val) is str:
+                raise TypeError("We only expected to deal with strings here !?!")
+
+            if val not in KNOWN_TASKS:
+                raise UnknownTaskException(f"{val} is not a known task.")
+
+        args = sorted(args)
+
+        # Init List
+        super().__init__(args)
+
+    def __setitem__(self, ii, val):
+        raise ValueError("Es Ist Verboten !!")
+
+    def insert(self, ii, val):
+        raise ValueError("Es Ist Verboten !!")
+
+    def pop(self, *args, **kwargs):
+        raise ValueError("Es Ist Verboten !!")
+
+    def append(self, val):
+        raise ValueError("Es Ist Verboten !!")

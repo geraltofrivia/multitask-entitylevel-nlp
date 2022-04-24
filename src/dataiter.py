@@ -21,10 +21,10 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG
-from utils.warnings import NoValidAnnotations, LabelDictNotFound
+from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG, unalias_split
+from utils.exceptions import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
-from utils.data import Document, Tasks, init_tasks
+from utils.data import Document, Tasks
 from utils.misc import check_dumped_config
 
 np.random.seed(NPRSEED)
@@ -39,6 +39,7 @@ class MultiTaskDataIter(Dataset):
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
             tasks: Iterable[str] = (),
+            loss_scales: Optional[np.ndarray] = None,
             rebuild_cache: bool = False
     ):
         """
@@ -62,6 +63,8 @@ class MultiTaskDataIter(Dataset):
         self.config = config
         self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
             if config.filter_candidates_pos_threshold > 0 else 10 ** 20
+
+        self.loss_scales = torch.tensor(loss_scales, dtype=torch.float)
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
@@ -87,10 +90,35 @@ class MultiTaskDataIter(Dataset):
                 raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
 
         (self.data, flag_successfully_pulled_from_disk) = self.load_from_disk(rebuild_cache)
+        self.task_weights = {}
 
         if not flag_successfully_pulled_from_disk:
+
+            # Init the list of documents (pull it from disk)
             self.dataset = DocumentReader(src=src, split=split, tasks=self._tasks_, shuffle=shuffle)
+
+            # Temporarily set class weights for all tasks as [0.5, 0.5]
+            for task_nm in self._tasks_:
+                if task_nm in ['ner', 'pruner']:
+                    self.task_weights[task_nm] = torch.ones(2, dtype=torch.float) / 2
+
+            # Process the dataset
             self.process()
+
+            # Calculate actual class weights
+            if not unalias_split(self._split_) == 'test':
+                for task_nm in self._tasks_:
+                    if task_nm in ['ner', 'pruner']:
+                        self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
+                                                                  dtype=torch.float)
+            # Update self.data
+            for i, item in enumerate(self.data):
+                if 'ner' in item:
+                    self.data[i]['ner']['weights'] = self.task_weights['ner']
+                if 'pruner' in item:
+                    self.data[i]['pruner']['weights'] = self.task_weights['pruner']
+
+            # Write this to disk
             self.write_to_disk()
 
         if self.config.trim:
@@ -348,6 +376,7 @@ class MultiTaskDataIter(Dataset):
 
         pruner_specific = {  # Pred stuff
             "gold_labels": gold_labels,
+            "weights": self.task_weights['pruner']
         }
 
         return pruner_specific
@@ -467,6 +496,7 @@ class MultiTaskDataIter(Dataset):
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
             "gold_labels": gold_labels,
+            "weights": self.task_weights['ner']
         }
 
         # Finally, check if gold_labels are empty (maybe all spans are larger than max span width or something)
@@ -637,6 +667,7 @@ class MultiTaskDataIter(Dataset):
             "n_subwords": n_subwords,
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
+            "loss_scales": self.loss_scales
         }
 
         if "coref" in self._tasks_:
@@ -844,10 +875,10 @@ class DataIterCombiner(Dataset):
     #         di = self.dataiters[dataiter_index]
     #         yield di[self.source_pointers[dataiter_index] % len(di)]
 
-    def __getitem__(self, item) -> dict:
+    def __getitem__(self, i) -> dict:
 
-        if item in self.history:
-            dataiter_index, pointer_index = self.history[item]
+        if i in self.history:
+            dataiter_index, pointer_index = self.history[i]
             return self.dataiters[dataiter_index][pointer_index]
 
         else:
@@ -856,7 +887,7 @@ class DataIterCombiner(Dataset):
             # ### ask for the next item.
 
             # Which source to sample from
-            dataiter_index = self.source_indices[item]
+            dataiter_index = self.source_indices[i]
             di = self.dataiters[dataiter_index]
 
             # Which item to yield
@@ -870,9 +901,16 @@ class DataIterCombiner(Dataset):
             self.source_pointers[dataiter_index] = pointer_index
 
             # Update the history
-            self.history[item] = (dataiter_index, pointer_index)
+            self.history[i] = (dataiter_index, pointer_index)
 
             return instance
+
+    def __setitem__(self, i, item):
+        try:
+            dataiter_index, pointer_index = self.history[i]
+            self.dataiters[dataiter_index][pointer_index] = i
+        except KeyError:
+            raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
 
 
 if __name__ == "__main__":
@@ -880,7 +918,7 @@ if __name__ == "__main__":
     dataset: str = 'scierc'
     epochs: int = 10
     encoder: str = "bert-base-uncased"
-    tasks: Tasks = init_tasks(('ner',))
+    tasks: Tasks = Tasks('ner', )
     device: str = "cpu"
     trim: bool = True
     train_encoder: bool = False
