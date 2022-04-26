@@ -4,7 +4,7 @@
 
 from functools import cached_property
 from dataclasses import dataclass, field
-from typing import List, NewType, Union, Tuple
+from typing import List
 
 from utils.nlp import to_toks
 from config import KNOWN_TASKS
@@ -278,6 +278,7 @@ class Tasks(list):
             Tasks(['coref', 'ner'])
     """
 
+    # noinspection PyUnusedLocal
     def __init__(self, *args, **kwargs):
 
         # First you want to allow for both forms of addressing (in comments above)

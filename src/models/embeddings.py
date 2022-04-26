@@ -9,9 +9,8 @@
 import torch
 import numpy as np
 import transformers
-import gensim.downloader as api
 from gensim.models import KeyedVectors
-from typing import List, Dict, Callable
+from typing import List, Callable
 
 # Local imports
 from utils.nlp import match_subwords_to_words
@@ -32,7 +31,7 @@ class BertEmbeddings:
 
     TODO: padding is set to zero. Should it be?
     TODO: what happens when a doc is larger than the max length? We seem to be truncating it.
-        Should we idify sentence by sentence instead?
+        Should we id-fy sentence by sentence instead?
     """
 
     def __init__(
@@ -220,6 +219,7 @@ class GloVeEmbeddings:
 
         n_batch = len(tokens)
         maxlen = max(len(seq) for seq in tokens)
+        # noinspection PyUnresolvedReferences
         hdim = self.vectors["the"].shape[0]
 
         outputs = torch.zeros((n_batch, maxlen, hdim), dtype=torch.float32)
@@ -235,6 +235,7 @@ class GloVeEmbeddings:
 if __name__ == "__main__":
     # Testing encode
     be = BertEmbeddings()
+    # noinspection SpellCheckingInspection
     print(
         be.encode(
             "I see a potatoatoatoato in my house. Nopessorryimeant houeses.".split()
@@ -242,6 +243,7 @@ if __name__ == "__main__":
     )
     #
     # Testing batch encode
+    # noinspection SpellCheckingInspection
     tokens = [
         "I see a little silhouette of a man.".split(),
         "Replace me with whatever text you seem to have agrowing inclinationing for.".split(),

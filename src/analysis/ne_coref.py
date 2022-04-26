@@ -148,11 +148,7 @@ def review(
             )[:4]
 
         # Choose the three best clusters
-        matches = dict(
-            sorted(matches.items(), key=lambda kv: -max(tuple_[0] for tuple_ in kv[1]))[
-            :3
-            ]
-        )
+        matches = dict(sorted(matches.items(), key=lambda kv: -max(tuple_[0] for tuple_ in kv[1]))[:3])
 
         print(ent, ent_[1:])
         pprint(matches)
@@ -210,7 +206,7 @@ def match_entities_to_coref_clusters(
             matched = _get_exact_match_ners_(span, ners)
             matched_spans = pop(ners, matched)
             matched_spans_ = pop(ners_, matched)
-            matched_spans_tags = pop(nertags, matched)
+            # matched_spans_tags = pop(nertags, matched)
             clustered_spans[i] += matched_spans
             clustered_spans_[i] += matched_spans_
 
@@ -259,10 +255,13 @@ def match_entities_to_coref_clusters(
         span if span in noun_chunks or is_nchunk(span, doc.pos) else [-2, -1]
         for span in ners
     ]
+    # noinspection SpellCheckingInspection
+
     ners_chunks_ = [
         ners_[i] if ners_chunks[i] != [-2, -1] else ["alphabetagamma"]
         for i in range(len(ners))
     ]
+    # noinspection SpellCheckingInspection
     ners_chunks_lemmatized = [
         lemmatize(span, lemmas) if span != [-2, -1] else "alphabetagamma"
         for span in ners_chunks
@@ -315,6 +314,7 @@ def match_entities_to_coref_clusters(
         span if span in noun_chunks or is_nchunk(span, doc.pos) else [-2, -1]
         for span in ners_filtered
     ]
+    # noinspection SpellCheckingInspection
     ners_filtered_chunks_ = [
         ners_[i] if ners_filtered_chunks[i] != [-2, -1] else ["alphabetagamma"]
         for i in range(len(ners))
@@ -485,6 +485,7 @@ def get_ungrounded_clusters(doc: Document) -> List[int]:
     ]
 
 
+# noinspection SpellCheckingInspection
 @click.command()
 @click.option(
     "--split",
@@ -593,8 +594,6 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
         # Find statistics on the number of named entities per named entity tags
         summary["named_entities_per_tag"] += count_tag_n_entities(doc, ent_src=ent_src)
 
-        raise NotImplementedError
-
         matched_entity_ids, unmatched_entities = match_entities_to_coref_clusters(
             doc, spacy_doc, ent_src=ent_src, filter_entities=filter_named_entities
         )
@@ -605,12 +604,8 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
             for k, v in matched_entity_ids.items()
         }
         clus_matched_diff_tags_per_doc = len(
-            [
-                1
-                for matched in matched_entity_ids.values()
-                if len(set(getattr(doc, ent_src).spans[epos][0] for epos in matched))
-                   > 1
-            ]
+            [1 for matched in matched_entity_ids.values()
+             if len(set(getattr(doc, ent_src).spans[epos][0] for epos in matched)) > 1]
         )
 
         summary["named_entities_unmatched_per_doc"].append(len(unmatched_entities))

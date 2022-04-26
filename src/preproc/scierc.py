@@ -92,7 +92,6 @@ class SciERCParser(GenericParser):
             doc = self.nlp(to_toks(doc_text))
             doc_pos = self.get_pos_tags(doc)
             doc_name = line['doc_key']
-            split = split_nm
 
             # Parse out NER stuff
             ner = self.get_named_entity_objs(line)

@@ -10,6 +10,7 @@ python-Levenshtein
 thefuzz
 click
 transformers
+gensim
 torch
 wandb
 sklearn

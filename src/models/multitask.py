@@ -39,7 +39,7 @@ class BasicMTL(nn.Module):
         # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
         self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1).to(config.device)
 
-        # Mention scorer (Unary, hdim) takes span representations and passes them through a 2 layer FFNN to score
+        # Mention scorer (Unary, hdim) takes span representations and passes them through a 2 layer FF NN to score
         #   whether they are valid spans or not.
         #   NOTE: its use is conflated because it tries to do two things
         #       (i) find syntactically incoherent spans
@@ -390,7 +390,7 @@ class BasicMTL(nn.Module):
             Step 3: Span Pruning (for Coref)
             
             candidate_span_scores: n_cands
-            Pass the span embeddings through a 2L FFNN (w dropout) and get a scalar score indicating the models' 
+            Pass the span embeddings through a 2L FF NN (w dropout) and get a scalar score indicating the models' 
                 predictions about them. We now need through sort through the spans and keep top-k.
                 
             num_top_antecedents: int
@@ -790,6 +790,7 @@ class BasicMTL(nn.Module):
 
         return return_dict
 
+    # noinspection PyUnusedLocal
     def pred_with_labels(
             self,
             input_ids: torch.tensor,

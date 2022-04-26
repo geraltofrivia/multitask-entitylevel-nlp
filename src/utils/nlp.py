@@ -37,6 +37,7 @@ from utils.misc import pop
 
 SPAN_POS_BLACKLIST_PREFIX = ("DT", "JJ")
 SPAN_POS_BLACKLIST_SUFFIX = (".", "POS")
+# noinspection SpellCheckingInspection
 NCHUNK_POS_WHITELIST = ("NN", "NNS", "NNP", "NNPS")
 
 
@@ -162,6 +163,7 @@ def match_subwords_to_words(
                 sw_selected = i
 
                 # DEBUG: every time there are more than 8 sw in a word, figure out what's up!
+                # noinspection SpellCheckingInspection
                 if sw_selected > 8 and not (
                         sw_phrase.startswith("http")
                         or sw_phrase.startswith("<http")

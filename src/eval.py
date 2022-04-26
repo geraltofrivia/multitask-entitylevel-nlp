@@ -136,7 +136,7 @@ class Evaluator:
 
         The metrics micro and metrics macro are passed independently.
         Micro metrics need only work on a instance to instance basis to return a score that can be simply aggregated
-        Macro metrics can not make this aggregation independently. So we expect them to return s'thing once at the end.
+        Macro metrics can not make this aggregation independently. So we expect them to return sthing once at the end.
 
         The metric each in turn is a class object. The micro ones simply inherit object and
             can be thought of as static fns. The macros can't. The macro objects register the scores internally

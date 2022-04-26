@@ -4,7 +4,6 @@ import click
 import torch
 import transformers
 from pathlib import Path
-from copy import deepcopy
 from functools import partial
 from typing import List, Callable, Union, Optional
 from mytorch.utils.goodies import mt_save_dir
@@ -177,7 +176,7 @@ def get_dataiter_partials(
 @click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
 @click.option('--resume-dir', default=-1, type=int,
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
-                   "/models/trained/<datasetcombinatio>/<task combination>/<resume_dir>/model.torch.")
+                   "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
@@ -220,7 +219,7 @@ def run(
     if dataset_2:
         if not tasks_2:
             raise BadParameters(f"No tasks specified for dataset 2: {dataset_2}.")
-        if not dataset_2 in KNOWN_SPLITS.keys():
+        if dataset_2 not in KNOWN_SPLITS.keys():
             raise BadParameters(f"Unknown dataset: {dataset_2}.")
     if dataset not in KNOWN_SPLITS:
         raise BadParameters(f"Unknown dataset: {dataset}.")
@@ -258,7 +257,7 @@ def run(
     # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
     if 'ner' in tasks:
         n_classes_ner = get_n_classes(task='ner', dataset=dataset)
-    if 'ner' in tasks_2:
+    elif 'ner' in tasks_2:
         n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
     else:
         n_classes_ner = 1
@@ -379,7 +378,7 @@ def run(
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
         wandb.config.update(config.to_dict(), allow_val_change=True)
 
-    outputs = training_loop(
+    training_loop(
         model=model,
         epochs=epochs,
         trn_dl=train_ds,

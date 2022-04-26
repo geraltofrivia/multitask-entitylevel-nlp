@@ -7,9 +7,7 @@ import numpy as np
 from pathlib import Path
 from tqdm.auto import tqdm
 from eval import Evaluator
-from mytorch.utils.goodies import Timer
 from typing import Iterable, Callable, Union, Optional
-from mytorch.utils.goodies import tosave, mt_save
 
 # Local imports
 try:
@@ -40,8 +38,11 @@ def training_loop(
         flag_save: bool = False,
         save_dir: Optional[Path] = None,
         epochs_last_run: int = 0,
-        save_config: dict = {}
+        save_config: dict = None
 ) -> (list, list, list):
+    if flag_save and save_config is None:
+        save_config = {}
+
     train_loss = {task_nm: [] for task_nm in tasks}
     train_metrics = {}
     dev_metrics = {}
@@ -53,57 +54,53 @@ def training_loop(
         trn_ds = trn_dl()
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
 
-        # Train
-        with Timer() as timer:
+        # Training (on the train set)
+        for i, instance in enumerate(tqdm(trn_ds)):
 
-            # Training (on the train set)
-            for i, instance in enumerate(tqdm(trn_ds)):
+            # Reset the gradients.
+            opt.zero_grad()
 
-                # Reset the gradients.
-                opt.zero_grad()
+            instance["prep_coref_eval"] = True
 
-                # TODO should we avoid excessive computations of prepping data for evaluating coref (set flag to false)
-                instance["prep_coref_eval"] = True
+            # Move all input tensors to the right devices
+            instance = change_device(instance, device)
 
-                # Move all input tensors to the right devices
-                instance = change_device(instance, device)
+            # DEBUG: if there are more than 9k candidates, skip the instance. save mem.
+            if instance['candidate_starts'].shape[0] > 9000:
+                warnings.warn(f"Skipping {i:5d}. Too many candidates. "
+                              f"Input: {instance['input_ids'].shape}."
+                              f"Spans: {instance['candidate_starts'].shape}")
+                continue
 
-                # DEBUG: if there are more than 9k candidates, skip the instance. save mem.
-                if instance['candidate_starts'].shape[0] > 9000:
-                    warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                                  f"Input: {instance['input_ids'].shape}."
-                                  f"Spans: {instance['candidate_starts'].shape}")
-                    continue
+            # Forward Pass
+            outputs = forward_fn(**instance)
 
-                # Forward Pass
-                outputs = forward_fn(**instance)
+            # Calc loss
+            loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
 
-                # Calc loss
-                loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
+            # Calc gradients
+            loss.backward()
 
-                # Calc gradients
-                loss.backward()
+            # Backward Pass
+            opt.step()
 
-                # Backward Pass
-                opt.step()
+            # Throw the outputs to the eval benchmark also
+            train_eval.update(instance=instance, outputs=outputs)
 
-                # Throw the outputs to the eval benchmark also
-                train_eval.update(instance=instance, outputs=outputs)
-
-                for task_nm in instance['tasks']:
-                    per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
-
-                # Try to plug mem leaks
-                del loss
-                change_device(outputs, 'cpu')
-                del outputs
-                trn_ds[i] = change_device(instance, 'cpu')
-
-            # Evaluation (on the validation set)
-            dev_eval.run()
+            for task_nm in instance['tasks']:
+                per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
 
             # Try to plug mem leaks
-            del trn_ds
+            del loss
+            change_device(outputs, 'cpu')
+            del outputs
+            trn_ds[i] = change_device(instance, 'cpu')
+
+        # Evaluation (on the validation set)
+        dev_eval.run()
+
+        # Try to plug mem leaks
+        del trn_ds
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())

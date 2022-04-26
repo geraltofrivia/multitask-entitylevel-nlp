@@ -349,6 +349,7 @@ class MultiTaskDataIter(Dataset):
 
         return truth
 
+    # noinspection PyUnusedLocal
     def process_pruner(
             self,
             instance: Document,
@@ -572,6 +573,8 @@ class MultiTaskDataIter(Dataset):
         #                                        for word_id in range(len(word2subword_ends))],
         #                                       dtype=torch.long, device="cpu")
 
+        # noinspection PyUnusedLocal
+        # Commented out, DO NOT DELETE (you never know ;) )
         # 1 marks that the index is a start of a new token, 0 marks that it is not.
         word_startmap_subword = wordid_for_subword != torch.roll(wordid_for_subword, 1)
 
@@ -589,9 +592,7 @@ class MultiTaskDataIter(Dataset):
         """
 
         candidate_starts = (
-            torch.arange(start=0, end=n_subwords, device="cpu")
-                .unsqueeze(1)
-                .repeat(1, self.config.max_span_width)
+            torch.arange(start=0, end=n_subwords, device="cpu").unsqueeze(1).repeat(1, self.config.max_span_width)
         )  # n_subwords, max_span_width
         candidate_ends = candidate_starts + torch.arange(
             start=0, end=self.config.max_span_width, device="cpu"
@@ -620,10 +621,9 @@ class MultiTaskDataIter(Dataset):
         # filter_candidate_starts_midword = word_startmap_subword[candidate_starts]
         # filter_candidate_ends_midword = word_startmap_subword[torch.clamp(candidate_ends, max=n_subwords - 1)]
 
-        candidate_mask = (
-                filter_beyond_document & filter_different_sentences
-            # & filter_candidate_starts_midword & filter_candidate_ends_midword
-        )  # & filter_candidate_starts_midword & \
+        candidate_mask = (filter_beyond_document & filter_different_sentences)
+        # & filter_candidate_starts_midword & filter_candidate_ends_midword
+        # & filter_candidate_starts_midword & \
         #  filter_candidate_ends_midword  # n_subwords, max_span_width
 
         # Now we flatten the candidate starts, ends and the mask and do an index select to ignore the invalid ones
