@@ -966,11 +966,13 @@ class BasicMTL(nn.Module):
                     gold_clusters[cluster_id] = gold_clusters.get(cluster_id, []) + \
                                                 [(coref['gold_starts'][i].item(), coref['gold_ends'][i].item())]
 
+                # Gold clusters is a dict of tuple of (start, end), (start, end) corresponding to every cluster ID
                 gold_clusters = [tuple(v) for v in gold_clusters.values()]
+
                 mention_to_gold = {}
-                for c in gold_clusters:
-                    for mention in c:
-                        mention_to_gold[mention] = c
+                for cluster in gold_clusters:
+                    for mention in cluster:
+                        mention_to_gold[mention] = cluster
 
                 ids = input_ids
                 top_span_starts = top_span_starts

@@ -167,8 +167,11 @@ class Evaluator:
 
     def update(self, instance: dict, outputs: dict):
         """
-            Depending on the tasks contained in instance['tasks'], invoke different metrics and
-                ask them to consider this instance
+            Depending on the tasks contained in instance['tasks'],
+                invoke different metrics and ask them to consider this instance.
+
+            Note that this is the the "main" function for this class.
+            Self.run just gets the preds and throws them to this function.
 
         :param instance:
         :param outputs:
