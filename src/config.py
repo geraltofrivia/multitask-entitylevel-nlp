@@ -64,5 +64,7 @@ CONFIG: dict = {
     'loss_scales_coref': [1.0, ],
     'loss_scales_ner': [1.0, ],
     'loss_scales_pruner': [1.0, ],
-    'filter_candidates_pos_threshold': 2000
+    'filter_candidates_pos_threshold': 2000,
+    'max_span_width': 5,
+    'learning_rate': 0.005
 }

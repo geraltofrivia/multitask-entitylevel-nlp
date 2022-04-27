@@ -149,7 +149,8 @@ def get_dataiter_partials(
 @click.option("--tasks_2", "-t2", type=str, default=None, multiple=True,
               help="Multiple values are okay e.g. -t2 coref -t2 ner or just one of these", )
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
-@click.option("--learning-rate", "-lr", type=float, default=0.005, help="Learning rate. Defaults to 0.005.")
+@click.option("--learning-rate", "-lr", type=float, default=CONFIG['learning_rate'],
+              help="Learning rate. Defaults to 0.005.")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
@@ -177,10 +178,13 @@ def get_dataiter_partials(
 @click.option('--resume-dir', default=-1, type=int,
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
+@click.option('--max-span-width', '-msw', type=int, default=CONFIG['max_span_width'],
+              help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
 def run(
+        max_span_width: int,
         dataset: str,
         tasks: List[str],
         dataset_2: str,
@@ -235,7 +239,7 @@ def run(
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
     config = transformers.BertConfig(dir_config)
-    config.max_span_width = 5
+    config.max_span_width = max_span_width
     config.coref_dropout = 0.3
     config.metadata_feature_size = 20
     config.unary_hdim = 1000
