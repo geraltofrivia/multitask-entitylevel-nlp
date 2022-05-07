@@ -36,14 +36,15 @@ class BasicMTL(nn.Module):
             num_embeddings=self.config.max_span_width, embedding_dim=n_coref_metadata_dim,
         ).to(config.device)
         self.segment_dist_embeddings = nn.Embedding(num_embeddings=config.coref_max_training_segments,
-                                                    embedding_dim=n_coref_metadata_dim)
+                                                    embedding_dim=n_coref_metadata_dim).to(config.device)
 
         # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
         self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1).to(config.device)
 
-        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim)
-        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim)
-        self.distance_projection = nn.Linear(n_coref_metadata_dim, 1)
+        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim).to(config.device)
+        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim).to(
+            config.device)
+        self.distance_projection = nn.Linear(n_coref_metadata_dim, 1).to(config.device)
 
         # Mention scorer (Unary, hdim) takes span representations and passes them through a 2 layer FF NN to score
         #   whether they are valid spans or not.
