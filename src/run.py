@@ -16,9 +16,9 @@ except ImportError:
 from utils.data import Tasks
 from loops import training_loop
 from models.multitask import BasicMTL
-from dataiter import MultiTaskDataIter, DataIterCombiner
 from utils.misc import check_dumped_config
-from config import LOCATIONS as LOC, CONFIG, KNOWN_SPLITS
+from dataiter import MultiTaskDataIter, DataIterCombiner
+from config import LOCATIONS as LOC, CONFIG, KNOWN_SPLITS, LOSS_SCALES
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
@@ -51,9 +51,9 @@ def get_pretrained_dirs(nm: str):
         return nm, nm, nm
 
 
-def pick_loss_scale(options: dict, tasks: Tasks, ignore_task: str):
+def pick_loss_scale(tasks: Tasks, ignore_task: str):
     key = 'loss_scales_' + '_'.join(sorted(tasks))
-    scales = options[key]
+    scales = LOSS_SCALES[key]
     if ignore_task:
         ignore_index = tasks.index(ignore_task)
         scales[ignore_index] = 0
@@ -115,7 +115,7 @@ def get_dataiter_partials(
         ignore_task: str
 ):
     # Assign loss scales based on task
-    loss_scales = pick_loss_scale(CONFIG, tasks, ignore_task=ignore_task)
+    loss_scales = pick_loss_scale(tasks, ignore_task=ignore_task)
     # loss_scales = loss_scales.tolist() if not type(loss_scales) is list else loss_scales
 
     # Load the data
@@ -257,6 +257,13 @@ def run(
     config.wandb = use_wandb
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
+
+    # merge all pre-typed config values into this bertconfig obj
+    for k, v in CONFIG.items():
+        try:
+            _ = config.__getattr__(k)
+        except AttributeError:
+            config.__setattr__(k, v)
 
     # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
     if 'ner' in tasks:

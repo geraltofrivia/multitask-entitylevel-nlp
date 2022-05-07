@@ -58,13 +58,17 @@ LOSS_RATIO_CNP = [1.0, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner 
 LOSS_RATIO_CP = [1.0 / 20000, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0 / 20000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
 CONFIG: dict = {
+    'filter_candidates_pos_threshold': 2000,
+    'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
+    'learning_rate': 0.005,
+    'coref_metadata_feature_size': 20,  # self explanatory
+    'coref_max_training_segments': 5  # used to determine max in segment distance part of coref
+}
+LOSS_SCALES = {
     'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
     'loss_scales_coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
     'loss_scales_coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
     'loss_scales_coref': [1.0, ],
     'loss_scales_ner': [1.0, ],
     'loss_scales_pruner': [1.0, ],
-    'filter_candidates_pos_threshold': 2000,
-    'max_span_width': 5,
-    'learning_rate': 0.005
 }

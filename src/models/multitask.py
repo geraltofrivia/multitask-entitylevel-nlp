@@ -1,8 +1,8 @@
 """
-    TODO:
-        - in data sampler (pipeline, make sure to convert 1, sl -> n, max sl sequences.
-            One doc per batch. Pad_to_multiple_of etc etc.
+    The core model is here. It does Coref. It does NER. It does everything. Come one come all.
+    Modularity is so 2021. I'll shoot myself in the foot instead thank you very much.
 """
+
 import math
 import torch
 import transformers
@@ -26,27 +26,40 @@ class BasicMTL(nn.Module):
         self.n_max_len: int = self.config.max_position_embeddings
         self.n_hid_dim: int = self.config.hidden_size
         self.n_classes_ner = n_classes_ner
+        n_coref_metadata_dim = self.config.coref_metadata_feature_size
 
         # Encoder responsible for giving contextual vectors to subword tokens
         self.encoder = transformers.BertModel.from_pretrained(enc_modelnm).to(config.device)
 
         # Span width embeddings give a fix dim score to width of spans (usually 1 to config.max_span_width (~5))
         self.span_width_embeddings = nn.Embedding(
-            num_embeddings=config.max_span_width,
-            embedding_dim=config.metadata_feature_size,
+            num_embeddings=self.config.max_span_width, embedding_dim=n_coref_metadata_dim,
         ).to(config.device)
+        self.segment_dist_embeddings = nn.Embedding(num_embeddings=config.coref_max_training_segments,
+                                                    embedding_dim=n_coref_metadata_dim)
 
         # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
         self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1).to(config.device)
+
+        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim)
+        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim)
+        self.distance_projection = nn.Linear(n_coref_metadata_dim, 1)
 
         # Mention scorer (Unary, hdim) takes span representations and passes them through a 2 layer FF NN to score
         #   whether they are valid spans or not.
         #   NOTE: its use is conflated because it tries to do two things
         #       (i) find syntactically incoherent spans
         #       (ii) find spans that are not anaphoric
-        span_embedding_dim = 3 * config.hidden_size + config.metadata_feature_size
+        span_embedding_dim = 3 * config.hidden_size + n_coref_metadata_dim
         self.unary_coref = nn.Sequential(
             nn.Linear(span_embedding_dim, config.unary_hdim),
+            nn.ReLU(),
+            nn.Dropout(config.coref_dropout),
+            nn.Linear(config.unary_hdim, 1),
+        ).to(config.device)
+
+        self.binary_coref_slow = nn.Sequential(
+            nn.Linear((span_embedding_dim * 3) + 2 * n_coref_metadata_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.unary_hdim, 1),
@@ -66,14 +79,12 @@ class BasicMTL(nn.Module):
             nn.Linear(config.unary_hdim, n_classes_ner),
         ).to(config.device)
 
-        # TODO: delete
-        self.fast_antecedent_projection = torch.nn.Linear(
-            span_embedding_dim, span_embedding_dim
-        ).to(config.device)
+        self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim).to(config.device)
+        self.slow_antecedent_projection = torch.nn.Linear(span_embedding_dim * 2, span_embedding_dim).to(config.device)
 
         # Initialising Losses
         self.ner_loss = nn.functional.cross_entropy
-        self.pruner_loss = self.rescaling_weights_bce_loss
+        self.pruner_loss = self._rescaling_weights_bce_loss_
         try:
             self.ner_ignore_weights = self.config.ner_ignore_weights
         except AttributeError:
@@ -84,7 +95,7 @@ class BasicMTL(nn.Module):
             self.pruner_ignore_weights = False
 
     @staticmethod
-    def rescaling_weights_bce_loss(logits, labels, weight: Optional[torch.Tensor] = None):
+    def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.Tensor] = None):
         # if weights are provided, scale them based on labels
         if weight is not None:
             _weight = torch.zeros_like(labels, dtype=torch.float) + weight[0]
@@ -93,7 +104,7 @@ class BasicMTL(nn.Module):
         else:
             return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
-    def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
+    def _get_span_word_attention_scores_(self, hidden_states, span_starts, span_ends):
         """
         CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L564
         Parameters
@@ -125,7 +136,35 @@ class BasicMTL(nn.Module):
         )  # [num_cand, num_words]span
         return token_attn
 
-    def get_span_embeddings(self, hidden_states, span_starts, span_ends):
+    @staticmethod
+    def _bucket_distance_(distances):
+        """
+        Places the given values (designed for distances) into 10 semi-logscale buckets:
+        [0, 1, 2, 3, 4, 5-7, 8-15, 16-31, 32-63, 64+].
+
+        Parameters
+        ----------
+        distances: tensor of size (candidates, candidates)
+            token distances between pairs
+
+        Returns
+        -------
+        distance buckets
+            tensor of size (candidates, candidates)
+        """
+        logspace_idx = torch.floor(torch.log(distances.float()) / math.log(2)).int() + 3
+        use_identity = (distances <= 4).int()
+        combined_idx = use_identity * distances + (1 - use_identity) * logspace_idx
+        return torch.clamp(combined_idx, 0, 9)
+
+    @staticmethod
+    def _batch_gather_(emb, indices):
+        batch_size, seq_len = emb.shape
+        flattened_emb = emb.view(-1, 1)
+        offset = (torch.arange(start=0, end=batch_size, device=indices.device) * seq_len).unsqueeze(1)
+        return flattened_emb[indices + offset].squeeze(2)
+
+    def _get_span_embeddings_(self, hidden_states, span_starts, span_ends):
         """
         CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L535
 
@@ -152,7 +191,7 @@ class BasicMTL(nn.Module):
         )
         emb.append(span_width_emb)
 
-        token_attention_scores = self.get_span_word_attention_scores(
+        token_attention_scores = self._get_span_word_attention_scores_(
             hidden_states, span_starts, span_ends
         )  # [num_cand, num_words]
         attended_word_representations = torch.mm(
@@ -161,30 +200,135 @@ class BasicMTL(nn.Module):
         emb.append(attended_word_representations)
         return torch.cat(emb, dim=1)
 
-    @staticmethod
-    def bucket_distance(distances):
+    def _get_fast_antecedent_scores_(self, span_emb):
         """
-        CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L496
-        Places the given values (designed for distances) into 10 semi-logs cale buckets:
-        [0, 1, 2, 3, 4, 5-7, 8-15, 16-31, 32-63, 64+].
+        Obtains representations of the spans
 
         Parameters
         ----------
-        distances: tensor of size (candidates, candidates)
-            token distances between pairs
+        span_emb: tensor of size (candidates, emb_size)
+            span representations
 
         Returns
         -------
-        distance buckets
-            tensor of size (candidates, candidates)
+        fast antecedent scores
+            tensor of size (candidates, span_embedding_size)
         """
-        logspace_idx = torch.floor(torch.log(distances.float()) / math.log(2)).int() + 3
-        use_identity = (distances <= 4).int()
-        combined_idx = use_identity * distances + (1 - use_identity) * logspace_idx
-        return torch.clamp(combined_idx, 0, 9)
+        source_emb = F.dropout(self.fast_antecedent_projection(span_emb),
+                               p=self.config.coref_dropout, training=self.training)  # [cand, emb]
+        target_emb = F.dropout(span_emb, p=self.config.coref_dropout, training=self.training)  # [cand, emb]
+        return torch.mm(source_emb, target_emb.t())  # [cand, cand]
+
+    def _get_slow_antecedent_scores_(
+            self,
+            top_span_emb: torch.tensor,
+            top_antecedents: torch.tensor,
+            top_antecedent_emb: torch.tensor,
+            top_antecedent_offsets: torch.tensor,
+            segment_distance: torch.tensor):
+        """
+        Compute slow antecedent scores
+
+        Parameters
+        ----------
+        top_span_emb: tensor of size (candidates, emb_size)
+            span representations
+        top_antecedents: tensor of size (candidates, antecedents)
+            indices of antecedents for each candidate
+        top_antecedent_emb: tensor of size (candidates, antecedents, emb)
+            embeddings of top antecedents for each candidate
+        top_antecedent_offsets: tensor of size (candidates, antecedents)
+            offsets for each mention/antecedent pair
+        segment_distance: tensor of size (candidates, antecedents)
+            segment distances for each candidate antecedent pair
+
+        Returns
+        -------
+        tensor of shape (candidates, antecedents)
+            antecedent scores
+        """
+        num_cand, num_ant = top_antecedents.shape
+        feature_emb_list = []
+
+        # if self.use_metadata:
+        #     top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
+        #     same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)  # [top_cand, top_ant]
+        #     speaker_pair_emb = self.same_speaker_embeddings(
+        #         torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
+        #     feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
+        #     genre_embs = genre_emb.view(1, 1, -1).repeat(num_cand, num_ant, 1)  # [top_cand, top_ant, feature_size]
+        #     feature_emb_list.append(genre_embs)
+
+        # span distance
+        antecedent_distance_buckets = self._bucket_distance_(top_antecedent_offsets).to(
+            top_span_emb.device)  # [cand, cand]
+        bucket_embeddings = self.slow_distance_embeddings(
+            torch.arange(start=0, end=10, device=top_span_emb.device))  # [10, feature_size]
+        feature_emb_list.append(bucket_embeddings[antecedent_distance_buckets])  # [cand, ant, feature_size]
+
+        # segment distance
+        segment_distance_emb = self.segment_dist_embeddings(
+            torch.arange(start=0, end=self.config.coref_max_training_segments, device=top_span_emb.device))
+        feature_emb_list.append(segment_distance_emb[segment_distance])  # [cand, ant, feature_size]
+
+        feature_emb = torch.cat(feature_emb_list, 2)  # [cand, ant, emb]
+        feature_emb = F.dropout(feature_emb, p=self.config.coref_dropout,
+                                training=self.training)  # [cand, ant, emb]
+        target_emb = top_span_emb.unsqueeze(1)  # [cand, 1, emb]
+        similarity_emb = top_antecedent_emb * target_emb  # [cand, ant, emb]
+        target_emb = target_emb.repeat(1, num_ant, 1)  # [cand, ant, emb]
+
+        pair_emb = torch.cat([target_emb, top_antecedent_emb, similarity_emb, feature_emb], 2)  # [cand, ant, emb]
+
+        return self.binary_coref_slow(pair_emb).squeeze(-1)
+
+    def _coarse_to_fine_pruning_(self, span_emb, mention_scores, num_top_antecedents):
+        """
+        Compute fast estimate antecedent scores and prune based on these scores.
+
+        Parameters
+        ----------
+        span_emb: tensor of size (candidates, emb_size)
+            span representations
+        mention_scores: tensor of size (candidates)
+            mention scores of spans
+        num_top_antecedents: int
+            number of antecedents
+
+        Returns
+        -------
+        top_antecedents: tensor of shape (mentions, antecedent_candidates)
+            indices of top antecedents for each mention
+        top_antecedents_mask: tensor of shape (mentions, antecedent_candidates)
+            boolean mask for antecedent candidates
+        top_antecedents_fast_scores: tensor of shape (mentions, antecedent_candidates)
+            fast scores for each antecedent candidate
+        top_antecedent_offsets: tensor of shape (mentions, antecedent_candidates)
+            offsets for each mention/antecedent pair
+        """
+        num_candidates = span_emb.shape[0]
+        top_span_range = torch.arange(start=0, end=num_candidates, device=span_emb.device)
+        antecedent_offsets = top_span_range.unsqueeze(1) - top_span_range.unsqueeze(0)  # [cand, cand]
+        antecedents_mask = antecedent_offsets >= 1  # [cand, cand]
+        fast_antecedent_scores = mention_scores.unsqueeze(1) + mention_scores.unsqueeze(0)  # [cand, cand]
+        fast_antecedent_scores += torch.log(antecedents_mask.float())  # [cand, cand]
+        fast_antecedent_scores += self._get_fast_antecedent_scores_(span_emb)  # [cand, cand]
+        # add distance scores
+        antecedent_distance_buckets = self._bucket_distance_(antecedent_offsets).to(span_emb.device)  # [cand, cand]
+        bucket_embeddings = F.dropout(self.distance_embeddings(torch.arange(start=0, end=10, device=span_emb.device)),
+                                      p=self.config.coref_dropout, training=self.training)  # [10, feature_size]
+        bucket_scores = self.distance_projection(bucket_embeddings)  # [10, 1]
+        fast_antecedent_scores += bucket_scores[antecedent_distance_buckets].squeeze(-1)  # [cand, cand]
+        # get top antecedent scores/features
+        _, top_antecedents = torch.topk(fast_antecedent_scores, num_top_antecedents, sorted=False,
+                                        dim=1)  # [cand, num_ant]
+        top_antecedents_mask = self._batch_gather_(antecedents_mask, top_antecedents)  # [cand, num_ant]
+        top_antecedents_fast_scores = self._batch_gather_(fast_antecedent_scores, top_antecedents)  # [cand, num_ant]
+        top_antecedents_offsets = self._batch_gather_(antecedent_offsets, top_antecedents)  # [cand, num_ant]
+        return top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedents_offsets
 
     @staticmethod
-    def extract_spans(
+    def _extract_spans_(
             candidate_starts: torch.Tensor,
             candidate_ends: torch.Tensor,
             candidate_span_scores: torch.Tensor,
@@ -241,100 +385,6 @@ class BasicMTL(nn.Module):
                     end_to_earliest_start[cand_end] = cand_start
             current_span_index += 1
         return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
-
-    # TODO: here to test something, delete this and the next two functions
-    def get_fast_antecedent_scores(self, span_emb):
-        """
-        Obtains representations of the spans
-
-        Parameters
-        ----------
-        span_emb: tensor of size (candidates, emb_size)
-            span representations
-
-        Returns
-        -------
-        fast antecedent scores
-            tensor of size (candidates, span_embedding_size)
-        """
-        source_emb = F.dropout(
-            self.fast_antecedent_projection(span_emb),
-            p=self.config.coref_dropout,
-            training=self.training,
-        )  # [cand, emb]
-        target_emb = F.dropout(
-            span_emb, p=self.config.coref_dropout, training=self.training
-        )  # [cand, emb]
-        return torch.mm(source_emb, target_emb.t())  # [cand, cand]
-
-    @staticmethod
-    def batch_gather(emb, indices):
-        batch_size, seq_len = emb.shape
-        flattened_emb = emb.view(-1, 1)
-        offset = (
-                torch.arange(start=0, end=batch_size, device=indices.device) * seq_len
-        ).unsqueeze(1)
-        return flattened_emb[indices + offset].squeeze(2)
-
-    def coarse_to_fine_pruning(self, span_emb, mention_scores, num_top_antecedents):
-        """
-        Compute fast estimate antecedent scores and prune based on these scores.
-
-        Parameters
-        ----------
-        span_emb: tensor of size (candidates, emb_size)
-            span representations
-        mention_scores: tensor of size (candidates)
-            mention scores of spans
-        num_top_antecedents: int
-            number of antecedents
-
-        Returns
-        -------
-        top_antecedents: tensor of shape (mentions, antecedent_candidates)
-            indices of top antecedents for each mention
-        top_antecedents_mask: tensor of shape (mentions, antecedent_candidates)
-            boolean mask for antecedent candidates
-        top_antecedents_fast_scores: tensor of shape (mentions, antecedent_candidates)
-            fast scores for each antecedent candidate
-        top_antecedent_offsets: tensor of shape (mentions, antecedent_candidates)
-            offsets for each mention/antecedent pair
-        """
-        num_candidates = span_emb.shape[0]
-        top_span_range = torch.arange(
-            start=0, end=num_candidates, device=span_emb.device
-        )
-        antecedent_offsets = top_span_range.unsqueeze(1) - top_span_range.unsqueeze(
-            0
-        )  # [cand, cand]
-        antecedents_mask = antecedent_offsets >= 1  # [cand, cand]
-        fast_antecedent_scores = mention_scores.unsqueeze(1) + mention_scores.unsqueeze(
-            0
-        )  # [cand, cand]
-        fast_antecedent_scores += torch.log(antecedents_mask.float())  # [cand, cand]
-        fast_antecedent_scores += self.get_fast_antecedent_scores(
-            span_emb
-        )  # [cand, cand]
-        # # add distance scores
-        # antecedent_distance_buckets = self.bucket_distance(antecedent_offsets).to(span_emb.device)  # [cand, cand]
-        # bucket_embeddings = F.dropout(self.distance_embeddings(torch.arange(start=0, end=10, device=span_emb.device)),
-        #                               p=self.config.coref_dropout, training=self.training)  # [10, feature_size]
-        # bucket_scores = self.distance_projection(bucket_embeddings)  # [10, 1]
-        # fast_antecedent_scores += bucket_scores[antecedent_distance_buckets].squeeze(-1)  # [cand, cand]
-        # get top antecedent scores/features
-        _, top_antecedents = torch.topk(
-            fast_antecedent_scores, num_top_antecedents, sorted=False, dim=1
-        )  # [cand, num_ant]
-        top_antecedents_mask = self.batch_gather(
-            antecedents_mask, top_antecedents
-        )  # [cand, num_ant]
-        top_antecedents_fast_scores = self.batch_gather(
-            fast_antecedent_scores, top_antecedents
-        )  # [cand, num_ant]
-        # top_antecedents_offsets = self.batch_gather(
-        #     antecedent_offsets, top_antecedents
-        # )  # [cand, num_ant]
-        return top_antecedents, top_antecedents_mask, top_antecedents_fast_scores
 
     @staticmethod
     def coref_softmax_loss(top_antecedent_scores, top_antecedent_labels):
@@ -408,10 +458,10 @@ class BasicMTL(nn.Module):
 
         # get beam size
         n_top_spans = int(float(n_subwords * self.config.top_span_ratio))
-        # n_top_ante = min(self.config.max_top_antecedents, n_top_spans)
+        n_top_ante = min(self.config.max_top_antecedents, n_top_spans)
 
         # Get top mention scores and sort by span order (avoiding overlaps in selected spans)
-        top_span_indices = self.extract_spans(
+        top_span_indices = self._extract_spans_(
             candidate_starts, candidate_ends, candidate_span_scores, n_top_spans
         )
         top_span_starts = candidate_starts[top_span_indices]  # [top_cand]
@@ -432,6 +482,7 @@ class BasicMTL(nn.Module):
             "top_span_mention_scores": top_span_mention_scores,
             "top_span_emb": top_span_emb,
             "n_top_spans": n_top_spans,
+            "n_top_antecedents": n_top_ante,
             "top_span_indices": top_span_indices,
             "logits_after_pruning": logits_after_pruning
         }
@@ -439,20 +490,20 @@ class BasicMTL(nn.Module):
     # noinspection PyUnusedLocal
     def coref(
             self,
+            input_ids: torch.tensor,
             encoded: torch.tensor,
+            attention_mask: torch.tensor,
+            top_span_starts: torch.tensor,
             top_span_emb: torch.tensor,
             top_span_mention_scores: torch.tensor,
             n_top_spans: int,
+            n_top_antecedents: int,
             *args, **kwargs
     ):
         """
-
-        :param encoded:
-        :param top_span_emb:
-        :param top_span_mention_scores:
-        :param n_top_spans:
-        :param args:
-        :param kwargs:
+            This is an adapted but largely unchanged code of BertForCoreferenceResolutionBase in mangoes,
+                with c2f elements but no higher order stuff and
+                TODO: no metadata finagling as of now. we'll include this soon-ish.
         :return:
             {
                 "top_antecedents": tensor: indices in top span candidates of top antecedents for each mention
@@ -461,193 +512,226 @@ class BasicMTL(nn.Module):
             }
         """
 
-        # opp = self.coarse_to_fine_pruning(
-        #     top_span_emb, top_span_mention_scores, self.config.max_top_antecedents
-        # )
+        # c2f block
+        dummy_scores = torch.zeros([n_top_spans, 1], device=self.config.device)  # [top_cand, 1]
+        top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedent_offsets = \
+            self._coarse_to_fine_pruning_(top_span_emb, top_span_mention_scores, n_top_antecedents)
 
-        """
-            Step 4: Filtering antecedents for each anaphor
-            1. The antecedent must occur before the anaphor: modeled by a lower triangular identity matrix based mask
-            2. Only top K prev. antecedents are considered. They are sorted based on their mention scores.
-                For this: we put the mask over mention scores and argsort to get top indices. 
-                These indices are then set as one, rest as zero in a new mask. E.g.
-                
-                Let there are 4 spans. k (max antecedents to be considered) is 2
-                mention_scores = [2,4,-1,3]
-                all_prev = [
-                    [1, 0, 0, 0],
-                    [1, 1, 0, 0],
-                    [1, 1, 1, 0],
-                    [1, 1, 1, 1]
-                ] # i.e. for the first span, the candidates must be only 1; 
-                # for third, the first three spans are candidates .. etc
-                desired_mask = [
-                    [0, _, _, _], # though we can select k=2 for it, there is only 1 candidate before the span
-                    [1, 0, _, _], # we can select k=2, we have only two options,
-                    [1, 0, _, _], # though we can select the third one, the first two have higher mention score
-                    [1, 3, _, _] # the top k=2 mentions based on mention score
-                ]
-        """
-        # Create an antecedent mask: lower triangular matrix =e, rest 0 indicating the candidates for each span
-        # [n_ana, n_ana]
-        top_antecedents_mask__filtered = torch.ones(
-            n_top_spans, n_top_spans, device=encoded.device
-        ).tril()  # Lower triangular mat with filled diagonal
-        top_antecedents_mask__filtered = top_antecedents_mask__filtered - torch.eye(
-            top_antecedents_mask__filtered.shape[0],
-            top_antecedents_mask__filtered.shape[1],
-            dtype=top_antecedents_mask__filtered.dtype,
-            device=top_antecedents_mask__filtered.device,
-        )  # torch.eye is a diagonal. This op simply makes it so the mat has zeros in diagonals
+        num_segments = input_ids.shape[0]
+        segment_length = input_ids.shape[1]
+        flat_word_segments = torch.arange(start=0, end=num_segments, device=input_ids.device).view(-1, 1).repeat(
+            [1, segment_length]).view(-1)  # [segments, segment_len]
+        # flat_word_segments = torch.masked_select(word_segments.view(-1), attention_mask.bool().view(-1))
+        mention_segments = flat_word_segments[top_span_starts].view(-1, 1)  # [top_cand, 1]
+        antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]]  # [top_cand, top_ant]
+        segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
+                                       self.config.coref_max_training_segments - 1)  # [top_cand, top_ant]
 
-        """
-            At this point, this mask looks like:
-            [[0., 0., 0.,  ..., 0., 0., 0.],
-            [1., 0., 0.,  ..., 0., 0., 0.],
-            [1., 1., 0.,  ..., 0., 0., 0.],
-            ...,
-            [1., 1., 1.,  ..., 0., 0., 0.],
-            [1., 1., 1.,  ..., 1., 0., 0.],
-            [1., 1., 1.,  ..., 1., 1., 0.]]
-            
-            
-            Because when we take a log of it (used in argsort below) it will look like:
-            [[-inf, -inf, -inf,  ..., -inf, -inf, -inf],
-            [0., -inf, -inf,  ..., -inf, -inf, -inf],
-            [0., 0., -inf,  ..., -inf, -inf, -inf],
-            ...,
-            [0., 0., 0.,  ..., -inf, -inf, -inf],
-            [0., 0., 0.,  ..., 0., -inf, -inf],
-            [0., 0., 0.,  ..., 0., 0., -inf]]
-        
-        """
+        # calculate final slow scores (this was a higher order for loop that we paved over)
+        top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
+        top_antecedent_scores = top_antecedents_fast_scores + \
+                                self._get_slow_antecedent_scores_(top_span_emb, top_antecedents, top_antecedent_emb,
+                                                                  top_antecedent_offsets,
+                                                                  segment_distance)  # [top_cand, top_ant]
 
-        # Argsort mention scores for each span but ignored masked instances.
-        top_antecedents_ind__filtered = torch.argsort(
-            top_span_mention_scores + torch.log(top_antecedents_mask__filtered),
-            descending=True,
-            dim=1,
-        )  # [n_ana, n_ana]
+        top_antecedent_weights = F.softmax(
+            torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
+        top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
+                                       1)  # [top_cand, top_ant + 1, emb]
+        attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb,
+                                      1)  # [top_cand, emb]
+        gate_vectors = torch.sigmoid(
+            self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
+        top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
 
-        # Add 1 to indices (temporarily, to distinguish between index '0',
-        #   and ignoring an index '_' (in the matrix in code comments above),
-        #   and the multiply it with the mask.
-        top_antecedents_ind__filtered = (top_antecedents_ind__filtered + 1) * \
-                                        top_antecedents_mask__filtered  # [n_ana, n_ana]
+        top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
 
-        # Finally we subtract 1
-        # and hereon negative values indicates things which we don't want
-        top_antecedents_ind__filtered = (top_antecedents_ind__filtered - 1).to(
-            torch.long
-        )  # [n_ana, n_ante]
-
-        # The [n_ana, n_ana] lower triangular mat now has sorted span indices.
-        # We further need to clamp them to k.
-        # For that, we just crop top_antecedents_ind__filtered
-        top_antecedents_ind__filtered = top_antecedents_ind__filtered[:, : self.config.max_top_antecedents]
-        # [n_ana, n_ante]
-
-        # # Below is garbage, ignore
-        # # For that, a simple col mul. will suffice
-        # column_mask = torch.zeros((num_top_mentions,), device=encoded.device, dtype=torch.float)
-        # column_mask[:config.max_top_antecedents] = 1
-        # top_antecedents_ind__filtered = top_antecedents_ind__filtered*column_mask
-
-        # At this point, top_antecedents_ind__filtered has -1 representing masked out things,
-        #   and 0+ int to repr. actual indices
-        top_antecedents_emb__filtered = top_span_emb[
-            top_antecedents_ind__filtered
-        ]  # [n_ana, n_ante, span_emb]
-        # This mask is needed to ignore the antecedents which occur after the anaphor (in span embeddings mat)
-        top_antecedents_emb__filtered[top_antecedents_ind__filtered < 0] = 0
-
-        # Create a mask repr the -1 in top_antecedent_per_ana_ind
+        # This is the code block that i spent months debugging but couldn't fix so I've carpetted it over.
+        # Not deleting it because... sentiments.
+        #
+        # """
+        #     Step 4: Filtering antecedents for each anaphor
+        #     1. The antecedent must occur before the anaphor: modeled by a lower triangular identity matrix based mask
+        #     2. Only top K prev. antecedents are considered. They are sorted based on their mention scores.
+        #         For this: we put the mask over mention scores and argsort to get top indices.
+        #         These indices are then set as one, rest as zero in a new mask. E.g.
+        #
+        #         Let there are 4 spans. k (max antecedents to be considered) is 2
+        #         mention_scores = [2,4,-1,3]
+        #         all_prev = [
+        #             [1, 0, 0, 0],
+        #             [1, 1, 0, 0],
+        #             [1, 1, 1, 0],
+        #             [1, 1, 1, 1]
+        #         ] # i.e. for the first span, the candidates must be only 1;
+        #         # for third, the first three spans are candidates .. etc
+        #         desired_mask = [
+        #             [0, _, _, _], # though we can select k=2 for it, there is only 1 candidate before the span
+        #             [1, 0, _, _], # we can select k=2, we have only two options,
+        #             [1, 0, _, _], # though we can select the third one, the first two have higher mention score
+        #             [1, 3, _, _] # the top k=2 mentions based on mention score
+        #         ]
+        # """
+        # # Create an antecedent mask: lower triangular matrix =e, rest 0 indicating the candidates for each span
+        # # [n_ana, n_ana]
+        # top_antecedents_mask__filtered = torch.ones(
+        #     n_top_spans, n_top_spans, device=encoded.device
+        # ).tril()  # Lower triangular mat with filled diagonal
+        # top_antecedents_mask__filtered = top_antecedents_mask__filtered - torch.eye(
+        #     top_antecedents_mask__filtered.shape[0],
+        #     top_antecedents_mask__filtered.shape[1],
+        #     dtype=top_antecedents_mask__filtered.dtype,
+        #     device=top_antecedents_mask__filtered.device,
+        # )  # torch.eye is a diagonal. This op simply makes it so the mat has zeros in diagonals
+        #
+        # """
+        #     At this point, this mask looks like:
+        #     [[0., 0., 0.,  ..., 0., 0., 0.],
+        #     [1., 0., 0.,  ..., 0., 0., 0.],
+        #     [1., 1., 0.,  ..., 0., 0., 0.],
+        #     ...,
+        #     [1., 1., 1.,  ..., 0., 0., 0.],
+        #     [1., 1., 1.,  ..., 1., 0., 0.],
+        #     [1., 1., 1.,  ..., 1., 1., 0.]]
+        #
+        #
+        #     Because when we take a log of it (used in argsort below) it will look like:
+        #     [[-inf, -inf, -inf,  ..., -inf, -inf, -inf],
+        #     [0., -inf, -inf,  ..., -inf, -inf, -inf],
+        #     [0., 0., -inf,  ..., -inf, -inf, -inf],
+        #     ...,
+        #     [0., 0., 0.,  ..., -inf, -inf, -inf],
+        #     [0., 0., 0.,  ..., 0., -inf, -inf],
+        #     [0., 0., 0.,  ..., 0., 0., -inf]]
+        #
+        # """
+        #
+        # # Argsort mention scores for each span but ignored masked instances.
+        # top_antecedents_ind__filtered = torch.argsort(
+        #     top_span_mention_scores + torch.log(top_antecedents_mask__filtered),
+        #     descending=True,
+        #     dim=1,
+        # )  # [n_ana, n_ana]
+        #
+        # # Add 1 to indices (temporarily, to distinguish between index '0',
+        # #   and ignoring an index '_' (in the matrix in code comments above),
+        # #   and the multiply it with the mask.
+        # top_antecedents_ind__filtered = (top_antecedents_ind__filtered + 1) * \
+        #                                 top_antecedents_mask__filtered  # [n_ana, n_ana]
+        #
+        # # Finally we subtract 1
+        # # and hereon negative values indicates things which we don't want
+        # top_antecedents_ind__filtered = (top_antecedents_ind__filtered - 1).to(
+        #     torch.long
+        # )  # [n_ana, n_ante]
+        #
+        # # The [n_ana, n_ana] lower triangular mat now has sorted span indices.
+        # # We further need to clamp them to k.
+        # # For that, we just crop top_antecedents_ind__filtered
+        # top_antecedents_ind__filtered = top_antecedents_ind__filtered[:, : self.config.max_top_antecedents]
+        # # [n_ana, n_ante]
+        #
+        # # # Below is garbage, ignore
+        # # # For that, a simple col mul. will suffice
+        # # column_mask = torch.zeros((num_top_mentions,), device=encoded.device, dtype=torch.float)
+        # # column_mask[:config.max_top_antecedents] = 1
+        # # top_antecedents_ind__filtered = top_antecedents_ind__filtered*column_mask
+        #
+        # # At this point, top_antecedents_ind__filtered has -1 representing masked out things,
+        # #   and 0+ int to repr. actual indices
+        # top_antecedents_emb__filtered = top_span_emb[
+        #     top_antecedents_ind__filtered
+        # ]  # [n_ana, n_ante, span_emb]
+        # # This mask is needed to ignore the antecedents which occur after the anaphor (in span embeddings mat)
+        # top_antecedents_emb__filtered[top_antecedents_ind__filtered < 0] = 0
+        #
+        # # Create a mask repr the -1 in top_antecedent_per_ana_ind
+        # # top_antecedents_ind__filtered = torch.hstack(
+        # #     [
+        # #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
+        # #                     dtype=torch.int64, device=self.config.device) - 1,
+        # #         top_antecedents_ind__filtered
+        # #     ]
+        # # )
         # top_antecedents_ind__filtered = torch.hstack(
         #     [
+        #         top_antecedents_ind__filtered,
         #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
         #                     dtype=torch.int64, device=self.config.device) - 1,
-        #         top_antecedents_ind__filtered
         #     ]
-        # )
-        top_antecedents_ind__filtered = torch.hstack(
-            [
-                top_antecedents_ind__filtered,
-                torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
-                            dtype=torch.int64, device=self.config.device) - 1,
-            ]
-        )  # TODO: try putting dummies to left and taking care of the rest of the code
-        top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
-        top_antecedents_mask[top_antecedents_ind__filtered < 0] = 0
-
-        # We argsort this to yield a list of indices.
-
-        """
-            Step 5: Finally, let's do pairwise scoring of spans and their candidate antecedent scores.
-            We concat
-                - a (n_anaphor, 1, span_emb) mat repr anaphors
-                - a (n_anaphor, max_antecedents, span_emb) mat repr antecedents for each anaphor
-                - a (n_anaphor, max_antecedents, span_emb) mat repr element wise mul b/w the two.
-        """
-        similarity_emb = top_antecedents_emb__filtered * top_span_emb.unsqueeze(
-            1
-        )  # [n_ana, n_ante, span_emb]
-        anaphor_emb = top_span_emb.unsqueeze(1).repeat(
-            1, min(n_top_spans, self.config.max_top_antecedents), 1
-        )  # [n_ana, n_ante, span_emb]
-        pair_emb = torch.cat(
-            [anaphor_emb, top_antecedents_emb__filtered, similarity_emb], 2
-        )  # [n_ana], n_ante, 3*span_emb]
-
-        # Finally, pass it through the params and get the scores
-        top_antecedent_scores = self.binary_coref(pair_emb).squeeze(
-            -1
-        )  # [n_ana, n_ante]
-
-        # Dummy scores are set to zero (for reasons explained in Lee et al 2017 e2e coref)
-        dummy_scores = torch.zeros(
-            [n_top_spans, 1], device=encoded.device
-        )  # [n_ana, 1]
-
-        top_antecedent_scores = torch.cat(
-            [dummy_scores, top_antecedent_scores], dim=1
-            # [top_antecedent_scores, dummy_scores], dim=1
-        )  # [n_ana, n_ante + 1]
-
-        # Now we transpose some things back from the space of individual span's candidates to the space of pruned spans
-
-        # Now you have a notion of which are the likeliest antecedents for every given anaphor (sorted by scores).
-        top_antecedent_indices_in_each_span_cand_space = torch.argsort(
-            top_antecedent_scores, descending=True
-        )  # [n_ana, n_ante + 1]
-
-        # TODO: I'm not sure about this. Empirically decide.
-        # Since we're going to be using the top_antecedent_mask, need to get the mask arranged in the same fashion.
-        top_antecedent_mask = top_antecedents_mask.gather(
-            index=top_antecedent_indices_in_each_span_cand_space,
-            dim=1
-        )  # [n_ana, n_ante + 1]
-
-        '''
-             The previous code (commented below) was flawed. Like, objectively wrong.
-             Previously, top_antecedent_indices were in not in the same space, but just argsort-ed scores
-                so a value of 45 in index (3, 0) would mean that
-                for the third span, antecedent candidate #45 is the most likely antecedent.
-                However, this is not 45 in top_spans ..
-                just 45th antecedent in the list of top 50 spans for THIS anaphor.
-
-             So, that's fixed now.
-        '''
-        top_antecedent_indices = top_antecedents_ind__filtered.gather(
-            index=top_antecedent_indices_in_each_span_cand_space,
-            dim=1
-        )  # [n_ana, n_ante + 1]
+        # )  # TODO: try putting dummies to left and taking care of the rest of the code
+        # top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
+        # top_antecedents_mask[top_antecedents_ind__filtered < 0] = 0
+        #
+        # # We argsort this to yield a list of indices.
+        #
+        # """
+        #     Step 5: Finally, let's do pairwise scoring of spans and their candidate antecedent scores.
+        #     We concat
+        #         - a (n_anaphor, 1, span_emb) mat repr anaphors
+        #         - a (n_anaphor, max_antecedents, span_emb) mat repr antecedents for each anaphor
+        #         - a (n_anaphor, max_antecedents, span_emb) mat repr element wise mul b/w the two.
+        # """
+        # similarity_emb = top_antecedents_emb__filtered * top_span_emb.unsqueeze(
+        #     1
+        # )  # [n_ana, n_ante, span_emb]
+        # anaphor_emb = top_span_emb.unsqueeze(1).repeat(
+        #     1, min(n_top_spans, self.config.max_top_antecedents), 1
+        # )  # [n_ana, n_ante, span_emb]
+        # pair_emb = torch.cat(
+        #     [anaphor_emb, top_antecedents_emb__filtered, similarity_emb], 2
+        # )  # [n_ana], n_ante, 3*span_emb]
+        #
+        # # Finally, pass it through the params and get the scores
+        # top_antecedent_scores = self.binary_coref(pair_emb).squeeze(
+        #     -1
+        # )  # [n_ana, n_ante]
+        #
+        # # Dummy scores are set to zero (for reasons explained in Lee et al 2017 e2e coref)
+        # dummy_scores = torch.zeros(
+        #     [n_top_spans, 1], device=encoded.device
+        # )  # [n_ana, 1]
+        #
+        # top_antecedent_scores = torch.cat(
+        #     [dummy_scores, top_antecedent_scores], dim=1
+        #     # [top_antecedent_scores, dummy_scores], dim=1
+        # )  # [n_ana, n_ante + 1]
+        #
+        # # Now we transpose some things back from the space of individual span's candidates to the space of pruned spans
+        #
+        # # Now you have a notion of which are the likeliest antecedents for every given anaphor (sorted by scores).
+        # top_antecedent_indices_in_each_span_cand_space = torch.argsort(
+        #     top_antecedent_scores, descending=True
+        # )  # [n_ana, n_ante + 1]
+        #
+        # # TODO: I'm not sure about this. Empirically decide.
+        # # Since we're going to be using the top_antecedent_mask, need to get the mask arranged in the same fashion.
+        # top_antecedent_mask = top_antecedents_mask.gather(
+        #     index=top_antecedent_indices_in_each_span_cand_space,
+        #     dim=1
+        # )  # [n_ana, n_ante + 1]
+        #
+        # '''
+        #      The previous code (commented below) was flawed. Like, objectively wrong.
+        #      Previously, top_antecedent_indices were in not in the same space, but just argsort-ed scores
+        #         so a value of 45 in index (3, 0) would mean that
+        #         for the third span, antecedent candidate #45 is the most likely antecedent.
+        #         However, this is not 45 in top_spans ..
+        #         just 45th antecedent in the list of top 50 spans for THIS anaphor.
+        #
+        #      So, that's fixed now.
+        # '''
+        # top_antecedent_indices = top_antecedents_ind__filtered.gather(
+        #     index=top_antecedent_indices_in_each_span_cand_space,
+        #     dim=1
+        # )  # [n_ana, n_ante + 1]
 
         # Now we just return them.top_antecedents_emb__filtered
         return {
             "top_antecedent_scores": top_antecedent_scores,
             "top_antecedent_mask": top_antecedents_mask,
-            "top_antecedents": top_antecedent_indices,  # this was top_antecedent_indices
-            "antecedent_map": top_antecedents_ind__filtered  # this mask brings things from 461x461 to 461x51 space
+            "top_antecedents": top_antecedents,  # this was top_antecedent_indices
+            # "antecedent_map": top_antecedents_ind__filtered  # this mask brings things from 461x461 to 461x51 space
         }
 
     # noinspection PyUnusedLocal
@@ -717,8 +801,6 @@ class BasicMTL(nn.Module):
             -1, 1
         )  # n_words, h_dim
 
-        # TODO: some gold stuff
-
         """
             Step 2: Span embeddings
             
@@ -729,7 +811,7 @@ class BasicMTL(nn.Module):
                 add an attention weighted sum of vectors within the span.  
         """
         # n_cands, 3*h_dim + meta_dim
-        candidate_span_embeddings = self.get_span_embeddings(
+        candidate_span_embeddings = self._get_span_embeddings_(
             encoded, candidate_starts, candidate_ends
         )
 
@@ -765,10 +847,14 @@ class BasicMTL(nn.Module):
 
             if "coref" in tasks:
                 coref_op = self.coref(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
                     encoded=encoded,
+                    top_span_starts=pruner_op['top_span_starts'],
                     top_span_emb=pruner_op['top_span_emb'],
                     top_span_mention_scores=pruner_op['top_span_mention_scores'],
-                    n_top_spans=pruner_op['n_top_spans']
+                    n_top_spans=pruner_op['n_top_spans'],
+                    n_top_antecedents=pruner_op['n_top_antecedents']
                 )
                 return_dict["coref"] = coref_op
 
@@ -790,7 +876,6 @@ class BasicMTL(nn.Module):
 
         return return_dict
 
-    # noinspection PyUnusedLocal
     def pred_with_labels(
             self,
             input_ids: torch.tensor,
@@ -893,60 +978,74 @@ class BasicMTL(nn.Module):
             top_antecedent_scores = predictions["coref"]["top_antecedent_scores"]
             top_antecedent_mask = predictions["coref"]["top_antecedent_mask"]
             top_antecedents = predictions["coref"]["top_antecedents"]
-            antecedents_space_map = predictions["coref"]["antecedent_map"]  # mapping from 461 -> 51
+            # antecedents_space_map = predictions["coref"]["antecedent_map"]  # mapping from 461 -> 51
 
-            """
-                Gold cluster ID on candidate is a vector in original candidate space (~5k)
-                    where each position is a candidate, and its value represents cluster ID. 
-                It's mostly zero.
-                
-                In the first step, we bring this to the space of pruned candidates
-            """
-            gold_cluster_ids_on_pruned = gold_cluster_ids_on_candidates[pruned_space_map]
-
-            # We next bring it to the antecedents space (which is different for every span)
-            gold_cluster_ids_on_antecedents = gold_cluster_ids_on_pruned[
-                antecedents_space_map[:, 1:]
-                # antecedents_space_map[:, : antecedents_space_map.shape[1] - 1]
-            ]
-
-            # Make sure the masked candidates are suppressed.
-            # ### This again is problematic because the mask is over the top_antecedent_scores space
-            # ### But antecedent cluster IDs are a different sequence.
-            # ### That is, [2, 3] in the mask being zero does not mean that [2, 3] in cluster IDs should also be zero.
-            gold_cluster_ids_on_antecedents[top_antecedent_mask[:, 1:] == 0] = 0
-            # gold_cluster_ids_on_antecedents[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
-
-            # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
-            gold_cluster_ids_on_antecedents += torch.log(top_antecedent_mask.float()).int()[
-                                               :, 1:
-                                               # :, : top_antecedent_mask.shape[1] - 1
-                                               ]  # [top_cand, top_ant]
-            same_cluster_indicator = torch.eq(
-                gold_cluster_ids_on_antecedents, gold_cluster_ids_on_pruned.unsqueeze(1)
-            )  # [top_cand, top_ant]
-            non_dummy_indicator = (gold_cluster_ids_on_pruned > 0).unsqueeze(
-                1
-            )  # [top_cand, 1]
-            pairwise_labels = torch.logical_and(
-                same_cluster_indicator, non_dummy_indicator
-            )  # [top_cand, top_ant]
-            # noinspection PyArgumentList
-            dummy_labels = torch.logical_not(
-                pairwise_labels.any(1, keepdims=True)
-            )  # [top_cand, 1]
-            # TODO: might have to concatenate it the other way round (pairwise first, dummy second)
-            top_antecedent_labels = torch.cat(
-                # [pairwise_labels, dummy_labels], 1
-                [dummy_labels, pairwise_labels], 1
-            )  # [top_cand, top_ant + 1]
-            coref_loss = self.coref_softmax_loss(
-                top_antecedent_scores, top_antecedent_labels
-            )  # [top_cand]
-            coref_loss = torch.mean(coref_loss)
+            # Again, this entire snippet I spent months debugging and am paving over witn Mangoes code (below)
+            # """
+            #     Gold cluster ID on candidate is a vector in original candidate space (~5k)
+            #         where each position is a candidate, and its value represents cluster ID.
+            #     It's mostly zero.
+            #
+            #     In the first step, we bring this to the space of pruned candidates
+            # """
+            # gold_cluster_ids_on_pruned = gold_cluster_ids_on_candidates[pruned_space_map]
+            #
+            # # We next bring it to the antecedents space (which is different for every span)
+            # gold_cluster_ids_on_antecedents = gold_cluster_ids_on_pruned[
+            #     antecedents_space_map[:, 1:]
+            #     # antecedents_space_map[:, : antecedents_space_map.shape[1] - 1]
+            # ]
+            #
+            # # Make sure the masked candidates are suppressed.
+            # # ### This again is problematic because the mask is over the top_antecedent_scores space
+            # # ### But antecedent cluster IDs are a different sequence.
+            # # ### That is, [2, 3] in the mask being zero does not mean that [2, 3] in cluster IDs should also be zero.
+            # gold_cluster_ids_on_antecedents[top_antecedent_mask[:, 1:] == 0] = 0
+            # # gold_cluster_ids_on_antecedents[top_antecedent_mask[:, : top_antecedent_mask.shape[1] - 1] == 0] = 0
+            #
+            # # top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedent_scores]  # [top_cand, top_ant]
+            # gold_cluster_ids_on_antecedents += torch.log(top_antecedent_mask.float()).int()[
+            #                                    :, 1:
+            #                                    # :, : top_antecedent_mask.shape[1] - 1
+            #                                    ]  # [top_cand, top_ant]
+            # same_cluster_indicator = torch.eq(
+            #     gold_cluster_ids_on_antecedents, gold_cluster_ids_on_pruned.unsqueeze(1)
+            # )  # [top_cand, top_ant]
+            # non_dummy_indicator = (gold_cluster_ids_on_pruned > 0).unsqueeze(
+            #     1
+            # )  # [top_cand, 1]
+            # pairwise_labels = torch.logical_and(
+            #     same_cluster_indicator, non_dummy_indicator
+            # )  # [top_cand, top_ant]
+            # # noinspection PyArgumentList
+            # dummy_labels = torch.logical_not(
+            #     pairwise_labels.any(1, keepdims=True)
+            # )  # [top_cand, 1]
+            # # TODO: might have to concatenate it the other way round (pairwise first, dummy second)
+            # top_antecedent_labels = torch.cat(
+            #     # [pairwise_labels, dummy_labels], 1
+            #     [dummy_labels, pairwise_labels], 1
+            # )  # [top_cand, top_ant + 1]
+            # coref_loss = self.coref_softmax_loss(
+            #     top_antecedent_scores, top_antecedent_labels
+            # )  # [top_cand]
+            # coref_loss = torch.mean(coref_loss)
             # coref_loss = torch.sum(coref_loss)
 
-            # predictions["loss"] = coref_loss
+            gold_cluster_ids_on_pruned = gold_cluster_ids_on_candidates[pruned_space_map]
+
+            top_antecedent_cluster_ids = gold_cluster_ids_on_pruned[top_antecedents]  # [top_cand, top_ant]
+            top_antecedent_cluster_ids += torch.log(top_antecedent_mask.float()).int()  # [top_cand, top_ant]
+            same_cluster_indicator = torch.eq(top_antecedent_cluster_ids,
+                                              gold_cluster_ids_on_pruned.unsqueeze(1))  # [top_cand, top_ant]
+            non_dummy_indicator = (gold_cluster_ids_on_pruned > 0).unsqueeze(1)  # [top_cand, 1]
+            pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
+            dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
+            top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
+            coref_loss = self.coref_softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
+            coref_loss = torch.sum(coref_loss)
+
+            predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
             coref_labels = top_antecedent_labels
 
@@ -1050,31 +1149,33 @@ class BasicMTL(nn.Module):
 
 
 if __name__ == "__main__":
+    ...
 
-    config = transformers.BertConfig("bert-base-uncased")
-    config.max_span_width = 5
-    config.coref_dropout = 0.3
-    config.metadata_feature_size = 20
-    config.unary_hdim = 1000
-    config.binary_hdim = 2000
-    config.top_span_ratio = 0.4
-    config.max_top_antecedents = 50
-    config.device = "cpu"
-    config.name = "bert-base-uncased"
-
-    # Init the tokenizer
-    tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
-
-    # Get the dataset up and running
-    ds = MultiTaskDataIter(
-        "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
-    )
-
-    # Make the model
-    model = BasicMTL("bert-base-uncased", config=config)
-
-    # Try to wrap it in a dataloader
-    for x in ds:
-        pred = model.pred_with_labels(**x)
-        print(pred)
-        ...
+    # ce ne marche pas, desole
+    # config = transformers.BertConfig("bert-base-uncased")
+    # config.max_span_width = 5
+    # config.coref_dropout = 0.3
+    # config.coref_metadata_feature_size = 20
+    # config.unary_hdim = 1000
+    # config.binary_hdim = 2000
+    # config.top_span_ratio = 0.4
+    # config.max_top_antecedents = 50
+    # config.device = "cpu"
+    # config.name = "bert-base-uncased"
+    #
+    # # Init the tokenizer
+    # tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
+    #
+    # # Get the dataset up and running
+    # ds = MultiTaskDataIter(
+    #     "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
+    # )
+    #
+    # # Make the model
+    # model = BasicMTL("bert-base-uncased", config=config)
+    #
+    # # Try to wrap it in a dataloader
+    # for x in ds:
+    #     pred = model.pred_with_labels(**x)
+    #     print(pred)
+    #     ...
