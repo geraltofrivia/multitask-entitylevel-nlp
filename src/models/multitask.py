@@ -15,7 +15,6 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from dataiter import MultiTaskDataIter
 
 
 class BasicMTL(nn.Module):
@@ -140,7 +139,7 @@ class BasicMTL(nn.Module):
     @staticmethod
     def _bucket_distance_(distances):
         """
-        Places the given values (designed for distances) into 10 semi-logscale buckets:
+        Places the given values (designed for distances) into 10 semi-log-scale buckets:
         [0, 1, 2, 3, 4, 5-7, 8-15, 16-31, 32-63, 64+].
 
         Parameters
@@ -547,7 +546,7 @@ class BasicMTL(nn.Module):
 
         top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
 
-        # This is the code block that i spent months debugging but couldn't fix so I've carpetted it over.
+        # This is the code block that i spent months debugging but couldn't fix so I've carpeted it over.
         # Not deleting it because... sentiments.
         #
         # """
@@ -981,7 +980,7 @@ class BasicMTL(nn.Module):
             top_antecedents = predictions["coref"]["top_antecedents"]
             # antecedents_space_map = predictions["coref"]["antecedent_map"]  # mapping from 461 -> 51
 
-            # Again, this entire snippet I spent months debugging and am paving over witn Mangoes code (below)
+            # Again, this entire snippet I spent months debugging and am paving over with Mangoes code (below)
             # """
             #     Gold cluster ID on candidate is a vector in original candidate space (~5k)
             #         where each position is a candidate, and its value represents cluster ID.
@@ -1044,7 +1043,8 @@ class BasicMTL(nn.Module):
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
-            coref_loss = torch.sum(coref_loss)
+            coref_loss = torch.mean(coref_loss)
+            # coref_loss = torch.sum(coref_loss)
 
             predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
