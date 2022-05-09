@@ -278,7 +278,10 @@ def run(
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
     # Make the optimizer
-    opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
+    # opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
+    #                      freeze_encoder=config.freeze_encoder)
+    opt_base = torch.optim.Adam
+    opt = make_optimizer(model=model, optimizer_class=opt_base, lr=config.lr,
                          freeze_encoder=config.freeze_encoder)
 
     """
