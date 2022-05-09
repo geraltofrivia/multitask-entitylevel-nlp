@@ -1043,8 +1043,8 @@ class BasicMTL(nn.Module):
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
-            coref_loss = torch.mean(coref_loss)
-            # coref_loss = torch.su(coref_loss)
+            # coref_loss = torch.mean(coref_loss)
+            coref_loss = torch.su(coref_loss)
 
             predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
