@@ -180,6 +180,8 @@ def get_dataiter_partials(
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--max-span-width', '-msw', type=int, default=CONFIG['max_span_width'],
               help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
+@click.option('--coref-loss-mean', type=bool, default=CONFIG['coref_loss_mean'],
+              help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
@@ -413,3 +415,27 @@ def run(
 
 if __name__ == "__main__":
     run()
+
+    # si tu veux executer le code manuellment,
+    # max_span_width = 5
+    # dataset = 'ontonotes'
+    # tasks: List[str] = ['coref', 'pruner']
+    # dataset_2: str = None
+    # tasks_2: List[str] = None
+    # epochs: int = 10
+    # learning_rate: float = 0.005
+    # encoder: str = "bert-base-uncased"
+    # device: str = "cuda"
+    # trim: bool = True
+    # train_encoder: bool = False
+    # ner_unweighted: bool = False
+    # pruner_unweighted: bool = False
+    # t1_ignore_task: str = None
+    # t2_ignore_task: str = None
+    # use_wandb: bool = False
+    # wandb_comment: str = ''
+    # wandb_trial: bool = False
+    # filter_candidates_pos: bool = False
+    # save: bool = False
+    # resume_dir: int = -1
+    # use_pretrained_model: str = None

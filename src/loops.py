@@ -51,11 +51,11 @@ def training_loop(
     for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
 
         # Make data
-        trn_ds = trn_dl()
+        trn_dataset = trn_dl()
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
 
         # Training (on the train set)
-        for i, instance in enumerate(tqdm(trn_ds)):
+        for i, instance in enumerate(tqdm(trn_dataset)):
 
             # Reset the gradients.
             opt.zero_grad()
@@ -94,13 +94,13 @@ def training_loop(
             del loss
             change_device(outputs, 'cpu')
             del outputs
-            trn_ds[i] = change_device(instance, 'cpu')
+            trn_dataset[i] = change_device(instance, 'cpu')
 
         # Evaluation (on the validation set)
         dev_eval.run()
 
         # Try to plug mem leaks
-        del trn_ds
+        del trn_dataset
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())

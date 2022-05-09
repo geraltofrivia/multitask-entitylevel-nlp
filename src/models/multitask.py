@@ -65,12 +65,12 @@ class BasicMTL(nn.Module):
             nn.Linear(config.unary_hdim, 1),
         ).to(config.device)
 
-        self.binary_coref = nn.Sequential(
-            nn.Linear((span_embedding_dim * 3), config.binary_hdim),
-            nn.ReLU(),
-            nn.Dropout(config.coref_dropout),
-            nn.Linear(config.binary_hdim, 1),
-        ).to(config.device)
+        # self.binary_coref = nn.Sequential(
+        #     nn.Linear((span_embedding_dim * 3), config.binary_hdim),
+        #     nn.ReLU(),
+        #     nn.Dropout(config.coref_dropout),
+        #     nn.Linear(config.binary_hdim, 1),
+        # ).to(config.device)
 
         self.unary_ner = nn.Sequential(
             nn.Linear(span_embedding_dim, config.unary_hdim),
@@ -80,11 +80,13 @@ class BasicMTL(nn.Module):
         ).to(config.device)
 
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim).to(config.device)
+        # TODO: why are no grads coming here?
         self.slow_antecedent_projection = torch.nn.Linear(span_embedding_dim * 2, span_embedding_dim).to(config.device)
 
         # Initialising Losses
         self.ner_loss = nn.functional.cross_entropy
         self.pruner_loss = self._rescaling_weights_bce_loss_
+        self.coref_loss_agg = torch.mean if config.coref_loss_mean else torch.sum
         try:
             self.ner_ignore_weights = self.config.ner_ignore_weights
         except AttributeError:
@@ -530,9 +532,13 @@ class BasicMTL(nn.Module):
         # calculate final slow scores (this was a higher order for loop that we paved over)
         top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
         top_antecedent_scores = top_antecedents_fast_scores + \
-                                self._get_slow_antecedent_scores_(top_span_emb, top_antecedents, top_antecedent_emb,
-                                                                  top_antecedent_offsets,
-                                                                  segment_distance)  # [top_cand, top_ant]
+                                self._get_slow_antecedent_scores_(
+                                    top_span_emb,
+                                    top_antecedents,
+                                    top_antecedent_emb,
+                                    top_antecedent_offsets,
+                                    segment_distance
+                                )  # [top_cand, top_ant]
 
         top_antecedent_weights = F.softmax(
             torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
@@ -1043,8 +1049,7 @@ class BasicMTL(nn.Module):
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
-            # coref_loss = torch.mean(coref_loss)
-            coref_loss = torch.sum(coref_loss)
+            coref_loss = self.coref_loss_agg(coref_loss)  # can be a mean or a sum depending on config.
 
             predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
