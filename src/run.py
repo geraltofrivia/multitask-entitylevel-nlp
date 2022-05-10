@@ -421,7 +421,7 @@ if __name__ == "__main__":
     # dataset = 'ontonotes'
     # tasks: List[str] = ['coref', 'pruner']
     # dataset_2: str = None
-    # tasks_2: List[str] = None
+    # tasks_2: List[str] = []
     # epochs: int = 10
     # learning_rate: float = 0.005
     # encoder: str = "bert-base-uncased"
