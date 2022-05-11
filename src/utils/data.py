@@ -96,12 +96,11 @@ class Clusters:
 
 
 @dataclass
-class TypedRelations:
+class BinaryLinks:
     """
         Another data class obj containing all the things needed for smoothly using typed relations in a document
     """
     spans: List[List[List[int]]]  # Looks like [ [[112, 113], [155, 159]], [[2, 6], [11, 13]], ... ]
-    tags: List[str]  # Looks like [ 'meronym',  'lives-in' ... ]
     words: List[List[List[str]]] = field(default_factory=list)  # Looks like [ [['the', 'neighbor'], ['a', 'boy']], ..]
     pos: List[List[List[str]]] = field(default_factory=list)  # Looks same as words
     spans_head: List[List[List[int]]] = field(default_factory=list)
@@ -125,6 +124,22 @@ class TypedRelations:
             output.append(output_pair)
 
         self.spans_head = output
+
+
+@dataclass
+class BridgingAnaphors(BinaryLinks):
+    """ No change from above, just using a better name for the task. """
+
+
+@dataclass
+class TypedRelations(BinaryLinks):
+    """
+        You might notice that tags are also given a default value.
+        Very unideal since they should get concrete values. We should never have NER spans w/o tags
+        However, this can't be done w/o switching over to python 3.10 and I don't want to do that right now
+    """
+
+    tags: List[str] = field(default_factory=list)  # Looks like [ 'meronym',  'lives-in' ... ]
 
     def get_all(self, tag: str, src: str) -> list:
         if src not in ["spans", "words", "pos", "spans_head", "words_head", "pos_head"]:
@@ -225,6 +240,9 @@ class Document:
     # Typed Relation object storing gold typed relations (if found), empty is fine.
     rel: TypedRelations
 
+    # Bridging Anaphora object storing gold annotations (if found), empty is fine.
+    bridging: BridgingAnaphors
+
     # Split (ontonotes split: train;test;development; conll-2012-test
     split: str = field(default_factory=str)
 
@@ -276,6 +294,9 @@ class Tasks(list):
             Tasks('coref', 'ner')
         or
             Tasks(['coref', 'ner'])
+
+        PS: Don't bother deeply understanding this code, I wrote this in a fit of pseudo productive stupour
+            wherein I want to write something non trivial but also not important.
     """
 
     # noinspection PyUnusedLocal
