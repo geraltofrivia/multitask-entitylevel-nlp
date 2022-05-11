@@ -151,6 +151,10 @@ class CoNLLOntoNotesParser(GenericParser):
                     for span in cluster:
                         clusters_[cluster_id].append(flat_doc[span[0]: span[1]])
 
+                # debug
+                if clusters[i]:
+                    print('potato')
+
                 # Make a coref clusters object
                 coref = Clusters(spans=list(clusters[i]))
 

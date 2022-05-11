@@ -406,8 +406,25 @@ class CODICRACParser(GenericParser):
 
         # Finally use this collected information to create Document (utils/data) object
         for docname, raw_document, document_ in zip(documents.keys(), documents.values(), documents_.values()):
-            # Collect information to be put into BridgingInstances
-            document_ = self.nlp(to_toks(raw_document))
+            doc_text = raw_document
+            # noinspection PyTypeChecker
+            doc = self.nlp(to_toks(doc_text))
+            doc_pos = self.get_pos_tags(doc)
+
+            # Get the named entities prepped
+            doc_named_entities = named_entities[docname]
+            ner_spans = [[x.start, x.end] for x in doc_named_entities]
+            ner_tags = [x.metadata for x in doc_named_entities]
+            ner_words = [x.words for x in doc_named_entities]
+            ner = NamedEntities(spans=ner_spans, tags=ner_tags, words=ner_words)
+
+            # Get the coref clusters prepped
+            doc_clusters_spans = [[[span.start, span.end] for span in cluster]
+                                  for cluster in list(documents_clusters[docname].values())]
+            coref = Clusters(spans=doc_clusters_spans)
+
+            # Get the bridging things prepped as well
+            ...
 
         return outputs
 

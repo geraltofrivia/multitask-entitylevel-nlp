@@ -37,6 +37,11 @@ class GenericParser(ABC):
     def parse(self, split_nm: Union[Path, str]):
         ...
 
+    @staticmethod
+    def get_pos_tags(doc: tokens.Doc) -> List[List[str]]:
+        """ Get pos tags for each token, respecting the sentence boundaries, i.e. each sent is a list """
+        return [[token.pos_ for token in sent] for sent in doc.sents]
+
     def run(self):
 
         for split in self.suffixes:
