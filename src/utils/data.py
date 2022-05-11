@@ -241,7 +241,7 @@ class Document:
     rel: TypedRelations
 
     # Bridging Anaphora object storing gold annotations (if found), empty is fine.
-    bridging: BridgingAnaphors
+    bridging: BridgingAnaphors = field(default_factory=BridgingAnaphors)
 
     # Split (ontonotes split: train;test;development; conll-2012-test
     split: str = field(default_factory=str)
