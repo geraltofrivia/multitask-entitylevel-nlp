@@ -2,6 +2,16 @@ mkdir data
 mkdir data/raw
 mkdir data/raw/ontonotes
 mkdir data/raw/scierc
+mkdir data/raw/codicrac-switchboard
+mkdir data/raw/codicrac-light
+mkdir data/raw/codicrac-persuasion
+mkdir data/raw/codicrac-ami
+mkdir data/raw/codicrac-arrau
+mkdir data/raw/codicrac-arrau-t91
+mkdir data/raw/codicrac-arrau-t93
+mkdir data/raw/codicrac-arrau-rst
+mkdir data/raw/codicrac-arrau-gnome
+mkdir data/raw/codicrac-arrau-pear
 mkdir data/parsed
 mkdir data/parsed/ontonotes
 mkdir data/runs

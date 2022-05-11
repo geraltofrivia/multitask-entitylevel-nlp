@@ -16,9 +16,9 @@ import spacy
 import warnings
 import unidecode
 from pathlib import Path
+from copy import deepcopy
 from tqdm.auto import tqdm
 from spacy.tokens import Token
-from copy import deepcopy
 from typing import Iterable, Union, List
 
 # Local imports
@@ -38,21 +38,21 @@ class CoNLLOntoNotesParser(GenericParser):
     def __init__(
             self,
             raw_dir: Path,
-            splits: Iterable[str] = (),
+            suffixes: Iterable[str] = (),
             ignore_empty_documents: bool = False,
     ):
         """
         :param raw_dir: Path to the folder containing `development`, `train`, `test` subfolders.
-        :param splits: a tuple of which sub folders should we process
+        :param suffixes: a tuple of which sub folders should we process
         :param ignore_empty_documents: flag which if true
             will prevent documents with no coref clusters from being included
         """
-        super().__init__(raw_dir=raw_dir, splits=splits, ignore_empty_documents=ignore_empty_documents)
+        super().__init__(raw_dir=raw_dir, suffixes=suffixes, ignore_empty_documents=ignore_empty_documents)
         self.dir: Path = raw_dir
         self.splits = (
             ["train", "development", "test", "conll-2012-test"]
-            if not self.splits
-            else self.splits
+            if not self.suffixes
+            else self.suffixes
         )
         self.parsed: dict = {split_nm: [] for split_nm in self.splits}
 
@@ -60,10 +60,6 @@ class CoNLLOntoNotesParser(GenericParser):
         self.write_dir = self.write_dir / "ontonotes"
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
-
-        # Pull word replacements from the manually entered list
-        with (LOC.manual / "replacements.json").open("r") as f:
-            self.replacements = json.load(f)
 
         self.nlp = spacy.load("en_core_web_sm")
         # This tokenizer DOES not tokenize documents.
@@ -107,7 +103,7 @@ class CoNLLOntoNotesParser(GenericParser):
                 doc_parts,
                 doc_pos,
                 doc_ner_raw,
-            ) = self._parse_document_(path=f_name)
+            ) = self._parse_conll_document_(path=f_name)
 
             # Check if we want to ignore empty documents
             if self.flag_ignore_empty_documents:
@@ -213,6 +209,15 @@ class CoNLLOntoNotesParser(GenericParser):
 
         return outputs
 
+    @staticmethod
+    def _spacy_process_ner_tags_(
+            doc: spacy.tokens.Doc,
+    ) -> (List[str], List[Union[int]], List[str]):
+        ents = [[ent.start, ent.end] for ent in doc.ents]
+        ents_ = [[tok.text for tok in ent] for ent in doc.ents]
+        ents_tags = [ent.label_ for ent in doc.ents]
+        return ents, ents_, ents_tags
+
     def _normalize_word_(self, word, language):
         # We normalise unicode etc here. It will make working with HF tokenizers down the road much easier.
         backup_word = deepcopy(word)
@@ -233,7 +238,7 @@ class CoNLLOntoNotesParser(GenericParser):
         else:
             return word
 
-    def _parse_document_(self, path, language="english"):
+    def _parse_conll_document_(self, path, language="english"):
         """
         # Code taken from Mangoes
 
@@ -358,15 +363,6 @@ class CoNLLOntoNotesParser(GenericParser):
                 doc_ner_raw,
             )
 
-    @staticmethod
-    def _spacy_process_ner_tags_(
-            doc: spacy.tokens.Doc,
-    ) -> (List[str], List[Union[int]], List[str]):
-        ents = [[ent.start, ent.end] for ent in doc.ents]
-        ents_ = [[tok.text for tok in ent] for ent in doc.ents]
-        ents_tags = [ent.label_ for ent in doc.ents]
-        return ents, ents_, ents_tags
-
     def _onto_process_ner_tags_(self, tags: list, document: list) -> (list, list, list):
         """Convert raw columns of annotations into proper tags. Expect nested tags, use a stack."""
         finalised_annotations_span = []
@@ -416,7 +412,7 @@ class CoNLLOntoNotesParser(GenericParser):
 
 @click.command()
 @click.option(
-    "--split",
+    "--suffix",
     "-s",
     type=str,
     help="The name of the dataset SPLIT e.g. train, test, development, conll-2012-test etc",
@@ -427,9 +423,9 @@ class CoNLLOntoNotesParser(GenericParser):
     is_flag=True,
     help="If True, we ignore the documents without any coref annotation",
 )
-def run(split: str, ignore_empty: bool):
+def run(suffix: str, ignore_empty: bool):
     parser = CoNLLOntoNotesParser(
-        LOC.ontonotes_conll, splits=[split], ignore_empty_documents=ignore_empty
+        LOC.ontonotes_conll, suffixes=[suffix], ignore_empty_documents=ignore_empty
     )
     parser.run()
 

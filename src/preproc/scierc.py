@@ -23,15 +23,16 @@ from utils.data import Document, NamedEntities, TypedRelations, Clusters
 
 
 class SciERCParser(GenericParser):
-    def __init__(self, raw_dir: Path, splits: Iterable[str] = (), ignore_empty_documents: bool = False):
+    def __init__(
+            self,
+            raw_dir: Path,
+            suffixes: Iterable[str] = (),
+            ignore_empty_documents: bool = False
+    ):
 
-        super().__init__(raw_dir=raw_dir, splits=splits, ignore_empty_documents=ignore_empty_documents)
+        super().__init__(raw_dir=raw_dir, suffixes=suffixes, ignore_empty_documents=ignore_empty_documents)
 
-        self.dir = raw_dir
-        self.parsed: dict = {split_nm: [] for split_nm in splits}
-        self.splits = splits
-
-        self.flag_ignore_empty_documents: bool = ignore_empty_documents
+        self.parsed: dict = {split_nm: [] for split_nm in suffixes}
         self.write_dir = LOC.parsed / "scierc"
         self.write_dir.mkdir(parents=True, exist_ok=True)
 
@@ -149,25 +150,25 @@ def create_label_dict():
 
 
 @click.command()
-@click.option("--split", "-s", type=str,
+@click.option("--suffix", "-s", type=str,
               help="The name of the dataset SPLIT e.g. train, test, dev")
 @click.option("--ignore-empty", "-i", is_flag=True,
               help="If True, we ignore the documents without any coref annotation")
 @click.option("--collect-labels", is_flag=True,
               help="If this flag is True, we ignore everything else, "
                    "just go through train, dev splits and collect unique labels and create a dict out of them.")
-def run(split: str, ignore_empty: bool, collect_labels: bool):
+def run(suffix: str, ignore_empty: bool, collect_labels: bool):
     if collect_labels:
         create_label_dict()
     else:
-        if split == 'all':
-            splits = ['train', 'test', 'dev']
+        if suffix == 'all':
+            suffix = ['train', 'test', 'dev']
         else:
-            splits = [split, ]
-        parser = SciERCParser(LOC.scierc, splits=splits, ignore_empty_documents=ignore_empty)
+            suffix = [suffix, ]
+        parser = SciERCParser(LOC.scierc, suffixes=suffix, ignore_empty_documents=ignore_empty)
         parser.run()
 
-        if split == 'all':
+        if suffix == 'all':
             create_label_dict()
 
 

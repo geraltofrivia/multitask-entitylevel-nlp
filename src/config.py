@@ -15,16 +15,27 @@ ROOT_LOC: Path = Path("..") if str(Path().cwd()).split("/")[-1] == "src" else Pa
 LOCATIONS: Dict[str, Path] = FancyDict(
     **{
         "root": ROOT_LOC,
-        "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
-        "ontonotes_conll": ROOT_LOC / "data" / "raw" / "ontonotes" / "conll-2012" / "v5" / "data",
-        "scierc": ROOT_LOC / "data" / "raw" / "scierc",
         "raw": ROOT_LOC / "data" / "raw",
         "runs": ROOT_LOC / "data" / "runs",
         "parsed": ROOT_LOC / "data" / "parsed",
         "word2vec": ROOT_LOC / "models" / "word2vec",
         "glove": ROOT_LOC / "models" / "glove",
         "manual": ROOT_LOC / "data" / "manual",
-        "models": ROOT_LOC / "models" / "trained"
+        "models": ROOT_LOC / "models" / "trained",
+
+        # Some datasets
+        "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
+        "ontonotes_conll": ROOT_LOC / "data" / "raw" / "ontonotes" / "conll-2012" / "v5" / "data",
+        "scierc": ROOT_LOC / "data" / "raw" / "scierc",
+        "cc_ami": ROOT_LOC / "data" / "raw" / "codicrac-ami",
+        "cc_switchboard": ROOT_LOC / "data" / "raw" / "codicrac-switchboard",
+        "cc_arrau_t91": ROOT_LOC / "data" / "raw" / "codicrac-arrau-t91",
+        "cc_arrau_t93": ROOT_LOC / "data" / "raw" / "codicrac-arrau-t93",
+        "cc_arrau_rst": ROOT_LOC / "data" / "raw" / "codicrac-arrau-rst",
+        "cc_arrau_gnome": ROOT_LOC / "data" / "raw" / "codicrac-arrau-gnome",
+        "cc_arrau_pear": ROOT_LOC / "data" / "raw" / "codicrac-arrau-pear",
+        "cc_persuasion": ROOT_LOC / "data" / "raw" / "codicrac-persuasion",
+        "cc_light": ROOT_LOC / "data" / "raw" / "codicrac-light",
     }
 )
 

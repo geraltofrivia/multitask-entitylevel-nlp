@@ -3,11 +3,9 @@ import torch
 import numpy as np
 import transformers
 from pathlib import Path
-from copy import deepcopy
-from collections import Counter
 from transformers import BertConfig
 from dataclasses import dataclass, field
-from typing import List, Union, Tuple, Optional, Iterable
+from typing import List, Union, Optional
 
 
 def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
@@ -21,9 +19,7 @@ def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
     # Fix datatype of ids
     ids = [int(x) for x in ids]
 
-    assert ids[0] < len(
-        data
-    ), f"Data has only {len(data)} elements, but we have to pop {ids[0]}."
+    assert ids[0] < len(data), f"Data has only {len(data)} elements, but we have to pop {ids[0]}."
 
     for _id in ids:
         popped.append(data.pop(_id))
@@ -55,12 +51,8 @@ def weighted_addition_losses(losses, tasks, scales):
 @dataclass
 class AnnotationBlock:
     """
-    Dataclass used exclusively for searching for a pos tag in raw ONF ontonotes file.
-    This dataclass represents one annotation / pair of brackets.
-
-    E.g. when searching for NPs in
-        (NP (CD six)
-            (NNS years))
+    Variation of AnnotationBlock, below. These aren't expected to be nested (or its fine if they are)
+    Used for Ontonotes' NER parsing, specifically.
 
     an onf block may look like
     start = _, end = _+2, w
@@ -88,6 +80,46 @@ class AnnotationBlock:
         return [self.start, self.end]
 
 
+@dataclass
+class NestedAnnotationBlock:
+    """
+        Dataclass used exclusively for searching for a pos tag in raw ONF ontonotes file.
+        This dataclass represents one annotation / pair of brackets.
+
+        E.g. when searching for NPs in
+            (NP (CD six)
+                (NNS years))
+
+        an onf block may look like
+        start = _, end = _+2, w
+
+    """
+
+    start: int
+    words: List[str]
+    tag: str
+
+    end: int = field(default_factory=int)
+
+    open_inside: int = 0
+    closed_inside: int = 0
+
+    # Optional field for more text
+    metadata: str = field(default_factory=str)
+
+    def finalise(self):
+        assert self.open_inside == self.closed_inside, \
+            f"Bracket Mismatch. Open: {self.open_inside}, Closed: {self.closed_inside}"
+
+        assert self.end >= self.start
+        if self.start == self.end:
+            self.end += 1
+
+    @property
+    def span(self) -> List[int]:
+        return [self.start, self.end]
+
+
 class NERAnnotationBlockStack:
     def __init__(self):
         self.blocks: List[AnnotationBlock] = []
@@ -111,147 +143,59 @@ class NERAnnotationBlockStack:
         self.blocks.append(block)
 
 
-class ClusterAnnotationBlockStack:
+class NestedAnnotationBlockStack:
     """
-    NOT USED ANYMORE
-
-    A collection of aforementioned Blocks of annotation
-    Designed to parse nested coref cluster information in the processed CONLL2012 format.
+        A collection of aforementioned NestedAnnotationBlockStack.
+        This will be used for markable extraction from crac datasets/
     """
 
     def __init__(self):
-        self.blocks: List[AnnotationBlock] = []
+        self.blocks: List[NestedAnnotationBlock] = []
 
-    @property
-    def expected(self) -> List[Union[int, str]]:
-        """If no open annotation were to close, what would be the cluster info of this token."""
-        return [block.tag for block in self.blocks]
+    def append(self, block: NestedAnnotationBlock) -> None:
+        self.blocks.append(block)
 
-    def find_blocks_of_clusters(
-            self, ids: Iterable[int], oldest: bool = True, return_indices: bool = False
-    ) -> List[Union[int, AnnotationBlock]]:
-        """For each cluster ID, find the oldest/newest block"""
+    def register_word(self, word: str) -> None:
+        for block in self.blocks:
+            block.words.append(word)
 
-        # If descending, multiply start indices by -1; else by +1
-        asc_desc_sign = -1 if oldest else 1
+    def add(self, n: int = 1) -> None:
+        for block in self.blocks:
+            block.open_inside += n
 
-        block_indices: List[int] = []
-        for cluster in ids:
-            # Find all blocks of this cluster (which we haven't already selected)
-            block_indices_this_cluster = [
-                i
-                for i, block in enumerate(self.blocks)
-                if block.tag == cluster and i not in block_indices
-            ]
-
-            # Find the oldest amongst them all
-            # i.e. sort this list based on their corresponding block's start index (mul w -1 if oldest; 1 if newest)
-            selected_block_index = sorted(
-                block_indices_this_cluster,
-                key=lambda x: asc_desc_sign * self.blocks[x].start,
-            )[0]
-
-            # Append it
-            block_indices.append(selected_block_index)
-
-        # All these indices are now to be returned
-        if return_indices:
-            return sorted(block_indices)
-        else:
-            return [self.blocks[i] for i in sorted(block_indices)]
-
-    @staticmethod
-    def intersection(a: List[int], b: List[int]) -> List[int]:
+    def sub(self, n: int, span: int) -> Optional[List[NestedAnnotationBlock]]:
         """
-        Intersection of two lists including duplicates -
-        https://stackoverflow.com/questions/37645053/intersection-of-two-lists-including-duplicates
-        """
-        return list((Counter(a) & Counter(b)).elements())
-
-    @staticmethod
-    def subtraction(a: List[int], b: List[int]) -> List[int]:
-        """Subtraction of one list from another (with duplicates)"""
-        if not b:
-            return deepcopy(a)
-
-        b_ = deepcopy(b)
-        res = []
-        for ele in a:
-            if ele in b_:
-                b_.pop(b_.index(ele))
-            else:
-                res.append(ele)
-
-        return res
-
-    def process(
-            self, token, cluster: Union[int, Tuple[int]], span_id: int
-    ) -> Optional[List[AnnotationBlock]]:
-        """
-        Given: this token's actual annotation; and expected annotation.
-
-        1. If the annotation is empty, ensure that the stack is also empty. Something is wrong otherwise.
-        2. Do an intersection of Current (`c`) and Expected annotations (`e`)
-        3. If annotation belongs in `c - c ∩ e` -> it is a "new" annotation; make a block
-        4. If annotation belongs in `e - c ∩ e` -> it is an annotation that closed. Pop the block and send it back.
-
+            Note that n bracket ended.
+            Iteratively add one closed brackets to all blocks.
+            If at any point open brackets == closed brackets,
+                mark that block as finished and pop it
         """
 
-        if type(cluster) is int:
-            cluster = [cluster]
-        elif type(cluster) in [tuple, list]:
-            cluster = list(cluster)
-        else:
-            raise TypeError(f"Cluster {cluster} is of an unknown type")
+        to_pop: List[int] = []
 
-        while -1 in cluster:
-            cluster.pop(cluster.index(-1))
+        for i in range(n):
 
-        if cluster == [] and len(self.blocks) == 0:
-            return []
+            # Close one bracket in all blocks
+            for block_id, block in enumerate(self.blocks):
 
-        # Fetch the "expected" value
-        expected = self.expected.copy()
-        intersection = self.intersection(expected, cluster)
+                # If the block is already marked as finished, don't do anything to it
+                if block_id in to_pop:
+                    continue
 
-        # These (intersection) annotations were expected to continue, and they do. Just add the current word to them
-        # Find the actual AnnotationBlock objects corresponding to this
-        continuing_blocks = self.find_blocks_of_clusters(intersection)
-        for block in continuing_blocks:
-            block.words.append(token)
+                assert block.open_inside >= block.closed_inside
 
-        to_add: List[AnnotationBlock] = []
-        # to_del: List[int] = []
+                block.closed_inside += 1
 
-        # Elements in `cluster - (expected ∩ cluster)` are NEW annotations
-        for new_annotation in self.subtraction(cluster, intersection):
-            # Create a block and add it to the stack, later
-            to_add.append(
-                AnnotationBlock(start=span_id, words=[token], tag=new_annotation)
-            )
+                if block.open_inside == block.closed_inside:
+                    # All open brackets are closed
+                    block.end = span + 1
+                    to_pop.append(block_id)
 
-        # Elements in `expected - (expected ∩ cluster)` are now complete annotations, to be popped
-        to_del: List[int] = self.find_blocks_of_clusters(
-            self.subtraction(expected, intersection), oldest=False, return_indices=True
-        )
+        if not to_pop:
+            return None
 
-        # Add the span end ID to these blocks
-        for block in to_del:
-            self.blocks[block].end = span_id
-            self.blocks[block].finalise()
-
-        # Pop them from the internal list
-        popped: List[AnnotationBlock] = pop(data=self.blocks, ids=to_del)
-
-        if not cluster:
-            assert (
-                    self.blocks == []
-            ), f"There should be no more open annotations. There are {self.blocks}"
-
-        # Add the new ones
-        self.blocks += to_add
-
-        return popped
+        # Pop these elements and return
+        return pop(data=self.blocks, ids=to_pop)
 
 
 def is_equal(a, b) -> bool:

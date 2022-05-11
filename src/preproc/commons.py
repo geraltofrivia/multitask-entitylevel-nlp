@@ -1,6 +1,7 @@
+import json
 import pickle
-from pathlib import Path
 from spacy import tokens
+from pathlib import Path
 from abc import ABC, abstractmethod
 from typing import Union, List, Dict, Tuple, Iterable
 
@@ -15,11 +16,22 @@ from config import LOCATIONS as LOC
 
 class GenericParser(ABC):
 
-    def __init__(self, raw_dir: Path, splits: Iterable[str], ignore_empty_documents: bool = False):
+    def __init__(
+            self,
+            raw_dir: Path,
+            suffixes: Iterable[str],
+            ignore_empty_documents: bool = False,
+            ignore_token_replacements: bool = False
+    ):
         self.dir = raw_dir
-        self.splits = splits
-        self.ignore_empty_documents = ignore_empty_documents
+        self.suffixes = suffixes
         self.write_dir = LOC.parsed
+        self.flag_ignore_empty_documents = ignore_empty_documents
+        self.flag_ignore_token_replacements = ignore_token_replacements
+
+        # Pull word replacements from the manually entered list
+        with (LOC.manual / "replacements.json").open("r") as f:
+            self.replacements = json.load(f)
 
     @abstractmethod
     def parse(self, split_nm: Union[Path, str]):
@@ -27,7 +39,7 @@ class GenericParser(ABC):
 
     def run(self):
 
-        for split in self.splits:
+        for split in self.suffixes:
             # First, clear out all the previously processed things from the disk
             self.delete_preprocessed_files(split)
             outputs = self.parse(split)
