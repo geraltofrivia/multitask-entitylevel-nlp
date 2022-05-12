@@ -4,23 +4,19 @@
     One object corresponds to one document.
 """
 import re
-import json
 import click
 import spacy
-import pickle
-import jsonlines
 from spacy import tokens
 from pathlib import Path
-from typing import Iterable, Union, List, Dict, Optional
+from typing import Union, List, Dict, Optional
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, KNOWN_SPLITS
+from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
-from dataiter import DocumentReader
 from utils.nlp import to_toks, NullTokenizer
 from utils.data import Document, NamedEntities, BridgingAnaphors, Clusters, TypedRelations
 from utils.misc import NestedAnnotationBlock, NestedAnnotationBlockStack
@@ -44,7 +40,11 @@ class CODICRACParser(GenericParser):
             parser.run()
     """
 
-    def __init__(self, raw_dir: Path, ignore_empty_documents: bool = False):
+    def __init__(
+            self,
+            raw_dir: Path,
+            write_dir: Path = LOC.parsed,
+            ignore_empty_documents: bool = False):
 
         # Sanity add suffixes as per raw_dir
         self.dataset = raw_dir.name
@@ -66,7 +66,11 @@ class CODICRACParser(GenericParser):
         }
         suffix = possible_suffixes[self.dataset]
 
-        super().__init__(raw_dir=raw_dir, suffixes=suffix, ignore_empty_documents=ignore_empty_documents)
+        super().__init__(
+            raw_dir=raw_dir,
+            suffixes=suffix,
+            write_dir=write_dir,
+            ignore_empty_documents=ignore_empty_documents)
 
         self.write_dir = LOC.parsed / self.dataset
         self.write_dir.mkdir(parents=True, exist_ok=True)
@@ -294,6 +298,26 @@ class CODICRACParser(GenericParser):
 
         return outputs
 
+    def finalise(self, document: Document, spacy_doc: tokens.Doc) -> Document:
+        """ Find span heads... populate words in different annotations etc etc. """
+        spans = document.get_all_spans()
+        span_heads = self.get_span_heads(spacy_doc, spans=spans)
+
+        # Allocate span heads to these different forms of annotations
+        document.coref.allocate_span_heads(span_heads)
+        document.ner.allocate_span_heads(span_heads)
+        document.rel.allocate_span_heads(span_heads)
+        document.bridging.allocate_span_heads(span_heads)
+
+        # Assign words to coref (should be done AFTER assigning span heads)
+        # NOTE: this automatically adds words_head and pos_head also.
+        document.coref.add_words(document.document)
+        document.ner.add_words(document.document)
+        document.coref.add_pos(document.pos)
+        document.ner.add_pos(document.pos)
+
+        return document
+
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
         """ where actual preproc happens"""
 
@@ -426,10 +450,6 @@ class CODICRACParser(GenericParser):
                                                                                 meta_name='EntityID',
                                                                                 ignore_pseudo=False)
 
-        # Strip these annotation blocks of all metadata, and only keep spans and markable names
-        markables: Dict[str, Dict[str, NestedAnnotationBlock]] = {docname: {block.tag: block for block in blocks}
-                                                                  for docname, blocks in markables_.items()}
-
         # Use the meta name (entity ID) to get all coref clusters (they have the same entityID, in the IDENTITY column
         # Try also to group the markables_ with the meta value (EntityID which repr the cluster)
         documents_clusters = {docname: {} for docname in markables_.keys()}
@@ -460,8 +480,8 @@ class CODICRACParser(GenericParser):
         for docname, raw_document, document_ in zip(documents.keys(), documents.values(), documents_.values()):
             doc_text = raw_document
             # noinspection PyTypeChecker
-            doc = self.nlp(to_toks(doc_text))
-            doc_pos = self.get_pos_tags(doc)
+            spacy_doc = self.nlp(to_toks(doc_text))
+            doc_pos = self.get_pos_tags(spacy_doc)
 
             # Get the named entities prepped
             doc_named_entities = named_entities[docname]
@@ -494,6 +514,9 @@ class CODICRACParser(GenericParser):
                 bridging=bridging
             )
 
+            # Now to finalise the instance
+            document = self.finalise(document, spacy_doc=spacy_doc)
+
             outputs.append(document)
 
         return outputs
@@ -503,9 +526,9 @@ class CODICRACParser(GenericParser):
 @click.option("--dataset", "-d", type=str, help="The name of the dataset like 'persuasion', 'light', 'arrau' etc.")
 @click.option("--suffix", "-s", type=str, default=None,
               help="The name of the suffix (for Arrau) like 't91', 't93', 'gnome', 'pear', or 'rst'.")
-@click.option("--all", "-a", is_flag=True, help="If flag is given, we process every CODICRAC split.")
-def run(dataset: str, suffix: str, all: bool):
-    if all:
+@click.option("--run_all", "-a", is_flag=True, help="If flag is given, we process every CODICRAC split.")
+def run(dataset: str, suffix: str, run_all: bool):
+    if run_all:
         parser = CODICRACParser(LOC.cc_persuasion)
         parser.run()
         parser = CODICRACParser(LOC.cc_ami)

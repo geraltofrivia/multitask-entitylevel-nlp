@@ -694,7 +694,7 @@ class MultiTaskDataIter(Dataset):
 
 class DocumentReader(Dataset):
     def __init__(
-            self, src: str, split: str, shuffle: bool = False, tasks: Iterable[str] = ()
+            self, src: str, split: Optional[str] = None, shuffle: bool = False, tasks: Iterable[str] = ()
     ):
         """
             Returns an iterable that yields one document at a time.
@@ -735,7 +735,10 @@ class DocumentReader(Dataset):
 
     @staticmethod
     def get_fnames(dataset: str, split: str):
-        return [fnm for fnm in (LOC.parsed / dataset / split).glob("dump*.pkl")]
+        if split:
+            return [fnm for fnm in (LOC.parsed / dataset / split).glob("dump*.pkl")]
+        else:
+            return [fnm for fnm in (LOC.parsed / dataset).glob("dump*.pkl")]
 
     def pull_from_disk(self):
         """RIP ur mem lol"""

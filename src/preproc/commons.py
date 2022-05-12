@@ -20,12 +20,13 @@ class GenericParser(ABC):
             self,
             raw_dir: Path,
             suffixes: Iterable[str],
+            write_dir: Path = LOC.parsed,
             ignore_empty_documents: bool = False,
             ignore_token_replacements: bool = False
     ):
         self.dir = raw_dir
         self.suffixes = suffixes
-        self.write_dir = LOC.parsed
+        self.write_dir = write_dir
         self.flag_ignore_empty_documents = ignore_empty_documents
         self.flag_ignore_token_replacements = ignore_token_replacements
 

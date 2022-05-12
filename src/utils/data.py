@@ -19,9 +19,29 @@ class Clusters:
         finding clusters based on a particular pos
         easy representation for training data prep etc etc
 
-    Fields:
-        spans: List of List of span boundaries like [ [ [2, 5], [10, 20] ], [ [1,2], [11, 16] ] ]
-        words: Similar except instead of span boundary, each object itself is a list of tokens repr. that span.
+    Primarily, it consists of a list of spans (indices).
+    These indices correspond to the Document.document field (see "I see ... fandango" snippet above).
+    So, let's imagine our document looks something like:
+
+    ```py
+    # I saw a dog in a car. It was really cute. Its skin was brown with white spots !
+    doc = [
+        ["I", "saw", "a", "dog", "in", "a", "car", "."],                # 8 tokens
+        ["It", "was", "really", "cute", "."],                           # 5 tokens
+        ["Its", "skin", "was", "brown", "with", "white", "spots", "!"]  # 8 tokens
+    ] # total: 21 tokens
+    ```
+
+    The clusters here would be <"I">, <"a dog", "it", and "its">, and <"a car">.
+    That is, two singletons and one cluster with three spans. It would be represented by something like:
+
+    ```py
+    clusters = [
+        [[0, 1]],                        # one cluster with one span (a span is a list of two ints)
+        [[2, 4], [8, 9], [13, 14]]       # next cluster with three spans
+        [
+    ```
+
     """
 
     """
@@ -108,7 +128,7 @@ class BinaryLinks:
     pos: List[List[List[str]]] = field(default_factory=list)  # Looks same as words
     spans_head: List[List[List[int]]] = field(default_factory=list)
     words_head: List[List[List[str]]] = field(default_factory=list)
-    pos_heads: List[List[List[str]]] = field(default_factory=list)
+    pos_head: List[List[List[str]]] = field(default_factory=list)
 
     @property
     def isempty(self) -> bool:
@@ -167,6 +187,48 @@ class BinaryLinks:
             output.append(output_pair)
 
         self.spans_head = output
+
+    def add_words(self, doc: List[List[str]]):
+        """
+        Based on self.spans, and spans_head , fill in words and words_head
+        That is, I already know the spans of mentions and their span heads.
+        If I know the words in the document, I can also store the mention words in a list ...
+        """
+        words, words_head = [], []
+        f_doc = to_toks(doc)
+
+        for pair, pair_h in zip(self.spans, self.spans_head):
+            pair_words, pair_words_head = [], []
+            for span, span_h in zip(pair, pair_h):
+                pair_words.append(f_doc[span[0]: span[1]])
+                pair_words_head.append(f_doc[span_h[0]: span_h[1]])
+
+            words.append(pair_words)
+            words_head.append(pair_words_head)
+
+        self.words = words
+        self.words_head = words_head
+
+    def add_pos(self, doc: List[List[str]]):
+        """
+        Based on self.spans, and spans_head , fill in pos and pos_head
+        That is, I already know the spans of mentions and their span heads.
+        If I know the POS of words in the document, I can also store the mention tags in a list ...
+        """
+        pos, pos_head = [], []
+        f_doc = to_toks(doc)
+
+        for pair, pair_h in zip(self.spans, self.spans_head):
+            pair_pos, pair_pos_head = [], []
+            for span, span_h in zip(pair, pair_h):
+                pair_pos.append(f_doc[span[0]: span[1]])
+                pair_pos_head.append(f_doc[span_h[0]: span_h[1]])
+
+            pos.append(pair_pos)
+            pos_head.append(pair_pos_head)
+
+        self.pos = pos
+        self.pos_head = pos_head
 
     @classmethod
     def new(cls):
@@ -247,6 +309,10 @@ class NamedEntities:
     def isempty(self):
         return len(self.spans) == 0
 
+    @classmethod
+    def new(cls):
+        return NamedEntities(spans=[], tags=[])
+
     def get_tag_of(self, span, src: str = "spans") -> str:
         # Get span ID and based on it, fetch the tag
         if src not in ["spans", "words", "pos", "spans_head", "words_head", "pos_head"]:
@@ -298,6 +364,54 @@ class NamedEntities:
 
 @dataclass
 class Document:
+    """
+        Each document has the following fields:
+
+        **document**: `List[List[str]]`: A list of sentences where each sentence itself is a list of strings.
+        For instance:
+
+        ```py
+        [
+            ["I", "see", "a", "little", "silhouette", "of", "a", "man"],
+            ["Scaramouche", "Scaramouche", "will", "you", "do", "the", "Fandango"]
+        ]
+        ```
+
+        **pos**: `List[List[str]]`: The same as above except every string is replaced by its POS tag.
+        Warning: this is not an optional field. So in case your document is not annotated with pos tags,
+        you can pass fake pos tags (and choose to not exercise them down the line). You can do this simply by:
+
+        ```py
+        from pprint import pprint
+        from utils.data import Document
+        doc_text = [
+            ["I", "see", "a", "little", "silhouette", "of", "a", "man"],
+            ["Scaramouche", "Scaramouche", "will", "you", "do", "the", "Fandango"]
+        ]
+        fake_pos = Document.generate_pos_tags(doc_text)
+        pprint(fake_pos)
+        print("Corresponding to")
+        pprint(doc_text)
+        ```
+
+        **docname**: str
+
+        **genre**: str
+
+        are both metadata fields that you can choose to use however you want.
+        Ideally, docname should contain the docname. Genre can be left empty.
+
+        **coref**: Cluster
+
+        **ner**: NamedEntities
+
+        **bridging**: BridgingAnaphor
+
+        **rel**: TypedRelations
+
+        are the fields which contain task specific annotations.
+        All these four things are represented with their custom data classes (also found in `src/utils/data.py`)
+    """
     # The text of the document, broken down as list of sentence. Each sentence is a list of words
     document: List[List[str]]
 
@@ -327,6 +441,10 @@ class Document:
     docpart: int = field(default_factory=int)  # In some cases, ontonotes documents are divided into parts.
 
     # TODO: also add entity linking stuff
+
+    @classmethod
+    def generate_pos_tags(cls, doc_text):
+        return [['FAKE' for _ in sent] for sent in doc_text]
 
     def finalise(self):
         """
@@ -359,6 +477,24 @@ class Document:
             sentence_map
         )  # len(to_toks(self.document)) == len(sentence_map)
         return sentence_map
+
+    def get_all_spans(self) -> List[List[int]]:
+        """ Find all unique spans in coref, ner, re, ba and return them """
+        spans = []
+
+        if not self.coref.isempty:
+            spans += [tuple(span) for cluster in self.coref.spans for span in cluster]
+
+        if not self.ner.isempty:
+            spans += [tuple(span) for span in self.ner.spans]
+
+        if not self.rel.isempty:
+            spans += [tuple(span) for pair in self.rel.spans for span in pair]
+
+        if not self.bridging.isempty:
+            spans += [tuple(span) for pair in self.bridging.spans for span in pair]
+
+        return [list(span) for span in set(spans)]
 
 
 class Tasks(list):

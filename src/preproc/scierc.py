@@ -6,7 +6,6 @@ import json
 import click
 import spacy
 import jsonlines
-from spacy import tokens
 from pathlib import Path
 from typing import Iterable, Union, List
 
