@@ -1,3 +1,5 @@
+echo "This script can't download CODICRAC datasets for you. Please see src/playing-with-data-codicrac.ipynb to see what they should be arranged like."
+
 mkdir data
 mkdir data/raw
 mkdir data/raw/ontonotes
