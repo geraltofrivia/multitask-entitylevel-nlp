@@ -7,6 +7,7 @@ import re
 import json
 import click
 import spacy
+import pickle
 import jsonlines
 from spacy import tokens
 from pathlib import Path
@@ -21,7 +22,7 @@ from config import LOCATIONS as LOC, KNOWN_SPLITS
 from preproc.commons import GenericParser
 from dataiter import DocumentReader
 from utils.nlp import to_toks, NullTokenizer
-from utils.data import Document, NamedEntities, TypedRelations, Clusters
+from utils.data import Document, NamedEntities, BridgingAnaphors, Clusters, TypedRelations
 from utils.misc import NestedAnnotationBlock, NestedAnnotationBlockStack
 
 
@@ -55,9 +56,9 @@ class CODICRACParser(GenericParser):
             'codicrac-switchboard': ['Switchboard_3_dev.CONLL'],
             'codicrac-arrau-t91': ['Trains_91.CONLL'],
             'codicrac-arrau-t93': ['Trains_93.CONLL'],
-            'codicrac-arrau-gst': [
+            'codicrac-arrau-rst': [
                 'RST_DTreeBank_dev.CONLL',
-                'RST_DTreeBank_test.CONLL'
+                'RST_DTreeBank_test.CONLL',
                 'RST_DTreeBank_train.CONLL'
             ],
             'codicrac-arrau-pear': ['Pear_Stories.CONLL'],
@@ -76,6 +77,28 @@ class CODICRACParser(GenericParser):
 
         # noinspection RegExpRedundantEscape
         self.re_nested_annotation_blocks = re.compile(r'\([^\)\(\n]*\)?|\)')
+
+    def run(self):
+        """ overwriting it since we don't need suffixes UNLESS we're dealing with RST"""
+
+        for split in self.suffixes:
+            # First, clear out all the previously processed things from the disk
+            self.delete_preprocessed_files(split)
+            outputs = self.parse(split)
+
+            # Dump them to disk
+            if self.dataset != 'codicrac-arrau-rst':
+                self.write_to_disk(suffix=None, instances=outputs)
+            else:
+                # We are dealing with RST. Which split?
+                if '_dev' in split:
+                    self.write_to_disk(suffix='dev', instances=outputs)
+                elif '_test' in split:
+                    self.write_to_disk(suffix='test', instances=outputs)
+                elif '_train' in split:
+                    self.write_to_disk(suffix='train', instances=outputs)
+                else:
+                    raise ValueError(f"RST filename: {split} is unknown.")
 
     @staticmethod
     def _parse_annotation_(annotation: str) -> Dict[str, str]:
@@ -245,13 +268,39 @@ class CODICRACParser(GenericParser):
 
         return markables_
 
+    @staticmethod
+    def find_antecedents(
+            markables: Dict[str, List[NestedAnnotationBlock]],
+            anaphors: Dict[str, List[NestedAnnotationBlock]]
+    ) -> Dict[str, List[NestedAnnotationBlock]]:
+
+        outputs = {}
+
+        for docname in markables.keys():
+
+            outputs[docname] = []
+            # Turn List[NestedAnnotationBlock] to Dict[str, NestedAnnotationBlock] i.e. markable ID to block dict
+            doc_markables = {block.tag: block for block in markables[docname]}
+
+            for anaphor in anaphors[docname]:
+                antecedent_markable_id = anaphor.metadata
+                try:
+                    antecedent_markable = doc_markables[antecedent_markable_id]
+                except KeyError:
+                    # No markable antecedent was found. Investigate why
+                    print('potato')
+                    raise KeyError
+                outputs[docname].append(antecedent_markable)
+
+        return outputs
+
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
         """ where actual preproc happens"""
 
         outputs: List[Document] = []
         filedir: Path = self.dir / split_nm
 
-        assert filedir.exists()
+        assert filedir.exists(), f"File {filedir} not found!"
 
         # Lets read the file
         with filedir.open('r') as f:
@@ -396,6 +445,9 @@ class CODICRACParser(GenericParser):
                                                                                        tag_name='MarkableID',
                                                                                        meta_name='MentionAnchor',
                                                                                        ignore_pseudo=False)
+        # Corresponding to each, find an antecedent
+        bridging_antecedents = self.find_antecedents(markables_, bridging_anaphors)
+
         # The REFERENCE column has NER info.
         named_entities: Dict[str, List[NestedAnnotationBlock]] = self.get_markables(documents=documents,
                                                                                     documents_=documents_,
@@ -424,11 +476,63 @@ class CODICRACParser(GenericParser):
             coref = Clusters(spans=doc_clusters_spans)
 
             # Get the bridging things prepped as well
-            ...
+            doc_bridging_anaphors = [(block.start, block.end) for block in bridging_anaphors[docname]]
+            doc_bridging_antecedents = [(block.start, block.end) for block in bridging_antecedents[docname]]
+            bridging_spans = [[ante, ana] for ante, ana in zip(doc_bridging_antecedents, doc_bridging_anaphors)]
+            bridging_words = [(ante.words, ana.words) for ante, ana in
+                              zip(bridging_anaphors[docname], bridging_antecedents[docname])]
+            bridging = BridgingAnaphors(spans=bridging_spans, words=bridging_words)
+
+            # Make the object
+            document = Document(
+                document=doc_text,
+                pos=doc_pos,
+                docname=docname,
+                coref=coref,
+                ner=ner,
+                rel=TypedRelations.new(),
+                bridging=bridging
+            )
+
+            outputs.append(document)
 
         return outputs
 
 
+@click.command()
+@click.option("--dataset", "-d", type=str, help="The name of the dataset like 'persuasion', 'light', 'arrau' etc.")
+@click.option("--suffix", "-s", type=str, default=None,
+              help="The name of the suffix (for Arrau) like 't91', 't93', 'gnome', 'pear', or 'rst'.")
+@click.option("--all", "-a", is_flag=True, help="If flag is given, we process every CODICRAC split.")
+def run(dataset: str, suffix: str, all: bool):
+    if all:
+        parser = CODICRACParser(LOC.cc_persuasion)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_ami)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_light)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_switchboard)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_arrau_t91)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_arrau_t93)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_arrau_pear)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_arrau_rst)
+        parser.run()
+        parser = CODICRACParser(LOC.cc_arrau_gnome)
+        parser.run()
+
+    else:
+        if suffix:
+            parser = CODICRACParser(LOC[f"cc_{dataset}_{suffix}"])
+        else:
+            parser = CODICRACParser(LOC[f"cc_{dataset}"])
+
+        parser.run()
+
+
 if __name__ == '__main__':
-    parser = CODICRACParser(LOC.cc_persuasion)
-    parser.run()
+    run()

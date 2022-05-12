@@ -99,6 +99,9 @@ class Clusters:
 class BinaryLinks:
     """
         Another data class obj containing all the things needed for smoothly using typed relations in a document
+        Note that we do not make separate data fields for argument a and argument b.
+        Currently it is stored as
+            [ [rel1_arga, rel1_argb], [rel2_arga, rel2_argb] ... ]
     """
     spans: List[List[List[int]]]  # Looks like [ [[112, 113], [155, 159]], [[2, 6], [11, 13]], ... ]
     words: List[List[List[str]]] = field(default_factory=list)  # Looks like [ [['the', 'neighbor'], ['a', 'boy']], ..]
@@ -107,12 +110,52 @@ class BinaryLinks:
     words_head: List[List[List[str]]] = field(default_factory=list)
     pos_heads: List[List[List[str]]] = field(default_factory=list)
 
-    def __len__(self):
-        return len(self.spans)
+    @property
+    def isempty(self) -> bool:
+        return len(self.spans) == 0
 
     @property
-    def isempty(self):
-        return len(self.spans) == 0
+    def arga(self):
+        """ return spans in the first argument position """
+        return [pair[0] for pair in self.spans]
+
+    @property
+    def argb(self):
+        """ return spans in the first argument position """
+        return [pair[1] for pair in self.spans]
+
+    @property
+    def arga_h(self):
+        """ return spans in the first argument position """
+        return [pair[0] for pair in self.spans_head]
+
+    @property
+    def argb_h(self):
+        """ return spans in the first argument position """
+        return [pair[1] for pair in self.spans_head]
+
+    @property
+    def arga_w(self):
+        """ return spans in the first argument position """
+        return [pair[0] for pair in self.words]
+
+    @property
+    def argb_w(self):
+        """ return spans in the first argument position """
+        return [pair[1] for pair in self.words]
+
+    @property
+    def arga_wh(self):
+        """ return spans in the first argument position """
+        return [pair[0] for pair in self.words_head]
+
+    @property
+    def argb_wh(self):
+        """ return spans in the first argument position """
+        return [pair[1] for pair in self.words_head]
+
+    def __len__(self):
+        return len(self.spans)
 
     def allocate_span_heads(self, span_heads: dict):
         """Given a dict of {full span: span head}, allocate them based on the clusters in self.data"""
@@ -125,10 +168,43 @@ class BinaryLinks:
 
         self.spans_head = output
 
+    @classmethod
+    def new(cls):
+        return TypedRelations([], [])
+
 
 @dataclass
 class BridgingAnaphors(BinaryLinks):
     """ No change from above, just using a better name for the task. """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.antecedents = self.arga
+        self.anaphors = self.argb
+        self.antecedents_head = self.arga_h
+        self.anaphors_head = self.argb_h
+        self.antecedents_words = self.arga_w
+        self.anaphors_words = self.argb_w
+        self.antecedents_words_head = self.argb_wh
+        self.anaphors_words_head = self.argb_wh
+
+    def get_anaphor_for(self, span, return_index=False):
+        """ give antecedent span, get anaphor span. greedy: if there are multiple matches, returns the first one """
+        for i, ante in enumerate(self.antecedents):
+            if ante[0] == span[0] and ante[1] == span[1]:
+                if return_index:
+                    return i
+                else:
+                    return self.anaphors[i]
+
+    def get_antecedent_for(self, span, return_index=False):
+        """ give anaphor span, get antecedent span. greedy: if there are multiple matches, returns the first one """
+        for i, ana in enumerate(self.anaphors):
+            if ana[0] == span[0] and ana[1] == span[1]:
+                if return_index:
+                    return i
+                else:
+                    return self.antecedents[i]
 
 
 @dataclass
@@ -241,7 +317,7 @@ class Document:
     rel: TypedRelations
 
     # Bridging Anaphora object storing gold annotations (if found), empty is fine.
-    bridging: BridgingAnaphors = field(default_factory=BridgingAnaphors)
+    bridging: BridgingAnaphors
 
     # Split (ontonotes split: train;test;development; conll-2012-test
     split: str = field(default_factory=str)
@@ -295,7 +371,7 @@ class Tasks(list):
         or
             Tasks(['coref', 'ner'])
 
-        PS: Don't bother deeply understanding this code, I wrote this in a fit of pseudo productive stupour
+        PS: Don't bother deeply understanding this code, I wrote this in a fit of pseudo productive stupor
             wherein I want to write something non trivial but also not important.
     """
 

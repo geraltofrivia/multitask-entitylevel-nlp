@@ -3,7 +3,7 @@ import pickle
 from spacy import tokens
 from pathlib import Path
 from abc import ABC, abstractmethod
-from typing import Union, List, Dict, Tuple, Iterable
+from typing import Union, List, Dict, Tuple, Iterable, Optional
 
 # Local imports
 try:
@@ -104,11 +104,14 @@ class GenericParser(ABC):
         for f_name in write_dir.glob("*.pkl"):
             f_name.unlink()
 
-    def write_to_disk(self, split: Union[str, Path], instances: List[Document]):
+    def write_to_disk(self, suffix: Optional[Union[str, Path]], instances: List[Document]):
         """Write a (large) list of documents to disk"""
 
         # Assert that folder exists
-        write_dir = self.write_dir / split
+        if suffix:
+            write_dir = self.write_dir / suffix
+        else:
+            write_dir = self.write_dir
         write_dir.mkdir(parents=True, exist_ok=True)
 
         with (write_dir / "dump.pkl").open("wb+") as f:

@@ -19,7 +19,7 @@ from config import LOCATIONS as LOC, KNOWN_SPLITS
 from preproc.commons import GenericParser
 from dataiter import DocumentReader
 from utils.nlp import to_toks, NullTokenizer
-from utils.data import Document, NamedEntities, TypedRelations, Clusters
+from utils.data import Document, NamedEntities, TypedRelations, Clusters, BridgingAnaphors
 
 
 class SciERCParser(GenericParser):
@@ -106,7 +106,8 @@ class SciERCParser(GenericParser):
                 docname=doc_name,
                 coref=coref,
                 ner=ner,
-                rel=rel
+                rel=rel,
+                bridging=BridgingAnaphors.new()
             )
 
             outputs.append(document)

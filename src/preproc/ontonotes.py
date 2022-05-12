@@ -26,7 +26,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.data import Document, Clusters, NamedEntities, TypedRelations
+from utils.data import Document, Clusters, NamedEntities, TypedRelations, BridgingAnaphors
 from utils.misc import NERAnnotationBlockStack
 from utils.nlp import to_toks, NullTokenizer
 from preproc.commons import GenericParser
@@ -207,7 +207,8 @@ class CoNLLOntoNotesParser(GenericParser):
                     ner=ner_gold,
                     # ner_spacy=ner_spacy,
                     coref=coref,
-                    rel=TypedRelations([], [])
+                    rel=TypedRelations.new(),
+                    bridging=BridgingAnaphors.new()
                 )
                 outputs.append(doc)
 
