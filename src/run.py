@@ -215,9 +215,8 @@ def run(
     # TODO: enable specifying loss ratios for different tasks.
     # TODO: implement soft loading the model parameters somehow.
 
-    # If trim is enabled, we WILL turn the wandb_trial flag on
-    if trim or debug:
-        wandb_trial = True
+    # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
+    wandb_trial = trim or debug
 
     # If we are to "resume" training things from somewhere, we should also have the save flag enabled
     if resume_dir >= 0:
