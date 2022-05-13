@@ -11,6 +11,7 @@ import os, sys
 from pathlib import Path
 
 sys.path.append(str(Path(os.path.abspath(os.curdir)).parent))
+sys.path.append(str(Path(os.path.abspath(os.curdir)).parent.parent))
 
 # In[ ]:
 
