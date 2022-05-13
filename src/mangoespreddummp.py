@@ -9,9 +9,8 @@
 # In house mangoes pred (using mangoes as a lib)
 import os, sys
 from pathlib import Path
-
 sys.path.append(str(Path(os.path.abspath(os.curdir)).parent))
-sys.path.append(str(Path(os.path.abspath(os.curdir)).parent.parent))
+
 
 # In[ ]:
 
@@ -24,6 +23,7 @@ from transformers import BertTokenizerFast
 from tqdm.auto import tqdm, trange
 from pathlib import Path
 import pickle
+
 
 # In[ ]:
 
@@ -163,6 +163,7 @@ model = BERTForCoreferenceResolution.load("bert-base-cased", "SpanBERT/spanbert-
 
 tok = BertTokenizerFast.from_pretrained("bert-base-cased")
 
+
 # In[ ]:
 
 
@@ -223,20 +224,24 @@ print(writefl.absolute())
 
 # Dumping outputs
 for example_index in trange(len(train_dataset)):
-    example = train_dataset[example_index]
-    example = {name: tensor.to(model.model_device) for name, tensor in example.items()}
-    outputs = model.model.forward(example["input_ids"],
-                                  example["attention_mask"],
-                                  example["sentence_map"],
-                                  #                               speaker_ids=example["speaker_ids"],
-                                  #                               genre=example["genre"],
-                                  gold_starts=example["gold_starts"],
-                                  gold_ends=example["gold_ends"],
-                                  cluster_ids=example["cluster_ids"],
-                                  return_dict=True)
+    with torch.no_grad():
+        example = train_dataset[example_index]
+        example = {name: tensor.to(model.model_device) for name, tensor in example.items()}
+        outputs = model.model.forward(example["input_ids"],
+                                      example["attention_mask"],
+                                      example["sentence_map"],
+                                      #                               speaker_ids=example["speaker_ids"],
+                                      #                               genre=example["genre"],
+                                      gold_starts=example["gold_starts"],
+                                      gold_ends=example["gold_ends"],
+                                      cluster_ids=example["cluster_ids"],
+                                      return_dict=True)
 
-    # dump to disk
-    with (writefl / (str(example_index) + '.pkl')).open('wb+') as f:
-        pickle.dump({'inpuit': outputs, 'output': outputs}, f)
+        # dump to disk
+        with (writefl / (str(example_index) + '.pkl')).open('wb+') as f:
+            pickle.dump({'input': example, 'output': outputs}, f)
+
+        del example
+        del outputs
 
 # In[ ]:
