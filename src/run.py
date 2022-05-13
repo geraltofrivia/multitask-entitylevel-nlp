@@ -156,6 +156,8 @@ def get_dataiter_partials(
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
+@click.option('--debug', is_flag=True,
+              help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
 @click.option('--ner-unweighted', is_flag=True, default=False,
@@ -170,8 +172,6 @@ def get_dataiter_partials(
               help="If True, we report this run to WandB")
 @click.option('--wandb-comment', '-wbm', type=str, default=None,
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
-@click.option('--wandb-trial', '-wbt', is_flag=True, default=False,
-              help="If true, the wandb run is placed in a group of 'trial' runs.")
 @click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
               help="If true, dataiter ignores those candidates which have verbs in them "
                    "IF the doc has more than 10k candidates.")
@@ -195,6 +195,7 @@ def run(
         encoder: str = "bert-base-uncased",
         device: str = "cpu",
         trim: bool = False,
+        debug: bool = False,
         train_encoder: bool = False,
         ner_unweighted: bool = False,
         pruner_unweighted: bool = False,
@@ -202,7 +203,6 @@ def run(
         t2_ignore_task: str = None,
         use_wandb: bool = False,
         wandb_comment: str = '',
-        wandb_trial: bool = False,
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
@@ -216,7 +216,7 @@ def run(
     # TODO: implement soft loading the model parameters somehow.
 
     # If trim is enabled, we WILL turn the wandb_trial flag on
-    if trim:
+    if trim or debug:
         wandb_trial = True
 
     # If we are to "resume" training things from somewhere, we should also have the save flag enabled
@@ -253,6 +253,7 @@ def run(
     config.device = device
     config.epochs = epochs
     config.trim = trim
+    config.debug = debug
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
     config.pruner_ignore_weights = pruner_unweighted
@@ -307,11 +308,11 @@ def run(
     # Collect all metrics
     metrics = []
     if 'ner' in tasks + tasks_2:
-        metrics += [NERAcc(), NERSpanRecognitionPR()]
+        metrics += [NERAcc(debug=config.debug), NERSpanRecognitionPR(debug=config.debug)]
     if 'pruner' in tasks + tasks_2:
-        metrics += [PrunerPR()]
+        metrics += [PrunerPR(debug=config.debug)]
     if 'coref' in tasks + tasks_2:
-        metrics += [CorefBCubed(), CorefMUC(), CorefCeafe()]
+        metrics += [CorefBCubed(debug=config.debug), CorefMUC(debug=config.debug), CorefCeafe(debug=config.debug)]
 
     if dataset_2 and tasks_2:
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,

@@ -8,7 +8,6 @@ class BadParameters(Exception):
     This exception is supposed to indicate that the cli params passed did not meet the standards for some reason.
     Not particularly helpful in figuring out why on its own. Look closely at the error message generated.
     """
-
     pass
 
 
@@ -43,4 +42,9 @@ class NoValidAnnotations(Exception):
 class LabelDictNotFound(FileNotFoundError):
     """Raised by Data Iters.
     Specifically, if we don't find the label dict for a given task for a given dataset in data/manual"""
+    ...
+
+
+class NANsFound(ValueError):
+    """ There are nans where we didn't expect them (which is everywhere, pretty much). HALP! """
     ...

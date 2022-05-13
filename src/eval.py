@@ -15,6 +15,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device
+from utils.exceptions import NANsFound
 
 """
     Make a overall (macro) eval system. 
@@ -36,12 +37,12 @@ from utils.misc import change_device
 
 class Metric(ABC):
 
-    def __init__(self, nans_are_cool: bool):
+    def __init__(self, debug: bool):
         # If not None, will be concatenated before self.name values.
         self.prefix: Optional[str] = None
         self.values: List[str] = []
         self.task: str = ''
-        self.nans_are_cool: bool = nans_are_cool
+        self.debug: bool = debug
 
         # Here, we store the interim values which can be returned by a simple 'mean' at the end
         self.logs: Dict[str, List] = {}
@@ -72,8 +73,8 @@ class Metric(ABC):
 
 class MacroMetric(Metric, ABC):
 
-    def __init__(self, beta=1, nans_are_cool: bool = True):
-        super().__init__(nans_are_cool=nans_are_cool)
+    def __init__(self, beta=1, debug: bool = True):
+        super().__init__(debug=debug)
         self.prefix = None
         self.values = ['p', 'r', 'f1']
 
@@ -150,7 +151,7 @@ class Evaluator:
             dataset_partial: Callable,
             metrics: List[Metric],
             device: Union[str, torch.device],
-            nans_are_cool: bool = True
+            debug: bool = True
     ):
         """
         :param predict_fn: The function that gives the model outputs (forward class or whatever)
@@ -158,7 +159,7 @@ class Evaluator:
         :param metrics: a list of class objects inheriting class Metric.
             Micro metrics are expected to return their output at every point and can be aggregated by a simple mean
         :param device: torch device (just pass 'cpu' or 'cuda')
-        :param nans_are_cool: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
+        :param debug: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
         """
         self.predict_fn = predict_fn
         self.ds_partial = dataset_partial
@@ -262,8 +263,8 @@ class Evaluator:
 
 class NERAcc(Metric):
 
-    def __init__(self, nans_are_cool: bool = True):
-        super().__init__(nans_are_cool=nans_are_cool)
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
         self.values = ['acc', 'acc_nonzero']
         self.task = 'ner'
         self.prefix = None
@@ -286,8 +287,8 @@ class NERAcc(Metric):
 
 class NERSpanRecognitionPR(Metric):
 
-    def __init__(self, nans_are_cool: bool = True):
-        super().__init__(nans_are_cool=nans_are_cool)
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
         self.values = ['p', 'r']
         self.prefix = 'spanrec'
         self.task = 'ner'
@@ -308,8 +309,8 @@ class NERSpanRecognitionPR(Metric):
 
 class PrunerPR(Metric):
 
-    def __init__(self, nans_are_cool: bool = True):
-        super().__init__(nans_are_cool=nans_are_cool)
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
         self.values = ['p', 'r']
         self.task = 'pruner'
 
@@ -326,6 +327,19 @@ class PrunerPR(Metric):
         # TODO: add f1
         op = {'p': p, 'r': r}
 
+        # Check for nans.
+        if p.isnan() and self.debug:
+            raise NANsFound(f"There are NaNs in Pruner recall comp. Here are raw dumps of logits and labels:"
+                            f"Logits: {logits_after_pruning.shape}, Labels: {labels.shape}"
+                            f"{logits_after_pruning}"
+                            f"{labels}")
+        # Check for nans.
+        if r.isnan() and self.debug:
+            raise NANsFound(f"There are NaNs in Pruner recall comp. Here are raw dumps of logits and labels:"
+                            f"Logits: {logits_after_pruning.shape}, Labels: {labels.shape}"
+                            f"{logits_after_pruning}"
+                            f"{labels}")
+
         for k, v in op.items():
             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
@@ -333,8 +347,8 @@ class PrunerPR(Metric):
 # noinspection PyUnusedLocal
 class CorefCeafe(MacroMetric):
 
-    def __init__(self, beta=1, nans_are_cool: bool = True):
-        super().__init__(beta=beta, nans_are_cool=nans_are_cool)
+    def __init__(self, beta=1, debug: bool = True):
+        super().__init__(beta=beta, debug=debug)
         self.prefix = 'ceafe'
         self.task = 'coref'
 
@@ -364,8 +378,8 @@ class CorefCeafe(MacroMetric):
 
 class CorefBCubed(MacroMetric):
 
-    def __init__(self, nans_are_cool: bool = True):
-        super().__init__(nans_are_cool=nans_are_cool)
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
         self.prefix = 'b_cubed'
         self.task = 'coref'
 
@@ -402,8 +416,8 @@ class CorefBCubed(MacroMetric):
 
 class CorefMUC(MacroMetric):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
         self.prefix = 'muc'
         self.task = 'coref'
 
