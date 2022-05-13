@@ -17,7 +17,7 @@ sys.path.append(str(Path(os.path.abspath(os.curdir)).parent))
 
 import os
 import glob
-import time
+import torch
 from mangoes.modeling import BERTForCoreferenceResolution, MangoesCoreferenceDataset
 from transformers import BertTokenizerFast
 from tqdm.auto import tqdm, trange
@@ -215,7 +215,7 @@ print(len(eval_dataset))
 # In[ ]:
 
 
-writefl = Path('../temp/mangoespred')
+writefl = Path(ROOT_LOC / 'temp/mangoespred')
 writefl.mkdir(exist_ok=True, parents=True)
 print(writefl.absolute())
 
