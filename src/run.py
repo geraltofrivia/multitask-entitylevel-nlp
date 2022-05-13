@@ -141,6 +141,7 @@ def get_dataiter_partials(
     return train_ds, dev_ds
 
 
+# noinspection PyDefaultArgument
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
 @click.option("--tasks", "-t", type=str, multiple=True,
@@ -186,13 +187,11 @@ def get_dataiter_partials(
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
 def run(
-        max_span_width: int,
+        epochs: int,
         dataset: str,
         tasks: List[str],
         dataset_2: str,
-        tasks_2: List[str] = None,
-        epochs: int = 10,
-        learning_rate: float = 0.005,
+        tasks_2: List[str] = [],
         encoder: str = "bert-base-uncased",
         device: str = "cpu",
         trim: bool = False,
@@ -207,7 +206,10 @@ def run(
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
-        use_pretrained_model: str = None
+        use_pretrained_model: str = None,
+        learning_rate: float = CONFIG['learning_rate'],
+        max_span_width: int = CONFIG['max_span_width'],
+        coref_loss_mean: bool = CONFIG['coref_loss_mean']
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
@@ -259,6 +261,7 @@ def run(
     config.wandb = use_wandb
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
+    config.coref_loss_mean = coref_loss_mean
 
     # merge all pre-typed config values into this bertconfig obj
     for k, v in CONFIG.items():

@@ -36,11 +36,12 @@ from utils.misc import change_device
 
 class Metric(ABC):
 
-    def __init__(self):
+    def __init__(self, nans_are_cool: bool):
         # If not None, will be concatenated before self.name values.
         self.prefix: Optional[str] = None
         self.values: List[str] = []
         self.task: str = ''
+        self.nans_are_cool: bool = nans_are_cool
 
         # Here, we store the interim values which can be returned by a simple 'mean' at the end
         self.logs: Dict[str, List] = {}
@@ -71,8 +72,8 @@ class Metric(ABC):
 
 class MacroMetric(Metric, ABC):
 
-    def __init__(self, beta=1):
-        super().__init__()
+    def __init__(self, beta=1, nans_are_cool: bool = True):
+        super().__init__(nans_are_cool=nans_are_cool)
         self.prefix = None
         self.values = ['p', 'r', 'f1']
 
@@ -148,13 +149,16 @@ class Evaluator:
             predict_fn: Callable,
             dataset_partial: Callable,
             metrics: List[Metric],
-            device: Union[str, torch.device]
+            device: Union[str, torch.device],
+            nans_are_cool: bool = True
     ):
         """
         :param predict_fn: The function that gives the model outputs (forward class or whatever)
         :param dataset_partial: a partial encapsulating the dataset so that it can be reset whenever needed.
         :param metrics: a list of class objects inheriting class Metric.
             Micro metrics are expected to return their output at every point and can be aggregated by a simple mean
+        :param device: torch device (just pass 'cpu' or 'cuda')
+        :param nans_are_cool: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
         """
         self.predict_fn = predict_fn
         self.ds_partial = dataset_partial
@@ -258,8 +262,8 @@ class Evaluator:
 
 class NERAcc(Metric):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nans_are_cool: bool = True):
+        super().__init__(nans_are_cool=nans_are_cool)
         self.values = ['acc', 'acc_nonzero']
         self.task = 'ner'
         self.prefix = None
@@ -282,8 +286,8 @@ class NERAcc(Metric):
 
 class NERSpanRecognitionPR(Metric):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nans_are_cool: bool = True):
+        super().__init__(nans_are_cool=nans_are_cool)
         self.values = ['p', 'r']
         self.prefix = 'spanrec'
         self.task = 'ner'
@@ -304,8 +308,8 @@ class NERSpanRecognitionPR(Metric):
 
 class PrunerPR(Metric):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nans_are_cool: bool = True):
+        super().__init__(nans_are_cool=nans_are_cool)
         self.values = ['p', 'r']
         self.task = 'pruner'
 
@@ -329,8 +333,8 @@ class PrunerPR(Metric):
 # noinspection PyUnusedLocal
 class CorefCeafe(MacroMetric):
 
-    def __init__(self, beta=1):
-        super().__init__(beta=beta)
+    def __init__(self, beta=1, nans_are_cool: bool = True):
+        super().__init__(beta=beta, nans_are_cool=nans_are_cool)
         self.prefix = 'ceafe'
         self.task = 'coref'
 
@@ -360,8 +364,8 @@ class CorefCeafe(MacroMetric):
 
 class CorefBCubed(MacroMetric):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, nans_are_cool: bool = True):
+        super().__init__(nans_are_cool=nans_are_cool)
         self.prefix = 'b_cubed'
         self.task = 'coref'
 
