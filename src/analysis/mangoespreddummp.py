@@ -3,7 +3,7 @@
 
 # # Running Mangoes predictions locally
 
-# In[23]:
+# In[ ]:
 
 
 # In house mangoes pred (using mangoes as a lib)
@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(os.path.abspath(os.curdir)).parent))
 
-# In[26]:
+# In[ ]:
 
 
 import os
@@ -24,13 +24,13 @@ from tqdm.auto import tqdm, trange
 from pathlib import Path
 import pickle
 
-# In[31]:
+# In[ ]:
 
 
 from config import ROOT_LOC
 
 
-# In[27]:
+# In[ ]:
 
 
 def normalize_word(word, language):
@@ -43,8 +43,6 @@ def normalize_word(word, language):
 
 
 print('here')
-
-
 def parse_document(path, language="english"):
     """
     returns:
@@ -154,7 +152,7 @@ def parse_dataset(path):
     return dataset_sents, dataset_clusters_words, dataset_speakers, dataset_genres, dataset_doc_keys, gen_to_id
 
 
-# In[28]:
+# In[ ]:
 
 
 model = BERTForCoreferenceResolution.load("bert-base-cased", "SpanBERT/spanbert-base-cased",
@@ -164,17 +162,21 @@ model = BERTForCoreferenceResolution.load("bert-base-cased", "SpanBERT/spanbert-
 
 tok = BertTokenizerFast.from_pretrained("bert-base-cased")
 
-# In[30]:
+# In[ ]:
+
+
+# In[ ]:
 
 
 train_path = ROOT_LOC / 'data/raw/ontonotes/conll-2012/v5/data/train/data/english/annotations/*/*/*/*gold_conll'
 valid_path = ROOT_LOC / 'data/raw/ontonotes/conll-2012/v5/data/development/data/english/annotations/*/*/*/*gold_conll'
 
 # change this path to point to where the data is
-train_sents, train_clusters, train_speakers, train_genres, train_doc_keys, _ = parse_dataset(train_path)
+train_sents, train_clusters, train_speakers, train_genres, train_doc_keys, _ = parse_dataset(str(train_path))
 
 # Filter out useless ones
 valid_indices = [i for i, x in enumerate(train_clusters) if x]
+
 
 # In[ ]:
 
@@ -184,6 +186,7 @@ train_clusters = [train_clusters[i] for i in valid_indices]
 train_speakers = [train_speakers[i] for i in valid_indices]
 train_genres = [train_genres[i] for i in valid_indices]
 train_doc_keys = [train_doc_keys[i] for i in valid_indices]
+
 
 # In[ ]:
 
@@ -198,7 +201,7 @@ print(len(train_dataset))
 # In[ ]:
 
 
-eval_sents, eval_clusters, eval_speakers, eval_genres, eval_doc_keys, _ = parse_dataset(valid_path)
+eval_sents, eval_clusters, eval_speakers, eval_genres, eval_doc_keys, _ = parse_dataset(str(valid_path))
 
 eval_dataset = MangoesCoreferenceDataset(tok, use_metadata=False, max_segment_len=384, max_segments=3,
                                          documents=eval_sents, cluster_ids=eval_clusters,
@@ -233,4 +236,6 @@ for example_index in trange(len(train_dataset)):
 
     # dump to disk
     with (writefl / (str(example_index) + '.pkl')).open('wb+') as f:
-        pickle.dump(outputs, f)
+        pickle.dump({'inpuit': outputs, 'output': outputs}, f)
+
+# In[ ]:
