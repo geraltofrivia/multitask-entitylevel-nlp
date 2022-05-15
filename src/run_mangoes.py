@@ -392,6 +392,7 @@ def run(
     # model = BasicMTL(dir_encoder, config=config, n_classes_ner=n_classes_ner)
     # print("Model params: ", sum([param.nelement() for param in model.parameters()]))
     model = MangoesCorefWrapper()
+    model.model.model.to(config.device)
 
     # Make the optimiser
     base_keyword = 'bert'
