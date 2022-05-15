@@ -61,6 +61,7 @@ class MultiTaskDataIter(Dataset):
         self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
+        self.uncased = config.vocab_size.endswith('uncased')
         self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
             if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 
@@ -123,7 +124,7 @@ class MultiTaskDataIter(Dataset):
 
         if self.config.trim:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
-            self.data = self.data[:50]
+            self.data = self.data[:5]
 
     def estimate_class_weights(self, task: str) -> List[float]:
         """
@@ -131,6 +132,7 @@ class MultiTaskDataIter(Dataset):
             Expect them to be extremely heavily twisted in the case of __na__ of course.
         """
         # Create a flat (long, long) list of all labels
+        # print(self.data[0][task]['gold_labels'])
         y = torch.cat([datum[task]['gold_labels'] for datum in self.data]).to('cpu')
         return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
 
@@ -548,7 +550,8 @@ class MultiTaskDataIter(Dataset):
         """
         # Create a subword id to word id dictionary
         subword2word = match_subwords_to_words(
-            tokens, tokenized.input_ids, self.tokenizer
+            tokens, tokenized.input_ids, self.tokenizer,
+            ignore_cases=self.uncased
         )
         word2subword_all = {}
         for sw_id, w_id in subword2word.items():
@@ -746,6 +749,9 @@ class DocumentReader(Dataset):
         filenames = self.get_fnames(self._src_, self._split_)
         if self._shuffle_:
             np.random.shuffle(filenames)
+
+        if len(filenames) == 0:
+            raise FileNotFoundError(f"No preprocessed documents found in the desired location.")
 
         for fname in filenames:
 

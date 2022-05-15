@@ -536,6 +536,9 @@ class Tasks(list):
         # Init List
         super().__init__(args)
 
+    def __hash__(self):
+        super().__hash__()
+
     def __setitem__(self, ii, val):
         raise ValueError("Es Ist Verboten !!")
 
