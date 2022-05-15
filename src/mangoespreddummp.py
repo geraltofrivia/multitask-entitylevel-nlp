@@ -7,22 +7,25 @@
 
 
 # In house mangoes pred (using mangoes as a lib)
-import os, sys
+import os
+import sys
 from pathlib import Path
-sys.path.append(str(Path(os.path.abspath(os.curdir)).parent))
 
+sys.path.append(str(Path(os.path.abspath(os.curdir)).parent))
 
 # In[ ]:
 
 
-import os
+import numpy as np
 import glob
 import torch
+from collections import Counter
 from mangoes.modeling import BERTForCoreferenceResolution, MangoesCoreferenceDataset
 from transformers import BertTokenizerFast
-from tqdm.auto import tqdm, trange
+from tqdm.auto import trange
 from pathlib import Path
 import pickle
+from scipy.optimize import linear_sum_assignment as linear_assignment
 
 
 # In[ ]:
@@ -219,13 +222,135 @@ writefl = Path(ROOT_LOC / 'temp/mangoespred')
 writefl.mkdir(exist_ok=True, parents=True)
 print(writefl.absolute())
 
+
 # In[ ]:
 
 
+def f1(p_num, p_den, r_num, r_den, beta=1):
+    p = 0 if p_den == 0 else p_num / float(p_den)
+    r = 0 if r_den == 0 else r_num / float(r_den)
+    return 0 if p + r == 0 else (1 + beta * beta) * p * r / (beta * beta * p + r)
+
+
+class CorefEvaluator(object):
+    def __init__(self):
+        self.evaluators = [Evaluator(m) for m in (muc, b_cubed, ceafe)]
+
+    def update(self, predicted, gold, mention_to_predicted, mention_to_gold):
+        for e in self.evaluators:
+            e.update(predicted, gold, mention_to_predicted, mention_to_gold)
+
+    def get_f1(self):
+        return sum(e.get_f1() for e in self.evaluators) / len(self.evaluators)
+
+    def get_recall(self):
+        return sum(e.get_recall() for e in self.evaluators) / len(self.evaluators)
+
+    def get_precision(self):
+        return sum(e.get_precision() for e in self.evaluators) / len(self.evaluators)
+
+    def get_prf(self):
+        return self.get_precision(), self.get_recall(), self.get_f1()
+
+
+class Evaluator(object):
+    def __init__(self, metric, beta=1):
+        self.p_num = 0
+        self.p_den = 0
+        self.r_num = 0
+        self.r_den = 0
+        self.metric = metric
+        self.beta = beta
+
+    def update(self, predicted, gold, mention_to_predicted, mention_to_gold):
+        if self.metric == ceafe:
+            pn, pd, rn, rd = self.metric(predicted, gold)
+        else:
+            pn, pd = self.metric(predicted, mention_to_gold)
+            rn, rd = self.metric(gold, mention_to_predicted)
+        self.p_num += pn
+        self.p_den += pd
+        self.r_num += rn
+        self.r_den += rd
+
+    def get_f1(self):
+        return f1(self.p_num, self.p_den, self.r_num, self.r_den, beta=self.beta)
+
+    def get_recall(self):
+        return 0 if self.r_num == 0 else self.r_num / float(self.r_den)
+
+    def get_precision(self):
+        return 0 if self.p_num == 0 else self.p_num / float(self.p_den)
+
+    def get_prf(self):
+        return self.get_precision(), self.get_recall(), self.get_f1()
+
+    def get_counts(self):
+        return self.p_num, self.p_den, self.r_num, self.r_den
+
+
+def b_cubed(clusters, mention_to_gold):
+    num, dem = 0, 0
+
+    for c in clusters:
+        if len(c) == 1:
+            continue
+
+        gold_counts = Counter()
+        correct = 0
+        for m in c:
+            if m in mention_to_gold:
+                gold_counts[tuple(mention_to_gold[m])] += 1
+        for c2, count in gold_counts.items():
+            if len(c2) != 1:
+                correct += count * count
+
+        num += correct / float(len(c))
+        dem += len(c)
+
+    return num, dem
+
+
+def muc(clusters, mention_to_gold):
+    tp, p = 0, 0
+    for c in clusters:
+        p += len(c) - 1
+        tp += len(c)
+        linked = set()
+        for m in c:
+            if m in mention_to_gold:
+                linked.add(mention_to_gold[m])
+            else:
+                tp -= 1
+        tp -= len(linked)
+    return tp, p
+
+
+def phi4(c1, c2):
+    return 2 * len([m for m in c1 if m in c2]) / float(len(c1) + len(c2))
+
+
+def ceafe(clusters, gold_clusters):
+    clusters = [c for c in clusters if len(c) != 1]
+    scores = np.zeros((len(gold_clusters), len(clusters)))
+    for i in range(len(gold_clusters)):
+        for j in range(len(clusters)):
+            scores[i, j] = phi4(gold_clusters[i], clusters[j])
+    matching = linear_assignment(-scores)
+    similarity = sum(scores[matching[0], matching[1]])
+
+    # similarity = sum(scores[matching[:, 0], matching[:, 1]])
+    return similarity, len(clusters), similarity, len(gold_clusters)
+
+
+# In[ ]:
+
+coref_evaluator = CorefEvaluator()
+
 # Dumping outputs
-for example_index in trange(len(train_dataset)):
+for example_index in trange(len(eval_dataset)):
     with torch.no_grad():
-        example = train_dataset[example_index]
+        example = eval_dataset[example_index]
         example = {name: tensor.to(model.model_device) for name, tensor in example.items()}
         outputs = model.model.forward(example["input_ids"],
                                       example["attention_mask"],
@@ -237,6 +362,74 @@ for example_index in trange(len(train_dataset)):
                                       cluster_ids=example["cluster_ids"],
                                       return_dict=True)
 
+        gold_clusters = {}
+        for i in range(len(example["cluster_ids"])):
+            assert len(example["cluster_ids"]) == len(
+                example["gold_starts"]) == len(example["gold_ends"])
+            cid = example["cluster_ids"][i].item()
+            if cid in gold_clusters:
+                gold_clusters[cid].append((example["gold_starts"][i].item(),
+                                           example["gold_ends"][i].item()))
+            else:
+                gold_clusters[cid] = [(example["gold_starts"][i].item(),
+                                       example["gold_ends"][i].item())]
+
+        gold_clusters = [tuple(v) for v in gold_clusters.values()]
+        mention_to_gold = {}
+        for c in gold_clusters:
+            for mention in c:
+                mention_to_gold[mention] = c
+
+        top_indices = torch.argmax(outputs["top_antecedent_scores"], dim=-1, keepdim=False)
+        ids = outputs["flattened_ids"]
+        top_span_starts = outputs["top_span_starts"]
+        top_span_ends = outputs["top_span_ends"]
+        top_antecedents = outputs["top_antecedents"]
+        mention_indices = []
+        antecedent_indices = []
+        predicted_antecedents = []
+        for i in range(len(outputs["top_span_ends"])):
+            if top_indices[i] > 0:
+                mention_indices.append(i)
+                antecedent_indices.append(top_antecedents[i][top_indices[i] - 1].item())
+                predicted_antecedents.append(top_indices[i] - 1)
+
+        cluster_sets = []
+        for i in range(len(mention_indices)):
+            new_cluster = True
+            for j in range(len(cluster_sets)):
+                if mention_indices[i] in cluster_sets[j] or antecedent_indices[i] in cluster_sets[j]:
+                    cluster_sets[j].add(mention_indices[i])
+                    cluster_sets[j].add(antecedent_indices[i])
+                    new_cluster = False
+                    break
+            if new_cluster:
+                cluster_sets.append({mention_indices[i], antecedent_indices[i]})
+
+        cluster_dicts = []
+        clusters = []
+        for i in range(len(cluster_sets)):
+            cluster_mentions = sorted(list(cluster_sets[i]))
+            current_ids = []
+            current_start_end = []
+            for mention_index in cluster_mentions:
+                current_ids.append(ids[top_span_starts[mention_index]:top_span_ends[mention_index] + 1])
+                current_start_end.append((top_span_starts[mention_index].item(), top_span_ends[mention_index].item()))
+            cluster_dicts.append({"cluster_ids": current_ids})
+            clusters.append(tuple(current_start_end))
+
+        mention_to_predicted = {}
+        for c in clusters:
+            for mention in c:
+                mention_to_predicted[mention] = c
+
+        coref_evaluator.update(clusters, gold_clusters, mention_to_predicted, mention_to_gold)
+
+        outputs['_clusters'] = clusters
+        outputs['_gold_clusters'] = gold_clusters
+        outputs['_mention_to_predicted'] = mention_to_predicted
+        outputs['_mention_to_gold'] = mention_to_gold
+
         # dump to disk
         with (writefl / (str(example_index) + '.pkl')).open('wb+') as f:
             pickle.dump({'input': example, 'output': outputs}, f)
@@ -244,4 +437,11 @@ for example_index in trange(len(train_dataset)):
         del example
         del outputs
 
-# In[ ]:
+summary_dict = {}
+p, r, f = coref_evaluator.get_prf()
+summary_dict["Average F1 (py)"] = f
+print("Average F1 (py): {:.2f}% on {} docs".format(f * 100, len(eval_dataset)))
+summary_dict["Average precision (py)"] = p
+print("Average precision (py): {:.2f}%".format(p * 100))
+summary_dict["Average recall (py)"] = r
+print("Average recall (py): {:.2f}%".format(r * 100))
