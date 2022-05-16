@@ -382,10 +382,8 @@ def run(
     train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
                                              ignore_task=t1_ignore_task)
 
-    if debug:
-        if 'wandbid' in config.to_dict():
-            print("wandbid in config after partial creations")
-            input()
+    print(config)
+    raise IOError
 
     # Collect all metrics
     metrics = []
