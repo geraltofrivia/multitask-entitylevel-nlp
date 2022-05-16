@@ -71,11 +71,13 @@ LOSS_RATIO_CN = [1.0 / 20000, 1.0 / 2.5]  # Loss ratio to use to train coref, an
 CONFIG: dict = {
     'filter_candidates_pos_threshold': 2000,
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
-    'learning_rate': 0.005,
+    'learning_rate': 0.0001,
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
-    'bias_in_last_layers': False,  # model's last lin layers will have bias set based on this flag
+    'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
+    'encoder_learning_rate': 2e-05,
+    'encoder_weight_decay': 0.01,
 }
 LOSS_SCALES = {
     'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),

@@ -23,14 +23,71 @@ from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
 
-def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
+# def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
+#     if freeze_encoder:
+#         return optimizer_class(
+#             [param for name, param in model.named_parameters() if not name.startswith("encoder")],
+#             lr=lr
+#         )
+#     else:
+#         return optimizer_class(model.parameters(), lr=lr)
+def make_optimizer(
+        model: BasicMTL,
+        base_keyword: str,
+        task_weight_decay: Optional[float],
+        task_learning_rate: Optional[float],
+        adam_beta1: float = 0.9,
+        adam_beta2: float = 0.999,
+        adam_epsilon: float = 1e-8,
+        encoder_learning_rate: float = 5e-05,
+        encoder_weight_decay: float = 0.0,
+        freeze_encoder: bool = False,
+        optimizer_class: Callable = transformers.AdamW,
+):
+    """
+    Setup the optimizer and the learning rate scheduler.
+
+    This will use AdamW. If you want to use something else (ie, a different optimizer and multiple learn rates), you
+    can subclass and override this method in a subclass.
+    """
+
+    if task_learning_rate is None:
+        task_learning_rate = encoder_learning_rate
+    if task_weight_decay is None:
+        task_weight_decay = encoder_weight_decay
+
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and
+                       base_keyword in n],
+            "weight_decay": encoder_weight_decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and
+                       base_keyword in n],
+            "weight_decay": 0.0,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and
+                       base_keyword not in n],
+            "weight_decay": task_weight_decay,
+            "lr": task_learning_rate,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and
+                       base_keyword not in n],
+            "weight_decay": 0.0,
+            "lr": task_learning_rate,
+        },
+    ]
+
     if freeze_encoder:
-        return optimizer_class(
-            [param for name, param in model.named_parameters() if not name.startswith("encoder")],
-            lr=lr
-        )
-    else:
-        return optimizer_class(model.parameters(), lr=lr)
+        # Drop the first two groups from the params
+        optimizer_grouped_parameters = optimizer_grouped_parameters[2:]
+
+    optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": encoder_learning_rate}
+    return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
 def get_pretrained_dirs(nm: str):
@@ -285,9 +342,16 @@ def run(
     # Make the optimizer
     # opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
     #                      freeze_encoder=config.freeze_encoder)
-    opt_base = torch.optim.Adam
-    opt = make_optimizer(model=model, optimizer_class=opt_base, lr=config.lr,
-                         freeze_encoder=config.freeze_encoder)
+    # opt_base = torch.optim.Adam
+    opt = make_optimizer(
+        model=model,
+        task_learning_rate=config.lr,
+        freeze_encoder=config.freeze_encoder,
+        base_keyword='encoder',
+        task_weight_decay=None,
+        encoder_learning_rate=config.encoder_learning_rate,
+        encoder_weight_decay=config.encoder_weight_decay
+    )
 
     """
         Prep datasets.
