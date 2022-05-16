@@ -104,6 +104,7 @@ class BasicMTL(nn.Module):
             _weight[labels == 1] = weight[1]
             return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
         else:
+            # TODO: fix {RuntimeError}:result type Float can't be cast to the desired output type Long
             return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
     def _get_span_word_attention_scores_(self, hidden_states, span_starts, span_ends):
@@ -1014,7 +1015,7 @@ class BasicMTL(nn.Module):
             pruner_gold_ends = pruner["gold_ends"]
             pruner_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
                                                               pruner_gold_starts, pruner_gold_ends,
-                                                              pruner_gold_label_values)
+                                                              pruner_gold_label_values).to(torch.float)
 
             if self.pruner_unweighted:
                 pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
@@ -1130,12 +1131,12 @@ class BasicMTL(nn.Module):
                 """
                 # We go for each cluster id. That's not too difficult
                 gold_clusters = {}
-                for i, val in enumerate(coref['gold_cluster_ids']):
+                for i, val in enumerate(coref_gold_label_values):
                     cluster_id = val.item()
 
                     # Populate the dict
                     gold_clusters[cluster_id] = gold_clusters.get(cluster_id, []) + \
-                                                [(coref['gold_starts'][i].item(), coref['gold_ends'][i].item())]
+                                                [(coref_gold_starts[i].item(), coref_gold_ends[i].item())]
 
                 # Gold clusters is a dict of tuple of (start, end), (start, end) corresponding to every cluster ID
                 gold_clusters = [tuple(v) for v in gold_clusters.values()]
