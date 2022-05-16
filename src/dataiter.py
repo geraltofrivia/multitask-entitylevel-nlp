@@ -442,8 +442,8 @@ class MultiTaskDataIter(Dataset):
         )
 
         # Now to superimpose this tensor on the candidate space.
-        candidate_starts = generic_processed_stuff["candidate_starts"]
-        candidate_ends = generic_processed_stuff["candidate_ends"]
+        # candidate_starts = generic_processed_stuff["candidate_starts"]
+        # candidate_ends = generic_processed_stuff["candidate_ends"]
         # gold_labels = self.get_candidate_labels_mangoes(
         #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_labels
         # )  # [n_cand, n_cand]
