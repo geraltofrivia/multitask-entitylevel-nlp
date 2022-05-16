@@ -265,6 +265,7 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'epochs',
         'lr',
         'ner_class_weights'
+        'freeze_encoder',
         'device',
         'wandb',
         'wandb_comment',
