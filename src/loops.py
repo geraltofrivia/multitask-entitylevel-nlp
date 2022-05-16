@@ -47,11 +47,13 @@ def training_loop(
     train_metrics = {}
     dev_metrics = {}
 
+    trn_dataset = trn_dl()
+
     # Epoch level
     for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
 
         # Make data
-        trn_dataset = trn_dl()
+        # trn_dataset = trn_dl()
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
 
         # Training (on the train set)
@@ -91,9 +93,9 @@ def training_loop(
                 per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
 
             # Try to plug mem leaks
-            del loss
+            # del loss
             change_device(outputs, 'cpu')
-            del outputs
+            # del outputs
             trn_dataset[i] = change_device(instance, 'cpu')
 
         # Evaluation (on the validation set)
