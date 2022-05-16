@@ -264,12 +264,12 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'loss_scales',
         'epochs',
         'lr',
+        'ner_class_weights',
+        'freeze_encoder',
         'learning_rate',
+        'bias_in_last_layers',
         'encoder_learning_rate',
         'encoder_weight_decay',
-        'bias_in_last_layers',
-        'freeze_encoder',
-        'ner_class_weights',
         'device',
         'wandb',
         'wandb_comment',
@@ -297,23 +297,24 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
     config_d = config.to_dict()
     mismatches = {}
     for k, v in config_d.items():
+
+        if k in keys_to_ignore:
+            continue
+
         if k not in old_config:
             mismatches[k] = None
             continue
         if not is_equal(v, old_config[k]):
             mismatches[k] = old_config[k]
 
-    # Ignore some mismatches
-    for key in keys_to_ignore:
-        if key in mismatches:
-            mismatches.pop(key)
-
     if not mismatches:
         # They're all same!
         # Go through all elements of old config and put it on the new one
-        for k, v in old_config.items():
-            if k not in config_d:
-                setattr(config, k, v)
+
+        # TODO: i removed this pulling old items from disk thing. this is okay, right?
+        # for k, v in old_config.items():
+        #     if k not in config_d:
+        #         setattr(config, k, v)
         return True
     else:
         # There are some discrepancies

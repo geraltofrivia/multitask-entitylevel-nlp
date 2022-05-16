@@ -163,6 +163,7 @@ class Evaluator:
         """
         self.predict_fn = predict_fn
         self.ds_partial = dataset_partial
+        self.ds = self.ds_partial()
         self.metrics = {}
         for metric in metrics:
             self.metrics[metric.task] = self.metrics.get(metric.task, []) + [metric]
@@ -195,11 +196,8 @@ class Evaluator:
 
     def run(self):
 
-        # Init the dataset
-        ds = self.ds_partial()
-
         with torch.no_grad():
-            for i, instance in enumerate(tqdm(ds)):
+            for i, instance in enumerate(tqdm(self.ds)):
                 # Move the instance to the right device
                 instance = change_device(instance, self.device)
 
@@ -214,10 +212,10 @@ class Evaluator:
 
                 # Try to plug mem leaks
                 change_device(outputs, 'cpu')
-                del outputs
-                ds[i] = change_device(instance, 'cpu')
+                # del outputs
+                self.ds[i] = change_device(instance, 'cpu')
 
-        del ds
+        # del ds
         return self.report()
 
     def report(self):
