@@ -124,7 +124,7 @@ class MultiTaskDataIter(Dataset):
 
         if self.config.trim:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
-            self.data = self.data[:5]
+            self.data = self.data[:50]
 
     def estimate_class_weights(self, task: str) -> List[float]:
         """
