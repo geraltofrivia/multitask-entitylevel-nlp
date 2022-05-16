@@ -353,6 +353,7 @@ def run(
         encoder_weight_decay=config.encoder_weight_decay
     )
 
+
     """
         Prep datasets.
         For both d1 and d2,
@@ -443,6 +444,7 @@ def run(
         # See WandB stuff
         if use_wandb:
             # Try to find WandB ID in saved stuff
+            input("We're about to resume a run. Press enter to continue")
             config.wandbid = get_saved_wandb_id(savedir)
 
         # Pull checkpoint and update opt, model

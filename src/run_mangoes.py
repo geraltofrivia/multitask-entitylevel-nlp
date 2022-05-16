@@ -537,7 +537,7 @@ def run(
             save_config = config.to_dict()
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
-                   id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
+                   id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim or debug else "main")
         wandb.config.update(config.to_dict(), allow_val_change=True)
 
     training_loop(
