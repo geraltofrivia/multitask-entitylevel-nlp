@@ -75,6 +75,7 @@ CONFIG: dict = {
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
+    'bias_in_last_layers': False,  # model's last lin layers will have bias set based on this flag
 }
 LOSS_SCALES = {
     'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),

@@ -55,14 +55,14 @@ class BasicMTL(nn.Module):
             nn.Linear(span_embedding_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, 1),
+            nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
         ).to(config.device)
 
         self.binary_coref_slow = nn.Sequential(
             nn.Linear((span_embedding_dim * 3) + 2 * n_coref_metadata_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, 1),
+            nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
         ).to(config.device)
 
         # self.binary_coref = nn.Sequential(
@@ -76,7 +76,7 @@ class BasicMTL(nn.Module):
             nn.Linear(span_embedding_dim, config.unary_hdim),
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, n_classes_ner),
+            nn.Linear(config.unary_hdim, n_classes_ner, bias=self.config.bias_in_last_layers),
         ).to(config.device)
 
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim).to(config.device)
