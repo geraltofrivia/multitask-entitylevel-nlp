@@ -118,7 +118,6 @@ def pick_loss_scale(tasks: Tasks, ignore_task: str):
 
 
 def get_saved_wandb_id(loc: Path):
-    print('heree!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
     with (loc / 'config.json').open('r', encoding='utf8') as f:
         config = json.load(f)
 
@@ -322,6 +321,11 @@ def run(
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
 
+    if debug:
+        if 'wandbid' in config.to_dict():
+            print("wandbid in config after adding args")
+            input()
+
     # merge all pre-typed config values into this bertconfig obj
     for k, v in DEFAULTS.items():
         try:
@@ -340,6 +344,11 @@ def run(
     # Make the model
     model = BasicMTL(dir_encoder, config=config, n_classes_ner=n_classes_ner)
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
+
+    if debug:
+        if 'wandbid' in config.to_dict():
+            print("wandbid in config after model creation")
+            input()
 
     # Make the optimizer
     # opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
@@ -370,6 +379,11 @@ def run(
 
     train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
                                              ignore_task=t1_ignore_task)
+
+    if debug:
+        if 'wandbid' in config.to_dict():
+            print("wandbid in config after partial creations")
+            input()
 
     # Collect all metrics
     metrics = []
@@ -446,7 +460,8 @@ def run(
         # See WandB stuff
         if use_wandb:
             # Try to find WandB ID in saved stuff
-            input("We're about to resume a run. Press enter to continue")
+            if debug:
+                input("We're about to resume a run. Press enter to continue")
             config.wandbid = get_saved_wandb_id(savedir)
 
         # Pull checkpoint and update opt, model
@@ -461,10 +476,11 @@ def run(
             config.wandbid = wandb.util.generate_id()
             save_config = config.to_dict()
         else:
-            print("HERE!")
-            print(save)
-            print(resume_dir)
-            input('')
+            if debug:
+                print("HERE!")
+                print(save)
+                print(resume_dir)
+                input('')
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
