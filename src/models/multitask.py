@@ -764,8 +764,6 @@ class BasicMTL(nn.Module):
             word_map: List[int],
             n_words: int,
             n_subwords: int,
-            candidate_starts: torch.tensor,
-            candidate_ends: torch.tensor,
             tasks: Iterable[str],
             *args,
             **kwargs
@@ -778,8 +776,6 @@ class BasicMTL(nn.Module):
         :param word_map: list of word ID for each subword (excluding padded stuff)
         :param n_words: number of words (not subwords) in the original doc
         :param n_subwords: number of subwords
-        :param candidate_starts: subword ID for candidate span starts
-        :param candidate_ends: subword ID for candidate span ends
         :param tasks: list containing either coref or ner or both (indicating which routes to follow for this batch)
         """
 
@@ -806,6 +802,27 @@ class BasicMTL(nn.Module):
         input_ids = torch.masked_select(input_ids, attention_mask.bool()).view(
             -1, 1
         )  # n_words, h_dim
+
+        """
+            Step 1.n
+            
+            Calculate spans locally. Ignore the ones passed by the dataiter
+        """
+        candidate_starts = torch.arange(start=0,
+                                        end=input_ids.shape[0],
+                                        device=self.config.device).view(-1, 1).repeat(1, self.config.max_span_width)
+        candidate_ends = candidate_starts + torch.arange(start=0, end=self.config.max_span_width,
+                                                         device=self.config.device).unsqueeze(0)
+        candidate_start_sentence_indices = sentence_map[candidate_starts]  # [num_words, max_span_width]
+        candidate_end_sentence_indices = sentence_map[
+            torch.clamp(candidate_ends, max=input_ids.shape[0] - 1)]  # [num_words, max_span_width]
+        # find spans that are in the same segment and don't run past the end of the text
+        candidate_mask = torch.logical_and(candidate_ends < input_ids.shape[0],
+                                           torch.eq(candidate_start_sentence_indices,
+                                                    candidate_end_sentence_indices)).view(
+            -1).bool()  # [num_words *max_span_width]
+        candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # [candidates]
+        candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)
 
         """
             Step 2: Span embeddings

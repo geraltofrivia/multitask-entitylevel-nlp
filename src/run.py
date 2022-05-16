@@ -22,6 +22,8 @@ from config import LOCATIONS as LOC, CONFIG, KNOWN_SPLITS, LOSS_SCALES
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
+from mangoes.modeling.coref import BertForCoreferenceResolutionBase
+
 
 # def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
 #     if freeze_encoder:
