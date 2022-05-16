@@ -18,7 +18,7 @@ from loops import training_loop
 from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
 from dataiter import MultiTaskDataIter, DataIterCombiner
-from config import LOCATIONS as LOC, CONFIG, KNOWN_SPLITS, LOSS_SCALES
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
 
@@ -118,6 +118,7 @@ def pick_loss_scale(tasks: Tasks, ignore_task: str):
 
 
 def get_saved_wandb_id(loc: Path):
+    print('heree!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
     with (loc / 'config.json').open('r', encoding='utf8') as f:
         config = json.load(f)
 
@@ -207,7 +208,7 @@ def get_dataiter_partials(
 @click.option("--tasks_2", "-t2", type=str, default=None, multiple=True,
               help="Multiple values are okay e.g. -t2 coref -t2 ner or just one of these", )
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
-@click.option("--learning-rate", "-lr", type=float, default=CONFIG['learning_rate'],
+@click.option("--learning-rate", "-lr", type=float, default=DEFAULTS['learning_rate'],
               help="Learning rate. Defaults to 0.005.")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
@@ -236,9 +237,9 @@ def get_dataiter_partials(
 @click.option('--resume-dir', default=-1, type=int,
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
-@click.option('--max-span-width', '-msw', type=int, default=CONFIG['max_span_width'],
+@click.option('--max-span-width', '-msw', type=int, default=DEFAULTS['max_span_width'],
               help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
-@click.option('--coref-loss-mean', type=bool, default=CONFIG['coref_loss_mean'],
+@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'],
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
@@ -263,10 +264,10 @@ def run(
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
-        use_pretrained_model: str = None,
-        learning_rate: float = CONFIG['learning_rate'],
-        max_span_width: int = CONFIG['max_span_width'],
-        coref_loss_mean: bool = CONFIG['coref_loss_mean']
+        use_pretrained_model: str = None,  # @TODO: integrate this someday
+        learning_rate: float = DEFAULTS['learning_rate'],
+        max_span_width: int = DEFAULTS['max_span_width'],
+        coref_loss_mean: bool = DEFAULTS['coref_loss_mean']
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
@@ -314,14 +315,15 @@ def run(
     config.ner_ignore_weights = ner_unweighted
     config.pruner_ignore_weights = pruner_unweighted
     config.lr = learning_rate
-    config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] if filter_candidates_pos else -1
+    config.filter_candidates_pos_threshold = DEFAULTS[
+        'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
 
     # merge all pre-typed config values into this bertconfig obj
-    for k, v in CONFIG.items():
+    for k, v in DEFAULTS.items():
         try:
             _ = config.__getattr__(k)
         except AttributeError:
@@ -458,6 +460,11 @@ def run(
         if 'wandbid' not in config.to_dict():
             config.wandbid = wandb.util.generate_id()
             save_config = config.to_dict()
+        else:
+            print("HERE!")
+            print(save)
+            print(resume_dir)
+            input('')
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")

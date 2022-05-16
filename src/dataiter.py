@@ -21,7 +21,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, CONFIG, unalias_split
+from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, DEFAULTS, unalias_split
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
@@ -964,7 +964,7 @@ if __name__ == "__main__":
     config.trim = trim
     config.freeze_encoder = not train_encoder
     config.ner_ignore_weights = ner_unweighted
-    config.filter_candidates_pos_threshold = CONFIG['filter_candidates_pos_threshold'] \
+    config.filter_candidates_pos_threshold = DEFAULTS['filter_candidates_pos_threshold'] \
         if filter_candidates_pos else -1
 
     ds = MultiTaskDataIter(
