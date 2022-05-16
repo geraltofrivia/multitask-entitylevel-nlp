@@ -102,7 +102,7 @@ def training_loop(
         dev_eval.run()
 
         # Try to plug mem leaks
-        del trn_dataset
+        # del trn_dataset
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
