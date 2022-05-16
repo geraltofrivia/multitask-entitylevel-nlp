@@ -121,8 +121,6 @@ def get_saved_wandb_id(loc: Path):
     with (loc / 'config.json').open('r', encoding='utf8') as f:
         config = json.load(f)
 
-    raise IOError
-
     return config['wandbid']
 
 
@@ -323,11 +321,6 @@ def run(
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
 
-    if debug:
-        if 'wandbid' in config.to_dict():
-            print("wandbid in config after adding args")
-            input()
-
     # merge all pre-typed config values into this bertconfig obj
     for k, v in DEFAULTS.items():
         try:
@@ -347,11 +340,6 @@ def run(
     model = BasicMTL(dir_encoder, config=config, n_classes_ner=n_classes_ner)
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
-    if debug:
-        if 'wandbid' in config.to_dict():
-            print("wandbid in config after model creation")
-            input()
-
     # Make the optimizer
     # opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
     #                      freeze_encoder=config.freeze_encoder)
@@ -365,7 +353,6 @@ def run(
         encoder_learning_rate=config.encoder_learning_rate,
         encoder_weight_decay=config.encoder_weight_decay
     )
-
 
     """
         Prep datasets.
@@ -381,9 +368,6 @@ def run(
 
     train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
                                              ignore_task=t1_ignore_task)
-
-    print(config)
-    raise IOError
 
     # Collect all metrics
     metrics = []
@@ -460,8 +444,6 @@ def run(
         # See WandB stuff
         if use_wandb:
             # Try to find WandB ID in saved stuff
-            if debug:
-                input("We're about to resume a run. Press enter to continue")
             config.wandbid = get_saved_wandb_id(savedir)
 
         # Pull checkpoint and update opt, model
@@ -475,12 +457,6 @@ def run(
         if 'wandbid' not in config.to_dict():
             config.wandbid = wandb.util.generate_id()
             save_config = config.to_dict()
-        else:
-            if debug:
-                print("HERE!")
-                print(save)
-                print(resume_dir)
-                input('')
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")

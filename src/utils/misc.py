@@ -293,23 +293,24 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
     config_d = config.to_dict()
     mismatches = {}
     for k, v in config_d.items():
+
+        if k in keys_to_ignore:
+            continue
+
         if k not in old_config:
             mismatches[k] = None
             continue
         if not is_equal(v, old_config[k]):
             mismatches[k] = old_config[k]
 
-    # Ignore some mismatches
-    for key in keys_to_ignore:
-        if key in mismatches:
-            mismatches.pop(key)
-
     if not mismatches:
         # They're all same!
         # Go through all elements of old config and put it on the new one
-        for k, v in old_config.items():
-            if k not in config_d:
-                setattr(config, k, v)
+
+        # TODO: i removed this pulling old items from disk thing. this is okay, right?
+        # for k, v in old_config.items():
+        #     if k not in config_d:
+        #         setattr(config, k, v)
         return True
     else:
         # There are some discrepancies
