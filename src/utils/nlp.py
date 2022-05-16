@@ -179,6 +179,7 @@ def match_subwords_to_words(
                         or sw_phrase.startswith("hahahaha")
                         or sw_phrase.startswith("==")
                 ):
+                    print('potato')
                     print("TOO LONG: ", sw_phrase)
 
                 if sw_phrase == tokens[0]:

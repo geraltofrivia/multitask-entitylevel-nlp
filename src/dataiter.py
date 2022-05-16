@@ -61,7 +61,7 @@ class MultiTaskDataIter(Dataset):
         self._tasks_ = sorted(tasks)
         self.tokenizer = tokenizer
         self.config = config
-        self.uncased = config.vocab_size.endswith('uncased')
+        self.uncased = config.uncased
         self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
             if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 

@@ -845,6 +845,8 @@ class BasicMTL(nn.Module):
             "candidate_span_embeddings": candidate_span_embeddings,
             "coref": None,
             "ner": None,
+            "candidate_starts": candidate_starts,
+            "candidate_ends": candidate_ends
         }
 
         # DEBUG

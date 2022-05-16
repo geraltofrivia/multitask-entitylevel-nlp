@@ -321,6 +321,7 @@ def run(
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
+    config.uncased = encoder.endswith('uncased')
 
     # merge all pre-typed config values into this bertconfig obj
     for k, v in CONFIG.items():
