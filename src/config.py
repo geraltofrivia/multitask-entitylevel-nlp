@@ -78,6 +78,7 @@ DEFAULTS: dict = {
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
     'encoder_learning_rate': 2e-05,  # the LR used for encoder IF encoder is not frozen.
     'encoder_weight_decay': 0.01,  # the WD used for encoder. Used for everything else if task wd is not specified
+    # TODO: implement code to turn these two below to TRUE
     'ner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
     'pruner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
 }
