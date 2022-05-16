@@ -330,10 +330,10 @@ class MultiTaskDataIter(Dataset):
         # candidate_ends = generic_processed_stuff["candidate_ends"]
         gold_starts = coref_processed_stuff["gold_starts"]
         gold_ends = coref_processed_stuff["gold_ends"]
-        gold_cluster_ids = coref_processed_stuff["gold_cluster_ids"]
+        gold_cluster_ids = coref_processed_stuff["gold_label_values"]
 
         # replace gold labels with all ones.
-        new_cluster_ids = torch.ones_like(gold_cluster_ids)
+        new_cluster_ids = torch.ones_like(gold_starts)
 
         # gold_labels = self.get_candidate_labels_mangoes(
         #     candidate_starts, candidate_ends, gold_starts, gold_ends, new_cluster_ids
