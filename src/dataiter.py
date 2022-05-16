@@ -222,42 +222,6 @@ class MultiTaskDataIter(Dataset):
     def handle_replacements(self, tokens: List[str]) -> List[str]:
         return [self.replacements.get(tok, tok) for tok in tokens]
 
-    @staticmethod
-    def get_candidate_labels_mangoes(
-            candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels
-    ):
-        """
-        CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L470
-        get labels of candidates from gold ground truth
-
-        Parameters
-        ----------
-        candidate_starts, candidate_ends: tensor of size (candidates)
-            start and end token indices (in flattened document) of candidate spans
-        labeled_starts, labeled_ends: tensor of size (labeled)
-            start and end token indices (in flattened document) of labeled spans
-        labels: tensor of size (labeled)
-            cluster ids
-
-        Returns
-        -------
-        candidate_labels: tensor of size (candidates)
-        """
-        same_start = torch.eq(
-            labeled_starts.unsqueeze(1), candidate_starts.unsqueeze(0)
-        )  # [num_labeled, num_candidates]
-        same_end = torch.eq(
-            labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0)
-        )  # [num_labeled, num_candidates]
-        same_span = torch.logical_and(
-            same_start, same_end
-        )  # [num_labeled, num_candidates]
-
-        # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
-        candidate_labels = torch.mm(
-            labels.unsqueeze(0).float(), same_span.float()
-        ).long()  # [1, num_candidates]
-        return candidate_labels.squeeze(0)  # [num_candidates]
 
     @staticmethod
     def get_candidate_labels(
@@ -362,8 +326,8 @@ class MultiTaskDataIter(Dataset):
             Just create a 1/0 vec representing all valid candidates in gold candidate stuff.
         """
         # unpack things
-        candidate_starts = generic_processed_stuff["candidate_starts"]
-        candidate_ends = generic_processed_stuff["candidate_ends"]
+        # candidate_starts = generic_processed_stuff["candidate_starts"]
+        # candidate_ends = generic_processed_stuff["candidate_ends"]
         gold_starts = coref_processed_stuff["gold_starts"]
         gold_ends = coref_processed_stuff["gold_ends"]
         gold_cluster_ids = coref_processed_stuff["gold_cluster_ids"]
@@ -371,14 +335,15 @@ class MultiTaskDataIter(Dataset):
         # replace gold labels with all ones.
         new_cluster_ids = torch.ones_like(gold_cluster_ids)
 
-        # TODO: put it back up nicely and wrap it along with other tasks
-        # TODO: what to do with dataiter -> does it need info of pruner as well? no, right?
-        gold_labels = self.get_candidate_labels_mangoes(
-            candidate_starts, candidate_ends, gold_starts, gold_ends, new_cluster_ids
-        ).to(float)
+        # gold_labels = self.get_candidate_labels_mangoes(
+        #     candidate_starts, candidate_ends, gold_starts, gold_ends, new_cluster_ids
+        # ).to(float)
 
         pruner_specific = {  # Pred stuff
-            "gold_labels": gold_labels,
+            # "gold_labels": gold_labels,
+            "gold_starts": gold_starts,
+            "gold_ends": gold_ends,
+            "gold_label_values": new_cluster_ids,
             "weights": self.task_weights['pruner']
         }
 
@@ -403,24 +368,16 @@ class MultiTaskDataIter(Dataset):
                - change the label from being a word level index to a subword (bert friendly) level index
         """
         try:
-            gold_starts = torch.tensor(
-                [
-                    word2subword_starts[span[0]]
-                    for cluster in instance.coref.spans
-                    for span in cluster
-                ],
-                dtype=torch.long,
-                device="cpu",
-            )  # n_gold
-            gold_ends = torch.tensor(
-                [
-                    word2subword_ends[span[1] - 1]
-                    for cluster in instance.coref.spans
-                    for span in cluster
-                ],
-                dtype=torch.long,
-                device="cpu",
-            )  # n_gold
+            gold_starts = torch.tensor([
+                word2subword_starts[span[0]]
+                for cluster in instance.coref.spans
+                for span in cluster
+            ], dtype=torch.long, device="cpu")  # n_gold
+            gold_ends = torch.tensor([
+                word2subword_ends[span[1] - 1]
+                for cluster in instance.coref.spans
+                for span in cluster
+            ], dtype=torch.long, device="cpu")  # n_gold
         except KeyError as e:
             raise KeyError(
                 f"No sw found for token #{e.args[0]}: {to_toks(instance.document)[e.args[0]]}"
@@ -429,30 +386,26 @@ class MultiTaskDataIter(Dataset):
 
         # 1 is added at cluster ID ends because zero represents "no link/no cluster". I think...
         gold_cluster_ids = (
-                torch.tensor(
-                    [
-                        cluster_id
-                        for cluster_id, cluster in enumerate(instance.coref.spans)
-                        for _ in range(len(cluster))
-                    ],
-                    dtype=torch.long,
-                    device="cpu",
-                )
-                + 1
+                torch.tensor([
+                    cluster_id
+                    for cluster_id, cluster in enumerate(instance.coref.spans)
+                    for _ in range(len(cluster))
+                ],
+                    dtype=torch.long, device="cpu") + 1
         )  # n_gold
 
-        candidate_starts = generic_processed_stuff["candidate_starts"]
-        candidate_ends = generic_processed_stuff["candidate_ends"]
+        # candidate_starts = generic_processed_stuff["candidate_starts"]
+        # candidate_ends = generic_processed_stuff["candidate_ends"]
 
-        cluster_labels = self.get_candidate_labels_mangoes(
-            candidate_starts, candidate_ends, gold_starts, gold_ends, gold_cluster_ids
-        )  # [n_cand, n_cand]
+        # cluster_labels = self.get_candidate_labels_mangoes(
+        #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_cluster_ids
+        # )  # [n_cand, n_cand]
 
         coref_specific = {  # Pred stuff
-            "gold_cluster_ids_on_candidates": cluster_labels,
+            # "gold_cluster_ids_on_candidates": cluster_labels,
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
-            "gold_cluster_ids": gold_cluster_ids,
+            "gold_label_values": gold_cluster_ids,
         }
 
         return coref_specific
@@ -491,14 +444,14 @@ class MultiTaskDataIter(Dataset):
         # Now to superimpose this tensor on the candidate space.
         candidate_starts = generic_processed_stuff["candidate_starts"]
         candidate_ends = generic_processed_stuff["candidate_ends"]
-        gold_labels = self.get_candidate_labels_mangoes(
-            candidate_starts, candidate_ends, gold_starts, gold_ends, gold_labels
-        )  # [n_cand, n_cand]
+        # gold_labels = self.get_candidate_labels_mangoes(
+        #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_labels
+        # )  # [n_cand, n_cand]
 
         ner_specific = {
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
-            "gold_labels": gold_labels,
+            "gold_label_values": gold_labels,
             "weights": self.task_weights['ner']
         }
 
@@ -579,7 +532,7 @@ class MultiTaskDataIter(Dataset):
         # noinspection PyUnusedLocal
         # Commented out, DO NOT DELETE (you never know ;) )
         # 1 marks that the index is a start of a new token, 0 marks that it is not.
-        word_startmap_subword = wordid_for_subword != torch.roll(wordid_for_subword, 1)
+        # word_startmap_subword = wordid_for_subword != torch.roll(wordid_for_subword, 1)
 
         # Resize these tokens as outlined in docstrings
         input_ids = tokenized.input_ids.reshape((-1, n_mlen))  # n_seq, m_len
@@ -594,14 +547,14 @@ class MultiTaskDataIter(Dataset):
             2. Exclude the ones which exist at the end of sentences (i.e. start in one, end in another)
         """
 
-        candidate_starts = (
-            torch.arange(start=0, end=n_subwords, device="cpu").unsqueeze(1).repeat(1, self.config.max_span_width)
-        )  # n_subwords, max_span_width
-        candidate_ends = candidate_starts + torch.arange(
-            start=0, end=self.config.max_span_width, device="cpu"
-        ).unsqueeze(
-            0
-        )  # n_subwords, max_span_width
+        # candidate_starts = (
+        #     torch.arange(start=0, end=n_subwords, device="cpu").unsqueeze(1).repeat(1, self.config.max_span_width)
+        # )  # n_subwords, max_span_width
+        # candidate_ends = candidate_starts + torch.arange(
+        #     start=0, end=self.config.max_span_width, device="cpu"
+        # ).unsqueeze(
+        #     0
+        # )  # n_subwords, max_span_width
 
         """
             # Ignoring invalid spans
@@ -613,50 +566,50 @@ class MultiTaskDataIter(Dataset):
             We combine all these boolean filters (filter_*: torch.Tensor) with a logical AND.
             NOTE: all filter_* tensors are of shape # n_subwords, max_span_width
         """
-        filter_beyond_document = candidate_ends < n_subwords
-
-        candidate_starts_sent_id = sentid_for_subword[candidate_starts]
-        candidate_ends_sent_id = sentid_for_subword[
-            torch.clamp(candidate_ends, max=n_subwords - 1)
-        ]
-        filter_different_sentences = candidate_starts_sent_id == candidate_ends_sent_id
-
-        # filter_candidate_starts_midword = word_startmap_subword[candidate_starts]
-        # filter_candidate_ends_midword = word_startmap_subword[torch.clamp(candidate_ends, max=n_subwords - 1)]
-
-        candidate_mask = (filter_beyond_document & filter_different_sentences)
-        # & filter_candidate_starts_midword & filter_candidate_ends_midword
-        # & filter_candidate_starts_midword & \
-        #  filter_candidate_ends_midword  # n_subwords, max_span_width
-
-        # Now we flatten the candidate starts, ends and the mask and do an index select to ignore the invalid ones
-        candidate_mask = candidate_mask.view(-1)  # n_subwords * max_span_width
-
-        """
-            Final Candidate filtering:
-                - if there are more than the specified num. of candidates (self.filter_candidates_threshold),
-                - look at POS tags inside the documents and for each candidate, 
-                - if the POS tag contains VB, skip it. 
-        """
-        if candidate_mask.int().sum().item() > self.filter_candidates_pos_threshold:
-            # Get pos tags for each instance
-            pos = to_toks(instance.pos)
-            for i, (cs, ce) in enumerate(zip(candidate_starts.reshape(-1), candidate_ends.reshape(-1))):
-                if not candidate_mask[i]:
-                    continue
-                _cs = wordid_for_subword[cs]
-                _ce = wordid_for_subword[ce]
-                _pos = pos[_cs: _ce]
-                if 'VB' in _pos \
-                        or 'VBD' in _pos:
-                    candidate_mask[i] = False
-
-        candidate_starts = torch.masked_select(
-            candidate_starts.view(-1), candidate_mask
-        )  # n_subwords*max_span_width
-        candidate_ends = torch.masked_select(
-            candidate_ends.view(-1), candidate_mask
-        )  # n_subwords*max_span_width
+        # filter_beyond_document = candidate_ends < n_subwords
+        #
+        # candidate_starts_sent_id = sentid_for_subword[candidate_starts]
+        # candidate_ends_sent_id = sentid_for_subword[
+        #     torch.clamp(candidate_ends, max=n_subwords - 1)
+        # ]
+        # filter_different_sentences = candidate_starts_sent_id == candidate_ends_sent_id
+        #
+        # # filter_candidate_starts_midword = word_startmap_subword[candidate_starts]
+        # # filter_candidate_ends_midword = word_startmap_subword[torch.clamp(candidate_ends, max=n_subwords - 1)]
+        #
+        # candidate_mask = (filter_beyond_document & filter_different_sentences)
+        # # & filter_candidate_starts_midword & filter_candidate_ends_midword
+        # # & filter_candidate_starts_midword & \
+        # #  filter_candidate_ends_midword  # n_subwords, max_span_width
+        #
+        # # Now we flatten the candidate starts, ends and the mask and do an index select to ignore the invalid ones
+        # candidate_mask = candidate_mask.view(-1)  # n_subwords * max_span_width
+        #
+        # """
+        #     Final Candidate filtering:
+        #         - if there are more than the specified num. of candidates (self.filter_candidates_threshold),
+        #         - look at POS tags inside the documents and for each candidate,
+        #         - if the POS tag contains VB, skip it.
+        # """
+        # if candidate_mask.int().sum().item() > self.filter_candidates_pos_threshold:
+        #     # Get pos tags for each instance
+        #     pos = to_toks(instance.pos)
+        #     for i, (cs, ce) in enumerate(zip(candidate_starts.reshape(-1), candidate_ends.reshape(-1))):
+        #         if not candidate_mask[i]:
+        #             continue
+        #         _cs = wordid_for_subword[cs]
+        #         _ce = wordid_for_subword[ce]
+        #         _pos = pos[_cs: _ce]
+        #         if 'VB' in _pos \
+        #                 or 'VBD' in _pos:
+        #             candidate_mask[i] = False
+        #
+        # candidate_starts = torch.masked_select(
+        #     candidate_starts.view(-1), candidate_mask
+        # )  # n_subwords*max_span_width
+        # candidate_ends = torch.masked_select(
+        #     candidate_ends.view(-1), candidate_mask
+        # )  # n_subwords*max_span_width
         tasks = [task if not task.startswith("ner") else "ner" for task in self._tasks_]
 
         return_dict = {
@@ -668,8 +621,8 @@ class MultiTaskDataIter(Dataset):
             "sentence_map": sentid_for_subword,
             "n_words": n_words,
             "n_subwords": n_subwords,
-            "candidate_starts": candidate_starts,
-            "candidate_ends": candidate_ends,
+            # "candidate_starts": candidate_starts,
+            # "candidate_ends": candidate_ends,
             "loss_scales": self.loss_scales
         }
 

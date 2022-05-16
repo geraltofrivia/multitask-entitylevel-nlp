@@ -389,6 +389,47 @@ class BasicMTL(nn.Module):
         return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
 
     @staticmethod
+    def get_candidate_labels_mangoes(
+            candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels
+    ):
+        """
+
+        Function used to compare gold starts/ends and candidate starts/ends to create a correspondence index
+            (whether a candidate is correct or not, BASED on the labels given in the last arg)
+
+        CODE copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L470
+        get labels of candidates from gold ground truth
+
+        Parameters
+        ----------
+        candidate_starts, candidate_ends: tensor of size (candidates)
+            start and end token indices (in flattened document) of candidate spans
+        labeled_starts, labeled_ends: tensor of size (labeled)
+            start and end token indices (in flattened document) of labeled spans
+        labels: tensor of size (labeled)
+            cluster ids
+
+        Returns
+        -------
+        candidate_labels: tensor of size (candidates)
+        """
+        same_start = torch.eq(
+            labeled_starts.unsqueeze(1), candidate_starts.unsqueeze(0)
+        )  # [num_labeled, num_candidates]
+        same_end = torch.eq(
+            labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0)
+        )  # [num_labeled, num_candidates]
+        same_span = torch.logical_and(
+            same_start, same_end
+        )  # [num_labeled, num_candidates]
+
+        # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
+        candidate_labels = torch.mm(
+            labels.unsqueeze(0).float(), same_span.float()
+        ).long()  # [1, num_candidates]
+        return candidate_labels.squeeze(0)  # [num_candidates]
+
+    @staticmethod
     def coref_softmax_loss(top_antecedent_scores, top_antecedent_labels):
         """
         Code copied from https://gitlab.inria.fr/magnet/mangoes/-/blob/coref_exp/mangoes/modeling/coref.py#L587
@@ -910,8 +951,6 @@ class BasicMTL(nn.Module):
             word_map: List[int],
             n_words: int,
             n_subwords: int,
-            candidate_starts: torch.tensor,
-            candidate_ends: torch.tensor,
             tasks: Iterable[str],
             coref: dict = None,
             ner: dict = None,
@@ -959,18 +998,23 @@ class BasicMTL(nn.Module):
             word_map=word_map,
             n_words=n_words,
             n_subwords=n_subwords,
-            candidate_starts=candidate_starts,
-            candidate_ends=candidate_ends,
             tasks=tasks
         )
 
         outputs = {"loss": {}}
+        candidate_starts = predictions['candidate_starts']
+        candidate_ends = predictions['candidate_ends']
 
         if "pruner" in tasks:
             # Unpack pruner specific args (y labels)
             pruner_logits = predictions["pruner"]["logits"]
             pruner_logits_after_pruning = predictions["pruner"]["logits_after_pruning"]
-            pruner_labels = pruner["gold_labels"]
+            pruner_gold_label_values = pruner["gold_label_values"]
+            pruner_gold_starts = pruner["gold_starts"]
+            pruner_gold_ends = pruner["gold_ends"]
+            pruner_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
+                                                              pruner_gold_starts, pruner_gold_ends,
+                                                              pruner_gold_label_values)
 
             if self.pruner_ignore_weights:
                 pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
@@ -992,9 +1036,12 @@ class BasicMTL(nn.Module):
 
         if "coref" in tasks:
             # Unpack Coref specific args (y labels)
-            # gold_starts = coref["gold_starts"]
-            # gold_ends = coref["gold_ends"]
-            gold_cluster_ids_on_candidates = coref["gold_cluster_ids_on_candidates"]
+            coref_gold_starts = coref["gold_starts"]
+            coref_gold_ends = coref["gold_ends"]
+            coref_gold_label_values = coref["gold_label_values"]
+            gold_cluster_ids_on_candidates = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
+                                                                               coref_gold_starts, coref_gold_ends,
+                                                                               coref_gold_label_values)
 
             # Unpack Coref specific model predictions
             top_span_starts = predictions["pruner"]["top_span_starts"]
@@ -1153,8 +1200,13 @@ class BasicMTL(nn.Module):
             outputs["coref"] = {"logits": coref_logits, "labels": coref_labels, "eval": coref_eval}
 
         if "ner" in tasks:
-            ner_labels = ner["gold_labels"]  # n_spans, 1
+            ner_gold_starts = ner["gold_starts"]
+            ner_gold_ends = ner["gold_ends"]
+            ner_gold_label_values = ner["gold_label_values"]
             ner_logits = predictions["ner"]["logits"]  # n_spans, n_classes
+            ner_labels = self.get_candidate_labels_mangoes(candidate_starts, candidate_ends,
+                                                           ner_gold_starts, ner_gold_ends,
+                                                           ner_gold_label_values)
 
             # Calculating the loss
             if self.ner_ignore_weights:
