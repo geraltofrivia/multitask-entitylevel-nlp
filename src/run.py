@@ -219,9 +219,9 @@ def get_dataiter_partials(
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
-@click.option('--ner-unweighted', is_flag=True, default=False,
+@click.option('--ner-unweighted', is_flag=True, default=DEFAULTS['ner_unweighted'],
               help="If True, we do not input priors of classes into Model -> NER CE loss.")
-@click.option('--pruner-unweighted', is_flag=True, default=False,
+@click.option('--pruner-unweighted', is_flag=True, default=DEFAULTS['pruner_unweighted'],
               help="If True, we do not input priors of classes into Model -> Pruner BCEwL loss.")
 @click.option('--t1-ignore-task', default=None, type=str,
               help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
@@ -313,8 +313,8 @@ def run(
     config.trim = trim
     config.debug = debug
     config.freeze_encoder = not train_encoder
-    config.ner_ignore_weights = ner_unweighted
-    config.pruner_ignore_weights = pruner_unweighted
+    config.ner_unweighted = ner_unweighted
+    config.pruner_unweighted = pruner_unweighted
     config.lr = learning_rate
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1

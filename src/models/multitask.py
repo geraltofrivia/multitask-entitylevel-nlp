@@ -88,13 +88,13 @@ class BasicMTL(nn.Module):
         self.pruner_loss = self._rescaling_weights_bce_loss_
         self.coref_loss_agg = torch.mean if config.coref_loss_mean else torch.sum
         try:
-            self.ner_ignore_weights = self.config.ner_ignore_weights
+            self.ner_unweighted = self.config.ner_unweighted
         except AttributeError:
-            self.ner_ignore_weights = False
+            self.ner_unweighted = False
         try:
-            self.pruner_ignore_weights = self.config.pruner_ignore_weights
+            self.pruner_unweighted = self.config.pruner_unweighted
         except AttributeError:
-            self.pruner_ignore_weights = False
+            self.pruner_unweighted = False
 
     @staticmethod
     def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.Tensor] = None):
@@ -1016,7 +1016,7 @@ class BasicMTL(nn.Module):
                                                               pruner_gold_starts, pruner_gold_ends,
                                                               pruner_gold_label_values)
 
-            if self.pruner_ignore_weights:
+            if self.pruner_unweighted:
                 pruner_loss = self.pruner_loss(pruner_logits, pruner_labels)
             else:
                 pruner_loss = self.pruner_loss(pruner_logits, pruner_labels, weight=pruner["weights"])
@@ -1209,7 +1209,7 @@ class BasicMTL(nn.Module):
                                                            ner_gold_label_values)
 
             # Calculating the loss
-            if self.ner_ignore_weights:
+            if self.ner_unweighted:
                 ner_loss = self.ner_loss(ner_logits, ner_labels)
             else:
                 ner_loss = self.ner_loss(ner_logits, ner_labels, weight=ner["weights"])

@@ -109,10 +109,11 @@ class MultiTaskDataIter(Dataset):
             # Calculate actual class weights
             if not unalias_split(self._split_) == 'test':
                 for task_nm in self._tasks_:
-                    if task_nm in ['ner', 'pruner']:
+                    if (task_nm == 'ner' and not self.config.ner_unweighted) or \
+                            (task_nm == 'pruner' and not self.config.pruner_unweighted):
                         self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
                                                                   dtype=torch.float)
-            # Update self.data
+            # Update self.data with these class weights
             for i, item in enumerate(self.data):
                 if 'ner' in item:
                     self.data[i]['ner']['weights'] = self.task_weights['ner']
@@ -221,7 +222,6 @@ class MultiTaskDataIter(Dataset):
 
     def handle_replacements(self, tokens: List[str]) -> List[str]:
         return [self.replacements.get(tok, tok) for tok in tokens]
-
 
     @staticmethod
     def get_candidate_labels(
@@ -893,6 +893,7 @@ if __name__ == "__main__":
     trim: bool = True
     train_encoder: bool = False
     ner_unweighted: bool = False
+    pruner_unweighted: bool = False
     filter_candidates_pos = True
 
     # # Attempt to pull from disk
@@ -916,7 +917,8 @@ if __name__ == "__main__":
     config.epochs = epochs
     config.trim = trim
     config.freeze_encoder = not train_encoder
-    config.ner_ignore_weights = ner_unweighted
+    config.ner_unweighted = ner_unweighted
+    config.pruner_unweighted = pruner_unweighted
     config.filter_candidates_pos_threshold = DEFAULTS['filter_candidates_pos_threshold'] \
         if filter_candidates_pos else -1
 

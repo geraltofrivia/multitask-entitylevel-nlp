@@ -364,8 +364,8 @@ def run(
     config.trim = trim
     config.debug = debug
     config.freeze_encoder = not train_encoder
-    config.ner_ignore_weights = ner_unweighted
-    config.pruner_ignore_weights = pruner_unweighted
+    config.ner_unweighted = ner_unweighted
+    config.pruner_unweighted = pruner_unweighted
     config.lr = learning_rate
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
