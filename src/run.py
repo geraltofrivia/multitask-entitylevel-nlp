@@ -42,7 +42,7 @@ def make_optimizer(
         encoder_learning_rate: float = 5e-05,
         encoder_weight_decay: float = 0.0,
         freeze_encoder: bool = False,
-        optimizer_class: Callable = transformers.AdamW,
+        optimizer_class: Callable = torch.optim.AdamW,
 ):
     """
     Setup the optimizer and the learning rate scheduler.
@@ -120,6 +120,8 @@ def pick_loss_scale(tasks: Tasks, ignore_task: str):
 def get_saved_wandb_id(loc: Path):
     with (loc / 'config.json').open('r', encoding='utf8') as f:
         config = json.load(f)
+
+    raise IOError
 
     return config['wandbid']
 
