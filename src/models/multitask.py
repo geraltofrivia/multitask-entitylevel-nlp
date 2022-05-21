@@ -597,11 +597,11 @@ class BasicMTL(nn.Module):
         for i in range(2):
             top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
             top_antecedent_scores = top_antecedents_fast_scores + \
-                                    self.get_slow_antecedent_scores(top_span_emb,
-                                                                    top_antecedents,
-                                                                    top_antecedent_emb,
-                                                                    top_antecedent_offsets,
-                                                                    segment_distance)  # [top_cand, top_ant]
+                                    self._get_slow_antecedent_scores_(top_span_emb,
+                                                                      top_antecedents,
+                                                                      top_antecedent_emb,
+                                                                      top_antecedent_offsets,
+                                                                      segment_distance)  # [top_cand, top_ant]
             top_antecedent_weights = F.softmax(
                 torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
             top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
