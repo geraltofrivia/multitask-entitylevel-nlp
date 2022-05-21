@@ -1,13 +1,14 @@
 import json
-import wandb
-import click
-import torch
 import random
-import numpy as np
-import transformers
-from pathlib import Path
 from functools import partial
+from pathlib import Path
 from typing import List, Callable, Union, Optional
+
+import click
+import numpy as np
+import torch
+import transformers
+import wandb
 from mytorch.utils.goodies import mt_save_dir
 
 # Local imports
@@ -248,7 +249,7 @@ def get_dataiter_partials(
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--max-span-width', '-msw', type=int, default=DEFAULTS['max_span_width'],
               help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
-@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'],
+@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'], is_flag=True,
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
               help='Number of times we run the higher order loop. ')
