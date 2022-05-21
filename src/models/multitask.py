@@ -448,9 +448,7 @@ class BasicMTL(nn.Module):
         tensor of size (num_candidates)
             loss for each mention
         """
-        gold_scores = top_antecedent_scores + torch.log(
-            top_antecedent_labels.float()
-        )  # [top_cand, top_ant+1]
+        gold_scores = top_antecedent_scores + torch.log(top_antecedent_labels.float())  # [top_cand, top_ant+1]
         marginalized_gold_scores = torch.logsumexp(gold_scores, 1)  # [top_cand]
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]

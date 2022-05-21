@@ -397,7 +397,7 @@ def run(
 
     # Make the optimiser
     base_keyword = 'bert'
-    task_learn_rate = config.lr
+    task_learn_rate = config.learning_rate
     weight_decay = 0.0
     no_decay = ["bias", "LayerNorm.weight"]
     task_weight_decay = weight_decay
@@ -430,7 +430,7 @@ def run(
     ]
 
     optimizer_cls = transformers.AdamW
-    optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": config.lr}
+    optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": config.learning_rate}
     opt = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
 
     """

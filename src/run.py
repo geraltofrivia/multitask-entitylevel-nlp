@@ -315,7 +315,7 @@ def run(
     config.freeze_encoder = not train_encoder
     config.ner_unweighted = ner_unweighted
     config.pruner_unweighted = pruner_unweighted
-    config.lr = learning_rate
+    config.learning_rate = learning_rate
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
@@ -349,7 +349,7 @@ def run(
     # opt_base = torch.optim.Adam
     opt = make_optimizer(
         model=model,
-        task_learning_rate=config.lr,
+        task_learning_rate=config.learning_rate,
         freeze_encoder=config.freeze_encoder,
         base_keyword='encoder',
         task_weight_decay=None,
