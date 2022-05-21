@@ -327,7 +327,7 @@ def run(
     # merge all pre-typed config values into this bertconfig obj
     for k, v in DEFAULTS.items():
         try:
-            _ = config.__getattr__(k)
+            _ = config.__getattribute__(k)
         except AttributeError:
             config.__setattr__(k, v)
 
