@@ -20,7 +20,7 @@ from utils.misc import check_dumped_config
 from dataiter import MultiTaskDataIter, DataIterCombiner
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
-from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
+from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
 
 from mangoes.modeling.coref import BertForCoreferenceResolutionBase
 
@@ -374,6 +374,7 @@ def run(
 
     # Collect all metrics
     metrics = []
+    metrics += [TraceCandidates(debug=config.debug)]
     if 'ner' in tasks + tasks_2:
         metrics += [NERAcc(debug=config.debug), NERSpanRecognitionPR(debug=config.debug)]
     if 'pruner' in tasks + tasks_2:

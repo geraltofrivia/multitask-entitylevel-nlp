@@ -36,6 +36,11 @@ from utils.exceptions import NANsFound
 
 
 class Metric(ABC):
+    """
+        Abstract class with some metadata like metric name, a logs dict array,
+        a common generate summary function, a common rest function (empties value array)
+        and a abstract compute function which each actual metric will implement as it chooses.
+    """
 
     def __init__(self, debug: bool):
         # If not None, will be concatenated before self.name values.
@@ -69,6 +74,14 @@ class Metric(ABC):
 
     def reset(self):
         self.logs: Dict[str, List] = {}
+
+
+class Trace(Metric, ABC):
+    """
+        Traces are a different kind of metric: one which does not do a comparison between pred and gold but reports
+            some statistics
+    """
+    ...
 
 
 class MacroMetric(Metric, ABC):
@@ -160,21 +173,36 @@ class Evaluator:
             Micro metrics are expected to return their output at every point and can be aggregated by a simple mean
         :param device: torch device (just pass 'cpu' or 'cuda')
         :param debug: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
+            Also, when true, we report some general metrics like avg num of candidates per document, etc.
         """
         self.predict_fn = predict_fn
         self.ds_partial = dataset_partial
         self.ds = self.ds_partial()
+        self.debug = debug
         self.metrics = {}
-        for metric in metrics:
-            self.metrics[metric.task] = self.metrics.get(metric.task, []) + [metric]
         self.device = device
 
+        for metric in metrics:
+            self.metrics[metric.task] = self.metrics.get(metric.task, []) + [metric]
+
+        # If there are task agnostic metrics/traces, check the flag true
+        self.has_general_traces = 'general' in self.metrics.keys()
+
         self.results = {}
+
+    def _compute_debug_metrics_(self, instance, outputs):
+        """
+            These are not accuracy metrics, as much as traces but we report them nonetheless.
+            1. Avg num of candidates
+        """
 
     def update(self, instance: dict, outputs: dict):
         """
             Depending on the tasks contained in instance['tasks'],
                 invoke different metrics and ask them to consider this instance.
+
+            This ensures that the same eval can be used for different things. i.e. if an instance has only coref,
+                we won't compute NER metrics even though there might be NER preds in the __next__ instances.
 
             Note that this is the the "main" function for this class.
             Self.run just gets the preds and throws them to this function.
@@ -183,6 +211,11 @@ class Evaluator:
         :param outputs:
         :return: None
         """
+
+        if self.has_general_traces:
+            # We also want to compute the debug cases
+            for metric in self.metrics['general']:
+                metric.compute(**outputs)
 
         for task_nm in instance['tasks']:
 
@@ -257,6 +290,21 @@ class Evaluator:
                 aggregate[task_nm][metric_nm].append(metric_vl)
 
         return aggregate
+
+
+class TraceCandidates(Trace):
+
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
+        self.task = 'general'
+        self.values = ['unfiltered']
+        self.prefix = None
+
+    def compute(self, num_candidates: torch.Tensor, *args, **kwargs):
+        op = {'unfiltered': num_candidates}
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v]
 
 
 class NERAcc(Metric):

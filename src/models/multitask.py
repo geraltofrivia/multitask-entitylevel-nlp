@@ -1000,9 +1000,13 @@ class BasicMTL(nn.Module):
             tasks=tasks
         )
 
-        outputs = {"loss": {}}
         candidate_starts = predictions['candidate_starts']
         candidate_ends = predictions['candidate_ends']
+
+        outputs = {
+            "loss": {},
+            "num_candidates": candidate_starts.shape[0]
+        }
 
         if "pruner" in tasks:
             # Unpack pruner specific args (y labels)
