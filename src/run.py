@@ -331,6 +331,7 @@ def run(
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
     config.uncased = encoder.endswith('uncased')
+    config.curdir = str(Path('.').absolute())
 
     # merge all pre-typed config values into this bertconfig obj
     for k, v in DEFAULTS.items():

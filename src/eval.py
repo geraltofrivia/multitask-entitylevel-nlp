@@ -244,9 +244,9 @@ class Evaluator:
                 self.update(instance, outputs)
 
                 # Try to plug mem leaks
-                change_device(outputs, 'cpu')
+                # change_device(outputs, 'cpu')
                 # del outputs
-                self.ds[i] = change_device(instance, 'cpu')
+                # self.ds[i] = change_device(instance, 'cpu')
 
         # del ds
         return self.report()

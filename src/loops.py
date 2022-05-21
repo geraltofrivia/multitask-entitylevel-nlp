@@ -94,9 +94,9 @@ def training_loop(
 
             # Try to plug mem leaks
             # del loss
-            change_device(outputs, 'cpu')
+            # change_device(outputs, 'cpu')
             # del outputs
-            trn_dataset[i] = change_device(instance, 'cpu')
+            # trn_dataset[i] = change_device(instance, 'cpu')
 
         # Evaluation (on the validation set)
         dev_eval.run()
