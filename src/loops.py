@@ -91,7 +91,7 @@ def training_loop(
             # if there are more than a certain amount of (roughly) candidates, we skip the instance. save mem
             if instance['attention_mask'].view(-1).sum().item() > filter_candidates_len_threshold > 0:
                 warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                              f"Input: {instance['input_ids'].shape}.")
+                              f"Input: {instance['attention_mask'].view(-1).sum().item()}.")
                 continue
 
             # Move all input tensors to the right devices
