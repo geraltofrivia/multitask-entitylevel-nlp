@@ -1,13 +1,14 @@
 """
     Collection of evaluation functions for different tasks.
 """
-import torch
-import numpy as np
-from tqdm.auto import tqdm
-from collections import Counter
 from abc import ABC, abstractmethod
+from collections import Counter
 from typing import Dict, Callable, List, Union, Optional
+
+import numpy as np
+import torch
 from scipy.optimize import linear_sum_assignment as linear_assignment
+from tqdm.auto import tqdm
 
 # Local imports
 try:
@@ -489,3 +490,10 @@ class CorefMUC(MacroMetric):
         self.p_den += pd
         self.r_num += rn
         self.r_den += rd
+
+#
+# class MangoesEvaluatorWrapper:
+#     """ This uses an evaluator object """
+#     def __init__(self):
+#
+#         self.coref_evaluator = CorefEvaluator()

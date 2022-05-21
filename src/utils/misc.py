@@ -1,11 +1,12 @@
 import json
-import torch
-import numpy as np
-import transformers
-from pathlib import Path
-from transformers import BertConfig
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import List, Union, Optional
+
+import numpy as np
+import torch
+import transformers
+from transformers import BertConfig
 
 
 def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
@@ -346,3 +347,4 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
                 return False
         else:
             return False
+

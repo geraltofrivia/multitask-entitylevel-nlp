@@ -4,13 +4,14 @@
 """
 
 import math
-import torch
 import random
+from typing import List, Iterable, Optional
+
 import numpy as np
-import transformers
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import List, Iterable, Optional
+import transformers
 
 # Local imports
 try:
@@ -1172,8 +1173,10 @@ class BasicMTL(nn.Module):
                     cluster_id = val.item()
 
                     # Populate the dict
-                    gold_clusters[cluster_id] = gold_clusters.get(cluster_id, []) + \
-                                                [(coref_gold_starts[i].item(), coref_gold_ends[i].item())]
+                    if cluster_id in gold_clusters:
+                        gold_clusters[cluster_id].append((coref_gold_starts[i].item(), coref_gold_ends[i].item()))
+                    else:
+                        gold_clusters[cluster_id] = [(coref_gold_starts[i].item(), coref_gold_ends[i].item())]
 
                 # Gold clusters is a dict of tuple of (start, end), (start, end) corresponding to every cluster ID
                 gold_clusters = [tuple(v) for v in gold_clusters.values()]
@@ -1188,11 +1191,13 @@ class BasicMTL(nn.Module):
                 top_span_ends = top_span_ends
                 mention_indices = []
                 antecedent_indices = []
+                top_antecedents_DEBUG = torch.argmax(top_antecedent_scores, dim=-1, keepdim=False)
                 for i in range(len(top_span_ends)):
                     # If ith span is predicted to be related to an actual antecedent
-                    if top_antecedents[:, 0][i].item() > 0:
+                    # TODO top antecedents may not be made correctly!!!
+                    if top_antecedents_DEBUG[i].item() > 0:
                         mention_indices.append(i)
-                        antecedent_indices.append(top_antecedents[:, 0][i].item())
+                        antecedent_indices.append(top_antecedents_DEBUG[i].item())
 
                 cluster_sets = []
                 for i in range(len(mention_indices)):
