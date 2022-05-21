@@ -605,7 +605,7 @@ class BasicMTL(nn.Module):
             Now we've even added higher order stuff in. I just want it to work :crying:
         """
         # calculate final slow scores
-        for i in range(1):
+        for i in range(self.config.coref_higher_order):
             top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
             top_antecedent_scores = top_antecedents_fast_scores + \
                                     self._get_slow_antecedent_scores_(top_span_emb,

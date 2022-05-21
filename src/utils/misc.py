@@ -279,6 +279,7 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'tasks',
         'debug',
         'coref_loss_mean',
+        'coref_higher_order',
         'curdir',
     ]
 

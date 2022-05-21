@@ -72,6 +72,7 @@ DEFAULTS: dict = {
     'learning_rate': 0.0001,
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
+    'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
     'encoder_learning_rate': 1e-05,  # the LR used for encoder IF encoder is not frozen.

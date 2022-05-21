@@ -250,6 +250,8 @@ def get_dataiter_partials(
               help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
 @click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'],
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
+@click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
+              help='Number of times we run the higher order loop. ')
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
@@ -276,7 +278,8 @@ def run(
         use_pretrained_model: str = None,  # @TODO: integrate this someday
         learning_rate: float = DEFAULTS['learning_rate'],
         max_span_width: int = DEFAULTS['max_span_width'],
-        coref_loss_mean: bool = DEFAULTS['coref_loss_mean']
+        coref_loss_mean: bool = DEFAULTS['coref_loss_mean'],
+        coref_higher_order: int = DEFAULTS['coref_higher_order'],
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
@@ -332,6 +335,7 @@ def run(
     config.coref_loss_mean = coref_loss_mean
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
+    config.coref_higher_order = coref_higher_order
 
     # merge all pre-typed config values into this bertconfig obj
     for k, v in DEFAULTS.items():
