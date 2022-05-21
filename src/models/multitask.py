@@ -569,26 +569,50 @@ class BasicMTL(nn.Module):
         segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
                                        self.config.coref_max_training_segments - 1)  # [top_cand, top_ant]
 
-        # calculate final slow scores (this was a higher order for loop that we paved over)
-        top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
-        top_antecedent_scores = top_antecedents_fast_scores + \
-                                self._get_slow_antecedent_scores_(
-                                    top_span_emb,
-                                    top_antecedents,
-                                    top_antecedent_emb,
-                                    top_antecedent_offsets,
-                                    segment_distance
-                                )  # [top_cand, top_ant]
+        # # calculate final slow scores (this was a higher order for loop that we paved over)
+        # top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
+        # top_antecedent_scores = top_antecedents_fast_scores + \
+        #                         self._get_slow_antecedent_scores_(
+        #                             top_span_emb,
+        #                             top_antecedents,
+        #                             top_antecedent_emb,
+        #                             top_antecedent_offsets,
+        #                             segment_distance
+        #                         )  # [top_cand, top_ant]
+        #
+        # top_antecedent_weights = F.softmax(
+        #     torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
+        # top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
+        #                                1)  # [top_cand, top_ant + 1, emb]
+        # attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb,
+        #                               1)  # [top_cand, emb]
+        # gate_vectors = torch.sigmoid(
+        #     self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
+        # top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
 
-        top_antecedent_weights = F.softmax(
-            torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
-        top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
-                                       1)  # [top_cand, top_ant + 1, emb]
-        attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb,
-                                      1)  # [top_cand, emb]
-        gate_vectors = torch.sigmoid(
-            self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
-        top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
+        """
+            Now we've even added higher order stuff in. I just want it to work :crying:
+        """
+        # calculate final slow scores
+        for i in range(2):
+            top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
+            top_antecedent_scores = top_antecedents_fast_scores + \
+                                    self.get_slow_antecedent_scores(top_span_emb,
+                                                                    top_antecedents,
+                                                                    top_antecedent_emb,
+                                                                    top_antecedent_offsets,
+                                                                    segment_distance)  # [top_cand, top_ant]
+            top_antecedent_weights = F.softmax(
+                torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
+            top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
+                                           1)  # [top_cand, top_ant + 1, emb]
+            attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb,
+                                          1)  # [top_cand, emb]
+            gate_vectors = torch.sigmoid(
+                self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
+            top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
+
+        # TODO: why is the above not being used
 
         top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
 
