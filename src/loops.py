@@ -1,13 +1,15 @@
 import json
-import wandb
-import torch
 import pickle
 import warnings
-import numpy as np
 from pathlib import Path
-from tqdm.auto import tqdm
-from eval import Evaluator
 from typing import Iterable, Callable, Union, Optional
+
+import numpy as np
+import torch
+import wandb
+from tqdm.auto import tqdm
+
+from eval import Evaluator
 
 # Local imports
 try:
@@ -38,8 +40,30 @@ def training_loop(
         flag_save: bool = False,
         save_dir: Optional[Path] = None,
         epochs_last_run: int = 0,
-        save_config: dict = None
+        save_config: dict = None,
+        filter_candidates_len_threshold: int = -1
 ) -> (list, list, list):
+    """
+    TODO: write about every param
+
+    :param model:
+    :param epochs:
+    :param tasks:
+    :param opt:
+    :param forward_fn:
+    :param device:
+    :param trn_dl:
+    :param train_eval:
+    :param dev_eval:
+    :param flag_wandb:
+    :param flag_save:
+    :param save_dir:
+    :param epochs_last_run:
+    :param save_config:
+    :param filter_candidates_len_threshold: this is LEN threshold, not POS threshold.
+        You divide the POS threshold by max span width and send that here.
+    :return:
+    """
     if flag_save and save_config is None:
         save_config = {}
 
@@ -63,6 +87,12 @@ def training_loop(
             opt.zero_grad()
 
             instance["prep_coref_eval"] = True
+
+            # if there are more than a certain amount of (roughly) candidates, we skip the instance. save mem
+            if instance['attention_mask'].view(-1).sum().item() > filter_candidates_len_threshold:
+                warnings.warn(f"Skipping {i:5d}. Too many candidates. "
+                              f"Input: {instance['input_ids'].shape}.")
+                continue
 
             # Move all input tensors to the right devices
             instance = change_device(instance, device)

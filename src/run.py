@@ -417,9 +417,6 @@ def run(
         device=device
     )
 
-    print(config)
-    print("Training commences!")
-
     # Saving stuff
     if save:
         savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config, dataset=dataset,
@@ -480,6 +477,9 @@ def run(
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
         wandb.config.update(config.to_dict(), allow_val_change=True)
 
+    print(config)
+    print("Training commences!")
+
     training_loop(
         model=model,
         epochs=epochs,
@@ -494,7 +494,8 @@ def run(
         flag_save=save,
         save_dir=savedir,
         save_config=save_config,
-        epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0
+        epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0,
+        filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
     )
     print("potato")
 

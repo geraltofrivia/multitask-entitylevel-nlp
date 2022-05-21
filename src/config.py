@@ -1,7 +1,9 @@
-import numpy as np
 from pathlib import Path
 from typing import Dict
+
+import numpy as np
 from mytorch.utils.goodies import FancyDict
+
 from utils.exceptions import UnknownDataSplitException
 
 # No local imports (is a good idea)
@@ -67,7 +69,7 @@ LOSS_RATIO_CNP = [1.0, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner 
 LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0 / 20000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = {
-    'filter_candidates_pos_threshold': 2000,
+    'filter_candidates_pos_threshold': 10000,
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
     'learning_rate': 0.0001,
     'coref_metadata_feature_size': 20,  # self explanatory
