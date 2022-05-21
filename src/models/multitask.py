@@ -5,6 +5,8 @@
 
 import math
 import torch
+import random
+import numpy as np
 import transformers
 import torch.nn as nn
 import torch.nn.functional as F
@@ -15,6 +17,15 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
+from config import SEED
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 
 class BasicMTL(nn.Module):

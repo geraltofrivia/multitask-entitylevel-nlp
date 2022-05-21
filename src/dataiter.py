@@ -5,6 +5,7 @@
 import json
 import torch
 import pickle
+import random
 import warnings
 import numpy as np
 import transformers
@@ -21,13 +22,19 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, NPRSEED, KNOWN_TASKS, DEFAULTS, unalias_split
+from config import LOCATIONS as LOC, SEED, KNOWN_TASKS, DEFAULTS, unalias_split
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
 from utils.misc import check_dumped_config
 
-np.random.seed(NPRSEED)
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 
 class MultiTaskDataIter(Dataset):

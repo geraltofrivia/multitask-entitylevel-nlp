@@ -2,6 +2,8 @@ import json
 import wandb
 import click
 import torch
+import random
+import numpy as np
 import transformers
 from pathlib import Path
 from functools import partial
@@ -18,11 +20,17 @@ from loops import training_loop
 from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
 from dataiter import MultiTaskDataIter, DataIterCombiner
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
 
-from mangoes.modeling.coref import BertForCoreferenceResolutionBase
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 
 # def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
