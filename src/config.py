@@ -9,7 +9,7 @@ from utils.exceptions import UnknownDataSplitException
 # No local imports (is a good idea)
 
 # Random seeds
-SEED = 78
+SEED = 42
 
 ROOT_LOC: Path = Path("..") if str(Path().cwd()).split("/")[-1] == "src" else Path(".")
 LOCATIONS: Dict[str, Path] = FancyDict(

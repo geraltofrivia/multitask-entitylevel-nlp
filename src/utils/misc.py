@@ -32,10 +32,10 @@ def change_device(instance: dict, device: Union[str, torch.device]) -> dict:
     """ Go through every k, v in a dict and change its device (make it recursive) """
     for k, v in instance.items():
         if type(v) is torch.Tensor:
-            if 'device' == 'cpu':
-                instance[k] = v.detach().to('cpu')
-            else:
-                instance[k] = v.to(device)
+            # if 'device' == 'cpu':
+            instance[k] = v.detach().to(device)
+            # else:
+            #     instance[k] = v.to(device)
         elif type(v) is dict:
             instance[k] = change_device(v, device)
 

@@ -192,12 +192,6 @@ class Evaluator:
 
         self.results = {}
 
-    def _compute_debug_metrics_(self, instance, outputs):
-        """
-            These are not accuracy metrics, as much as traces but we report them nonetheless.
-            1. Avg num of candidates
-        """
-
     def update(self, instance: dict, outputs: dict):
         """
             Depending on the tasks contained in instance['tasks'],
