@@ -546,7 +546,7 @@ def run(
         device=device
     )
     dev_eval = Evaluator(
-        predict_fn=model.pred_with_labels,
+        predict_fn=model.forward,
         dataset_partial=dev_ds,
         metrics=metrics,
         device=device
