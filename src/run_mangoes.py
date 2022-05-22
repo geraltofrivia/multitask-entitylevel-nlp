@@ -619,7 +619,7 @@ def run(
         model=model,
         epochs=epochs,
         trn_dl=train_ds,
-        forward_fn=model.pred_with_labels,
+        forward_fn=model.forward,
         device=device,
         train_eval=train_eval,
         dev_eval=dev_eval,

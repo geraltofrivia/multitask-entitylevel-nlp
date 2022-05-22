@@ -3,19 +3,20 @@
     We store all of them here.
 """
 import json
-import torch
 import pickle
 import random
 import warnings
-import numpy as np
-import transformers
 from pathlib import Path
-from tqdm.auto import tqdm
-from transformers import BertConfig
-from torch.utils.data import Dataset
+from typing import List, Iterable, Union, Optional, Callable, Dict, Tuple
+
+import numpy as np
+import torch
+import transformers
 from mytorch.utils.goodies import FancyDict
 from sklearn.utils import compute_class_weight
-from typing import List, Iterable, Union, Optional, Callable, Dict, Tuple
+from torch.utils.data import Dataset
+from tqdm.auto import tqdm
+from transformers import BertConfig
 
 # Local imports
 try:
@@ -132,7 +133,7 @@ class MultiTaskDataIter(Dataset):
 
         if self.config.trim:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
-            self.data = self.data[:50]
+            self.data = self.data[:7]
 
     def estimate_class_weights(self, task: str) -> List[float]:
         """

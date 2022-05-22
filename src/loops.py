@@ -1,4 +1,5 @@
 import json
+import math
 import pickle
 import warnings
 from pathlib import Path
@@ -9,8 +10,6 @@ import torch
 import wandb
 from tqdm.auto import tqdm
 
-from eval import Evaluator
-
 # Local imports
 try:
     import _pathfix
@@ -18,6 +17,7 @@ except ImportError:
     from . import _pathfix
 from utils.misc import change_device, weighted_addition_losses
 from eval import MangoesEvaluatorWrapper
+from eval import Evaluator
 
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
@@ -170,6 +170,17 @@ def training_loop(
 
         if debug:
             mangoes_eval.summarise()
+
+            # Ensure that if they're different, the computation stops
+            org = {k: v for k, v in train_metrics['coref'].items() if k.startswith('b_cubed')}
+            manp = mangoes_eval.coref_evaluator.evaluators[1].get_precision()
+            manr = mangoes_eval.coref_evaluator.evaluators[1].get_recall()
+            manf = mangoes_eval.coref_evaluator.evaluators[1].get_f1()
+
+            if not (math.isclose(org['b_cubed_p'], manp) and \
+                    math.isclose(org['b_cubed_r'], manr) and \
+                    math.isclose(org['b_cubed_f1'], manf)):
+                print('oh shit here we go')
 
         # Saving code
         if flag_save:
