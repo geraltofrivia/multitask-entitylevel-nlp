@@ -136,6 +136,7 @@ class MangoesCorefWrapper():
             "mention_to_gold": mention_to_gold
         }
 
+        outputs['num_candidates'] = outputs['candidate_ends'].shape[0]
         outputs['coref'] = {}
         outputs['coref']['eval'] = coref_eval
         outputs['loss'] = {'coref': outputs['loss']}
