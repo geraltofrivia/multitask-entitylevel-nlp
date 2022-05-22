@@ -2,15 +2,17 @@
     Same as run.py but here we work with mangoes code instead.
 
 """
-
 import json
-import wandb
+import random
+from functools import partial
+from pathlib import Path
+from typing import List, Callable, Union, Optional
+
 import click
+import numpy as np
 import torch
 import transformers
-from pathlib import Path
-from functools import partial
-from typing import List, Callable, Union, Optional
+import wandb
 from mytorch.utils.goodies import mt_save_dir
 
 # Local imports
@@ -23,10 +25,18 @@ from loops import training_loop
 from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
 from dataiter import MultiTaskDataIter, DataIterCombiner
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
-from mangoes.modeling import BERTForCoreferenceResolution, MangoesCoreferenceDataset
-from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe
+from mangoes.modeling import BERTForCoreferenceResolution
+from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 
 class MangoesCorefWrapper():
@@ -133,14 +143,63 @@ class MangoesCorefWrapper():
         return outputs
 
 
-def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
+def make_optimizer(
+        model: BasicMTL,
+        base_keyword: str,
+        task_weight_decay: Optional[float],
+        task_learning_rate: Optional[float],
+        adam_beta1: float = 0.9,
+        adam_beta2: float = 0.999,
+        adam_epsilon: float = 1e-8,
+        encoder_learning_rate: float = 5e-05,
+        encoder_weight_decay: float = 0.0,
+        freeze_encoder: bool = False,
+        optimizer_class: Callable = torch.optim.AdamW,
+):
+    """
+    Setup the optimizer and the learning rate scheduler.
+
+    This will use AdamW. If you want to use something else (ie, a different optimizer and multiple learn rates), you
+    can subclass and override this method in a subclass.
+    """
+
+    if task_learning_rate is None:
+        task_learning_rate = encoder_learning_rate
+    if task_weight_decay is None:
+        task_weight_decay = encoder_weight_decay
+
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and
+                       base_keyword in n],
+            "weight_decay": encoder_weight_decay,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and
+                       base_keyword in n],
+            "weight_decay": 0.0,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay) and
+                       base_keyword not in n],
+            "weight_decay": task_weight_decay,
+            "lr": task_learning_rate,
+        },
+        {
+            "params": [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay) and
+                       base_keyword not in n],
+            "weight_decay": 0.0,
+            "lr": task_learning_rate,
+        },
+    ]
+
     if freeze_encoder:
-        return optimizer_class(
-            [param for name, param in model.named_parameters() if not name.startswith("encoder")],
-            lr=lr
-        )
-    else:
-        return optimizer_class(model.parameters(), lr=lr)
+        # Drop the first two groups from the params
+        optimizer_grouped_parameters = optimizer_grouped_parameters[2:]
+
+    optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": encoder_learning_rate}
+    return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
 def get_pretrained_dirs(nm: str):
@@ -250,7 +309,6 @@ def get_dataiter_partials(
 
     return train_ds, dev_ds
 
-
 # noinspection PyDefaultArgument
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
@@ -270,9 +328,9 @@ def get_dataiter_partials(
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
-@click.option('--ner-unweighted', is_flag=True, default=False,
+@click.option('--ner-unweighted', is_flag=True, default=DEFAULTS['ner_unweighted'],
               help="If True, we do not input priors of classes into Model -> NER CE loss.")
-@click.option('--pruner-unweighted', is_flag=True, default=False,
+@click.option('--pruner-unweighted', is_flag=True, default=DEFAULTS['pruner_unweighted'],
               help="If True, we do not input priors of classes into Model -> Pruner BCEwL loss.")
 @click.option('--t1-ignore-task', default=None, type=str,
               help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
@@ -291,8 +349,10 @@ def get_dataiter_partials(
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--max-span-width', '-msw', type=int, default=DEFAULTS['max_span_width'],
               help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
-@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'],
+@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'], is_flag=True,
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
+@click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
+              help='Number of times we run the higher order loop. ')
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
@@ -302,7 +362,7 @@ def run(
         tasks: List[str],
         dataset_2: str,
         tasks_2: List[str] = [],
-        encoder: str = "bert-base-cased",
+        encoder: str = "bert-base-uncased",
         device: str = "cpu",
         trim: bool = False,
         debug: bool = False,
@@ -316,10 +376,11 @@ def run(
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
-        use_pretrained_model: str = None,
+        use_pretrained_model: str = None,  # @TODO: integrate this someday
         learning_rate: float = DEFAULTS['learning_rate'],
         max_span_width: int = DEFAULTS['max_span_width'],
-        coref_loss_mean: bool = DEFAULTS['coref_loss_mean']
+        coref_loss_mean: bool = DEFAULTS['coref_loss_mean'],
+        coref_higher_order: int = DEFAULTS['coref_higher_order'],
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
@@ -366,18 +427,21 @@ def run(
     config.freeze_encoder = not train_encoder
     config.ner_unweighted = ner_unweighted
     config.pruner_unweighted = pruner_unweighted
-    config.lr = learning_rate
+    config.learning_rate = learning_rate
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
+    config.uncased = encoder.endswith('uncased')
+    config.curdir = str(Path('.').absolute())
+    config.coref_higher_order = coref_higher_order
 
     # merge all pre-typed config values into this bertconfig obj
     for k, v in DEFAULTS.items():
         try:
-            _ = config.__getattr__(k)
+            _ = config.__getattribute__(k)
         except AttributeError:
             config.__setattr__(k, v)
 
@@ -395,54 +459,63 @@ def run(
     model = MangoesCorefWrapper()
     model.model.model.to(config.device)
 
-    # Make the optimiser
-    base_keyword = 'bert'
-    task_learn_rate = config.learning_rate
-    weight_decay = 0.0
-    no_decay = ["bias", "LayerNorm.weight"]
-    task_weight_decay = weight_decay
-    adam_beta1 = 0.9
-    adam_beta2 = 0.999
-    adam_epsilon = 1e-8
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in model.model.model.named_parameters() if not any(nd in n for nd in no_decay) and
-                       base_keyword in n],
-            "weight_decay": weight_decay,
-        },
-        {
-            "params": [p for n, p in model.model.model.named_parameters() if any(nd in n for nd in no_decay) and
-                       base_keyword in n],
-            "weight_decay": 0.0,
-        },
-        {
-            "params": [p for n, p in model.model.model.named_parameters() if not any(nd in n for nd in no_decay) and
-                       base_keyword not in n],
-            "weight_decay": task_weight_decay,
-            "lr": task_learn_rate,
-        },
-        {
-            "params": [p for n, p in model.model.model.named_parameters() if any(nd in n for nd in no_decay) and
-                       base_keyword not in n],
-            "weight_decay": 0.0,
-            "lr": task_learn_rate,
-        },
-    ]
+    opt = make_optimizer(
+        model=model,
+        task_learning_rate=config.learning_rate,
+        freeze_encoder=config.freeze_encoder,
+        base_keyword='bert',
+        task_weight_decay=None,
+        encoder_learning_rate=config.encoder_learning_rate,
+        encoder_weight_decay=config.encoder_weight_decay
+    )
 
-    optimizer_cls = transformers.AdamW
-    optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": config.learning_rate}
-    opt = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
-
+    # # Make the optimiser
+    # base_keyword = 'bert'
+    # task_learn_rate = config.learning_rate
+    # weight_decay = 0.0
+    # no_decay = ["bias", "LayerNorm.weight"]
+    # task_weight_decay = weight_decay
+    # adam_beta1 = 0.9
+    # adam_beta2 = 0.999
+    # adam_epsilon = 1e-8
+    # optimizer_grouped_parameters = [
+    #     {
+    #         "params": [p for n, p in model.model.model.named_parameters() if not any(nd in n for nd in no_decay) and
+    #                    base_keyword in n],
+    #         "weight_decay": weight_decay,
+    #     },
+    #     {
+    #         "params": [p for n, p in model.model.model.named_parameters() if any(nd in n for nd in no_decay) and
+    #                    base_keyword in n],
+    #         "weight_decay": 0.0,
+    #     },
+    #     {
+    #         "params": [p for n, p in model.model.model.named_parameters() if not any(nd in n for nd in no_decay) and
+    #                    base_keyword not in n],
+    #         "weight_decay": task_weight_decay,
+    #         "lr": task_learn_rate,
+    #     },
+    #     {
+    #         "params": [p for n, p in model.model.model.named_parameters() if any(nd in n for nd in no_decay) and
+    #                    base_keyword not in n],
+    #         "weight_decay": 0.0,
+    #         "lr": task_learn_rate,
+    #     },
+    # ]
+    #
+    # optimizer_cls = transformers.AdamW
+    # optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": config.learning_rate}
+    # opt = optimizer_cls(optimizer_grouped_parameters, **optimizer_kwargs)
     """
         Prep datasets.
         For both d1 and d2,
             - prep loss scales
             - prep class weights (by instantiating a temp dataiter)
             - make suitable partials.
-            
+
         Then, IF d2 is specified, make a data combiner thing, otherwise just use this partial in the loop.
         Do the same for evaluators.
-        
+
     """
 
     train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
@@ -450,6 +523,7 @@ def run(
 
     # Collect all metrics
     metrics = []
+    metrics += [TraceCandidates(debug=config.debug)]
     if 'ner' in tasks + tasks_2:
         metrics += [NERAcc(debug=config.debug), NERSpanRecognitionPR(debug=config.debug)]
     if 'pruner' in tasks + tasks_2:
@@ -466,20 +540,17 @@ def run(
 
     # Make evaluators
     train_eval = Evaluator(
-        predict_fn=model.forward,
+        predict_fn=model.pred_with_labels,
         dataset_partial=train_ds,
         metrics=metrics,
         device=device
     )
     dev_eval = Evaluator(
-        predict_fn=model.forward,
+        predict_fn=model.pred_with_labels,
         dataset_partial=dev_ds,
         metrics=metrics,
         device=device
     )
-
-    print(config)
-    print("Training commences!")
 
     # Saving stuff
     if save:
@@ -511,7 +582,7 @@ def run(
             First check if the config matches. If not, then
                 - report the mismatches
                 - try to find other saved models which have the same config.
-            
+
             Get the WandB ID (if its there, and if WandB is enabled.)
             Second, pull the model weights and put them on the model.            
          """
@@ -538,14 +609,17 @@ def run(
             save_config = config.to_dict()
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
-                   id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim or debug else "main")
+                   id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
         wandb.config.update(config.to_dict(), allow_val_change=True)
+
+    print(config)
+    print("Training commences!")
 
     training_loop(
         model=model,
         epochs=epochs,
         trn_dl=train_ds,
-        forward_fn=model.forward,
+        forward_fn=model.pred_with_labels,
         device=device,
         train_eval=train_eval,
         dev_eval=dev_eval,
@@ -555,7 +629,9 @@ def run(
         flag_save=save,
         save_dir=savedir,
         save_config=save_config,
-        epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0
+        epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0,
+        filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
+        debug=config.debug
     )
     print("potato")
 
