@@ -501,6 +501,7 @@ class MangoesEvaluatorWrapper:
         self.n_examples = 0
 
     def update(self, instance, outputs):
+        outputs = outputs['coref']['eval']
         clusters = outputs['clusters']
         gold_clusters = outputs['gold_clusters']
         mention_to_predicted = outputs['mention_to_predicted']
