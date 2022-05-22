@@ -17,6 +17,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device, weighted_addition_losses
+from eval import MangoesEvaluatorWrapper
 
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
@@ -41,7 +42,8 @@ def training_loop(
         save_dir: Optional[Path] = None,
         epochs_last_run: int = 0,
         save_config: dict = None,
-        filter_candidates_len_threshold: int = -1
+        filter_candidates_len_threshold: int = -1,
+        debug: bool = False,
 ) -> (list, list, list):
     """
     TODO: write about every param
@@ -79,6 +81,12 @@ def training_loop(
         # Make data
         # trn_dataset = trn_dl()
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
+
+        if debug:
+            # Also run the mangoes eval
+            mangoes_eval = MangoesEvaluatorWrapper()
+        else:
+            mangoes_eval = None
 
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
@@ -119,6 +127,9 @@ def training_loop(
             # Throw the outputs to the eval benchmark also
             train_eval.update(instance=instance, outputs=outputs)
 
+            if debug:
+                mangoes_eval.update(instance, outputs)
+
             for task_nm in instance['tasks']:
                 per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
 
@@ -156,6 +167,9 @@ def training_loop(
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
                            for task_nm in tasks]))
+
+        if debug:
+            mangoes_eval.summarise()
 
         # Saving code
         if flag_save:

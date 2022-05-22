@@ -17,6 +17,7 @@ except ImportError:
     from . import _pathfix
 from utils.misc import change_device
 from utils.exceptions import NANsFound
+from mangoes_eval import CorefEvaluator
 
 """
     Make a overall (macro) eval system. 
@@ -491,9 +492,28 @@ class CorefMUC(MacroMetric):
         self.r_num += rn
         self.r_den += rd
 
-#
-# class MangoesEvaluatorWrapper:
-#     """ This uses an evaluator object """
-#     def __init__(self):
-#
-#         self.coref_evaluator = CorefEvaluator()
+
+class MangoesEvaluatorWrapper:
+    """ This uses an evaluator object """
+
+    def __init__(self):
+        self.coref_evaluator = CorefEvaluator()
+        self.n_examples = 0
+
+    def update(self, instance, outputs):
+        clusters = outputs['clusters']
+        gold_clusters = outputs['gold_clusters']
+        mention_to_predicted = outputs['mention_to_predicted']
+        mention_to_gold = outputs['mention_to_gold']
+        self.coref_evaluator.update(clusters, gold_clusters, mention_to_predicted, mention_to_gold)
+        self.n_examples += 1
+
+    def summarise(self):
+        summary_dict = {}
+        p, r, f = self.coref_evaluator.get_prf()
+        summary_dict["Average F1 (py)"] = f
+        print("Average F1 (py): {:.2f}% on {} docs".format(f * 100, self.n_examples))
+        summary_dict["Average precision (py)"] = p
+        print("Average precision (py): {:.2f}%".format(p * 100))
+        summary_dict["Average recall (py)"] = r
+        print("Average recall (py): {:.2f}%".format(r * 100))
