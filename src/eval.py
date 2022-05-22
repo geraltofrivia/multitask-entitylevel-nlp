@@ -405,7 +405,7 @@ class CorefCeafe(MacroMetric):
         scores = np.zeros((len(gold_clusters), len(clusters)))
         for i in range(len(gold_clusters)):
             for j in range(len(clusters)):
-                scores[i, j] = self._coref_phi4_(gold_clusters=gold_clusters[i], clusters=clusters[j])
+                scores[i, j] = self._coref_phi4_(c1=gold_clusters[i], c2=clusters[j])
         matching = linear_assignment(-scores)
         similarity = sum(scores[matching[0], matching[1]])
 
@@ -420,8 +420,8 @@ class CorefCeafe(MacroMetric):
         self.r_den += rd
 
     @staticmethod
-    def _coref_phi4_(clusters, gold_clusters, *args, **kwargs):
-        return 2 * len([m for m in clusters if m in gold_clusters]) / float(len(clusters) + len(gold_clusters))
+    def _coref_phi4_(c1, c2, *args, **kwargs):
+        return 2 * len([m for m in c1 if m in c2]) / float(len(c1) + len(c2))
 
 
 class CorefBCubed(MacroMetric):
