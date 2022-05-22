@@ -460,7 +460,7 @@ def run(
     model.model.model.to(config.device)
 
     opt = make_optimizer(
-        model=model,
+        model=model.model.model,
         task_learning_rate=config.learning_rate,
         freeze_encoder=config.freeze_encoder,
         base_keyword='bert',
