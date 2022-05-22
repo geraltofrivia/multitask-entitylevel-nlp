@@ -496,6 +496,7 @@ def run(
         save_config=save_config,
         epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0,
         filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
+        debug=config.debug
     )
     print("potato")
 
