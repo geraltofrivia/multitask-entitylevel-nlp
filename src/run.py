@@ -113,7 +113,7 @@ def get_pretrained_dirs(enc_nm: str, tok_nm: str):
             str(plausible_parent_dir / enc_nm / "encoder"),
         )
     else:
-        return nm, nm, nm
+        return enc_nm, tok_nm, enc_nm
 
 
 def pick_loss_scale(tasks: Tasks, ignore_task: str):
