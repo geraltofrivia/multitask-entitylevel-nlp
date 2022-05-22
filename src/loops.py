@@ -1,5 +1,4 @@
 import json
-import math
 import pickle
 import warnings
 from pathlib import Path
@@ -16,7 +15,6 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device, weighted_addition_losses
-from eval import MangoesEvaluatorWrapper
 from eval import Evaluator
 
 
@@ -82,12 +80,6 @@ def training_loop(
         # trn_dataset = trn_dl()
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
 
-        if debug:
-            # Also run the mangoes eval
-            mangoes_eval = MangoesEvaluatorWrapper()
-        else:
-            mangoes_eval = None
-
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
 
@@ -127,9 +119,6 @@ def training_loop(
             # Throw the outputs to the eval benchmark also
             train_eval.update(instance=instance, outputs=outputs)
 
-            if debug:
-                mangoes_eval.update(instance, outputs)
-
             for task_nm in instance['tasks']:
                 per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
 
@@ -147,7 +136,7 @@ def training_loop(
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
-        dev_metrics = train_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
         for task_nm in tasks:
@@ -167,20 +156,6 @@ def training_loop(
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
                            for task_nm in tasks]))
-
-        if debug:
-            mangoes_eval.summarise()
-
-            # Ensure that if they're different, the computation stops
-            org = {k: v for k, v in train_metrics['coref'].items() if k.startswith('b_cubed')}
-            manp = mangoes_eval.coref_evaluator.evaluators[1].get_precision()
-            manr = mangoes_eval.coref_evaluator.evaluators[1].get_recall()
-            manf = mangoes_eval.coref_evaluator.evaluators[1].get_f1()
-
-            if not (math.isclose(org['b_cubed_p'][-1], manp) and \
-                    math.isclose(org['b_cubed_r'][-1], manr) and \
-                    math.isclose(org['b_cubed_f1'][-1], manf)):
-                print('oh shit here we go')
 
         # Saving code
         if flag_save:

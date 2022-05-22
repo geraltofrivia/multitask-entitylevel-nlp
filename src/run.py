@@ -101,19 +101,16 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
-def get_pretrained_dirs(nm: str):
+def get_pretrained_dirs(enc_nm: str, tok_nm: str):
     """Check if the given nm is stored locally. If so, load that. Else, pass it on as is."""
-    plausible_parent_dir: Path = LOC.root / "models" / "huggingface" / nm
+    plausible_parent_dir: Path = LOC.root / "models" / "huggingface"
 
-    if (
-            (plausible_parent_dir / "config").exists()
-            and (plausible_parent_dir / "tokenizer").exists()
-            and (plausible_parent_dir / "encoder").exists()
-    ):
+    if ((plausible_parent_dir / enc_nm / "encoder").exists() and (plausible_parent_dir / enc_nm / "config").exists()
+            and (plausible_parent_dir / tok_nm / "tokenizer").exists()):
         return (
-            str(plausible_parent_dir / "config"),
-            str(plausible_parent_dir / "tokenizer"),
-            str(plausible_parent_dir / "encoder"),
+            str(plausible_parent_dir / enc_nm / "config"),
+            str(plausible_parent_dir / tok_nm / "tokenizer"),
+            str(plausible_parent_dir / enc_nm / "encoder"),
         )
     else:
         return nm, nm, nm
@@ -221,6 +218,7 @@ def get_dataiter_partials(
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS['learning_rate'],
               help="Learning rate. Defaults to 0.005.")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
+@click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
@@ -257,12 +255,13 @@ def get_dataiter_partials(
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
 def run(
+        tokenizer: str,
+        encoder: str,
         epochs: int,
         dataset: str,
         tasks: List[str],
         dataset_2: str,
         tasks_2: List[str] = [],
-        encoder: str = "bert-base-uncased",
         device: str = "cpu",
         trim: bool = False,
         debug: bool = False,
@@ -285,6 +284,9 @@ def run(
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
     # TODO: implement soft loading the model parameters somehow.
+
+    if not tokenizer:
+        tokenizer = encoder
 
     # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
     wandb_trial = trim or debug
@@ -309,7 +311,7 @@ def run(
     tasks = Tasks(tasks)
     tasks_2 = Tasks(tasks_2)
 
-    dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder)
+    dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
     config = transformers.BertConfig(dir_config)
@@ -388,13 +390,13 @@ def run(
 
     # Collect all metrics
     metrics = []
-    metrics += [TraceCandidates(debug=config.debug)]
+    metrics += [TraceCandidates]
     if 'ner' in tasks + tasks_2:
-        metrics += [NERAcc(debug=config.debug), NERSpanRecognitionPR(debug=config.debug)]
+        metrics += [NERAcc, NERSpanRecognitionPR]
     if 'pruner' in tasks + tasks_2:
-        metrics += [PrunerPR(debug=config.debug)]
+        metrics += [PrunerPR]
     if 'coref' in tasks + tasks_2:
-        metrics += [CorefBCubed(debug=config.debug), CorefMUC(debug=config.debug), CorefCeafe(debug=config.debug)]
+        metrics += [CorefBCubed, CorefMUC, CorefCeafe]
 
     if dataset_2 and tasks_2:
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,

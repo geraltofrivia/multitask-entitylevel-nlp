@@ -3,7 +3,7 @@
 """
 from abc import ABC, abstractmethod
 from collections import Counter
-from typing import Dict, Callable, List, Union, Optional
+from typing import Dict, Callable, List, Union, Optional, Type
 
 import numpy as np
 import torch
@@ -164,7 +164,7 @@ class Evaluator:
             self,
             predict_fn: Callable,
             dataset_partial: Callable,
-            metrics: List[Metric],
+            metrics: List[Type[Metric]],
             device: Union[str, torch.device],
             debug: bool = True
     ):
@@ -177,14 +177,17 @@ class Evaluator:
         :param debug: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
             Also, when true, we report some general metrics like avg num of candidates per document, etc.
         """
+
         self.predict_fn = predict_fn
         self.ds_partial = dataset_partial
         self.ds = self.ds_partial()
         self.debug = debug
-        self.metrics = {}
         self.device = device
 
-        for metric in metrics:
+        # Initialise all metrics
+        self.metrics = {}
+        for metric_cls in metrics:
+            metric = metric_cls(debug=self.debug)
             self.metrics[metric.task] = self.metrics.get(metric.task, []) + [metric]
 
         # If there are task agnostic metrics/traces, check the flag true
