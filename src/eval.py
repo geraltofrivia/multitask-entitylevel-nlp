@@ -510,11 +510,15 @@ class MangoesEvaluatorWrapper:
         self.n_examples += 1
 
     def summarise(self):
-        summary_dict = {}
-        p, r, f = self.coref_evaluator.get_prf()
-        summary_dict["Average F1 (py)"] = f
-        print("Average F1 (py): {:.2f}% on {} docs".format(f * 100, self.n_examples))
-        summary_dict["Average precision (py)"] = p
-        print("Average precision (py): {:.2f}%".format(p * 100))
-        summary_dict["Average recall (py)"] = r
-        print("Average recall (py): {:.2f}%".format(r * 100))
+        for evaluator in self.coref_evaluator.evaluators:
+            print(evaluator.name, f"P: {evaluator.get_precision():.3f}, R: {evaluator.get_recall():.3f}, "
+                                  f"F1: {evaluator.get_f1():.3f}")
+
+        # summary_dict = {}
+        # p, r, f = self.coref_evaluator.get_prf()
+        # summary_dict["Average F1 (py)"] = f
+        # print("Average F1 (py): {:.2f}% on {} docs".format(f * 100, self.n_examples))
+        # summary_dict["Average precision (py)"] = p
+        # print("Average precision (py): {:.2f}%".format(p * 100))
+        # summary_dict["Average recall (py)"] = r
+        # print("Average recall (py): {:.2f}%".format(r * 100))

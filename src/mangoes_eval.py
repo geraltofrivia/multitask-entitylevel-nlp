@@ -12,7 +12,8 @@ def f1(p_num, p_den, r_num, r_den, beta=1):
 
 class CorefEvaluator(object):
     def __init__(self):
-        self.evaluators = [Evaluator(m) for m in (muc, b_cubed, ceafe)]
+        self.evaluators = [Evaluator('muc', muc), Evaluator('b_cubed', b_cubed), Evaluator('ceafe', ceafe)]
+        # self.evaluators = [Evaluator(m) for m in (muc, b_cubed, ceafe)]
 
     def update(self, predicted, gold, mention_to_predicted, mention_to_gold):
         for e in self.evaluators:
@@ -32,7 +33,8 @@ class CorefEvaluator(object):
 
 
 class Evaluator(object):
-    def __init__(self, metric, beta=1):
+    def __init__(self, name, metric, beta=1):
+        self.name = name
         self.p_num = 0
         self.p_den = 0
         self.r_num = 0
