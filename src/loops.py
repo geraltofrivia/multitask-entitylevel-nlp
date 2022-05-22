@@ -177,9 +177,9 @@ def training_loop(
             manr = mangoes_eval.coref_evaluator.evaluators[1].get_recall()
             manf = mangoes_eval.coref_evaluator.evaluators[1].get_f1()
 
-            if not (math.isclose(org['b_cubed_p'], manp) and \
-                    math.isclose(org['b_cubed_r'], manr) and \
-                    math.isclose(org['b_cubed_f1'], manf)):
+            if not (math.isclose(org['b_cubed_p'][-1], manp) and \
+                    math.isclose(org['b_cubed_r'][-1], manr) and \
+                    math.isclose(org['b_cubed_f1'][-1], manf)):
                 print('oh shit here we go')
 
         # Saving code

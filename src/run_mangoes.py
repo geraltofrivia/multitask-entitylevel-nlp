@@ -52,7 +52,7 @@ class MangoesCorefWrapper():
 
         gold_starts = coref['gold_starts']
         gold_ends = coref['gold_ends']
-        cluster_ids = coref['gold_cluster_ids']
+        cluster_ids = coref['gold_label_values']
 
         outputs = self.model.model.forward(
             input_ids, attention_mask, sentence_map, gold_starts=gold_starts,
