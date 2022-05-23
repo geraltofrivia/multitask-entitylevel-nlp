@@ -77,7 +77,7 @@ class BasicMTL(nn.Module):
             nn.ReLU(),
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
-        )
+        ).to(config.device)
 
         self.binary_coref_slow = nn.Sequential(
             nn.Linear((span_embedding_dim * 3) + 2 * n_coref_metadata_dim, config.unary_hdim),
