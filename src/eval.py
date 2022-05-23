@@ -17,7 +17,7 @@ except ImportError:
     from . import _pathfix
 from utils.misc import change_device
 from utils.exceptions import NANsFound
-from mangoes_eval import CorefEvaluator
+from eval_mangoes import CorefEvaluator
 
 """
     Make a overall (macro) eval system. 

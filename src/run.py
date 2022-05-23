@@ -339,8 +339,9 @@ def run(
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
     config.coref_higher_order = coref_higher_order
+    config.vocab_size = tokenizer.get_vocab().__len__()
 
-    # merge all pre-typed config values into this bertconfig obj
+    # merge all pre-typed config values into this bert config obj
     for k, v in DEFAULTS.items():
         try:
             _ = config.__getattribute__(k)
@@ -354,9 +355,10 @@ def run(
         n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
     else:
         n_classes_ner = 1
+    config.n_classes_ner = n_classes_ner
 
     # Make the model
-    model = BasicMTL(dir_encoder, config=config, n_classes_ner=n_classes_ner)
+    model = BasicMTL(dir_encoder, config=config)
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
     # Make the optimizer
@@ -367,7 +369,7 @@ def run(
         model=model,
         task_learning_rate=config.learning_rate,
         freeze_encoder=config.freeze_encoder,
-        base_keyword='encoder',
+        base_keyword='bert',
         task_weight_decay=None,
         encoder_learning_rate=config.encoder_learning_rate,
         encoder_weight_decay=config.encoder_weight_decay

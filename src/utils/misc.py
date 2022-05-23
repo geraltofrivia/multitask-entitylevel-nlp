@@ -283,6 +283,7 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'coref_loss_mean',
         'coref_higher_order',
         'curdir',
+        'n_classes_ner',
     ]
 
     # If old is a dict, we don't need to pull
