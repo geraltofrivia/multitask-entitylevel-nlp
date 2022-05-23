@@ -76,6 +76,8 @@ def training_loop(
     # Epoch level
     for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
 
+        model.train()
+
         # Make data
         # trn_dataset = trn_dl()
         per_epoch_loss = {task_nm: [] for task_nm in tasks}
@@ -127,6 +129,8 @@ def training_loop(
             # change_device(outputs, 'cpu')
             # del outputs
             # trn_dataset[i] = change_device(instance, 'cpu')
+
+        model.eval()
 
         # Evaluation (on the validation set)
         dev_eval.run()
