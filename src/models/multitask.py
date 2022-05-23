@@ -46,6 +46,9 @@ class BasicMTL(nn.Module):
         self.span_width_embeddings = nn.Embedding(
             num_embeddings=self.config.max_span_width, embedding_dim=n_coref_metadata_dim,
         ).to(config.device)
+        self.span_width_prior_embeddings = nn.Embedding(num_embeddings=self.config.max_span_width,
+                                                        embedding_dim=n_coref_metadata_dim).to(config.device)
+
         self.segment_dist_embeddings = nn.Embedding(num_embeddings=config.coref_max_training_segments,
                                                     embedding_dim=n_coref_metadata_dim).to(config.device)
 
@@ -69,6 +72,12 @@ class BasicMTL(nn.Module):
             nn.Dropout(config.coref_dropout),
             nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
         ).to(config.device)
+        self.unary_width = nn.Sequential(
+            nn.Linear(n_coref_metadata_dim, config.unary_hdim),
+            nn.ReLU(),
+            nn.Dropout(config.coref_dropout),
+            nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
+        )
 
         self.binary_coref_slow = nn.Sequential(
             nn.Linear((span_embedding_dim * 3) + 2 * n_coref_metadata_dim, config.unary_hdim),
@@ -509,6 +518,11 @@ class BasicMTL(nn.Module):
         # n_cands
         candidate_span_scores = self.unary_coref(candidate_span_embeddings).squeeze(1)
         # TODO: joe adds span width embeddings here but we skip it for simplicity's sake.
+
+        # Get span width scores and add to candidate mention scores
+        span_width_index = candidate_ends - candidate_starts
+        span_width_emb = self.span_width_prior_embeddings(span_width_index)
+        candidate_span_scores += self.unary_width(span_width_emb).squeeze(1)
 
         # get beam size
         n_top_spans = int(float(n_subwords * self.config.top_span_ratio))
