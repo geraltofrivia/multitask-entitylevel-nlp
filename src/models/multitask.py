@@ -5,7 +5,7 @@
 
 import math
 import random
-from typing import List, Iterable, Optional
+from typing import List, Iterable, Optional, Union
 
 import numpy as np
 import torch
@@ -166,10 +166,6 @@ class MangoesMTL(BertPreTrainedModel):
             embeddings of top antecedents for each candidate
         top_antecedent_offsets: tensor of size (candidates, antecedents)
             offsets for each mention/antecedent pair
-        top_span_speaker_ids: tensor of size (candidates)
-            speaker ids for each span
-        genre_emb: tensor of size (feature_size)
-            genre embedding for document
         segment_distance: tensor of size (candidates, antecedents)
             segment distances for each candidate antecedent pair
 
@@ -376,6 +372,7 @@ class MangoesMTL(BertPreTrainedModel):
         """
         document_range = torch.arange(start=0, end=hidden_states.shape[0], device=hidden_states.device).unsqueeze(
             0).repeat(span_starts.shape[0], 1)  # [num_cand, num_words]
+        # noinspection PyTypeChecker
         token_mask = torch.logical_and(document_range >= span_starts.unsqueeze(1),
                                        document_range <= span_ends.unsqueeze(1))  # [num_cand, num_words]
         token_atten = self.span_attend_projection(hidden_states).squeeze(1).unsqueeze(0)  # [1, num_words]
@@ -441,6 +438,7 @@ class MangoesMTL(BertPreTrainedModel):
         candidate_end_sentence_indices = sentence_map[
             torch.clamp(candidate_ends, max=num_words - 1)]  # [num_words, max_span_width]
         # find spans that are in the same segment and don't run past the end of the text
+        # noinspection PyTypeChecker
         candidate_mask = torch.logical_and(candidate_ends < num_words,
                                            torch.eq(candidate_start_sentence_indices,
                                                     candidate_end_sentence_indices)).view(
@@ -514,95 +512,121 @@ class MangoesMTL(BertPreTrainedModel):
         top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
 
 
-class BasicMTL(nn.Module):
-    def __init__(self, enc_modelnm: str, config: BertConfig):
-        super().__init__()
+class BasicMTL(BertPreTrainedModel):
+    def __init__(
+            self,
+            enc_modelnm: str,
+            n_classes_ner: int,
+            hidden_size: int,
+            unary_hdim: int,
+            top_span_ratio: float,
+            max_span_width: int,
+            max_top_antecedents: int,
+            device: Union[torch.device, str],
+            bias_in_last_layers: bool,
+            coref_loss_mean: bool,
+            coref_metadata_feature_size: int,
+            coref_max_training_segments: int,
+            coref_higher_order: int,
+            coref_dropout: float,
+            ner_unweighted: bool,
+            pruner_unweighted: bool,
+            vocab_size: int,
+            *args, **kwargs
+    ):
+        base_config = BertConfig(vocab_size=vocab_size)
         # super().__init__(config)
-
-        self.config = config
-        self.n_classes_ner = self.config.n_classes_ner
-        self.n_max_len: int = self.config.max_position_embeddings
-        self.n_hid_dim: int = self.config.hidden_size
-        n_coref_metadata_dim = self.config.coref_metadata_feature_size
+        super().__init__(base_config)
+        # super().__init__() # TODO: change this
 
         # Encoder responsible for giving contextual vectors to subword tokens
-        # self.bert = BertModel(enc_modelnm).to(config.device)
-        self.bert = BertModel.from_pretrained(enc_modelnm).to(config.device)
+        self.bert = BertModel(base_config, add_pooling_layer=False).to(device)
+        # self.bert = BertModel.from_pretrained(enc_modelnm).to(device)
 
-        # Span width embeddings give a fix dim score to width of spans (usually 1 to config.max_span_width (~5))
+        # Span width embeddings give a fix dim score to width of spans (usually 1 to max_span_width (~5))
         self.span_width_embeddings = nn.Embedding(
-            num_embeddings=self.config.max_span_width, embedding_dim=n_coref_metadata_dim,
-        ).to(config.device)
-        self.span_width_prior_embeddings = nn.Embedding(num_embeddings=self.config.max_span_width,
-                                                        embedding_dim=n_coref_metadata_dim).to(config.device)
+            num_embeddings=max_span_width, embedding_dim=coref_metadata_feature_size,
+        ).to(device)
+        self.span_width_prior_embeddings = nn.Embedding(num_embeddings=max_span_width,
+                                                        embedding_dim=coref_metadata_feature_size).to(device)
 
-        self.segment_dist_embeddings = nn.Embedding(num_embeddings=config.coref_max_training_segments,
-                                                    embedding_dim=n_coref_metadata_dim).to(config.device)
+        self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
+                                                    embedding_dim=coref_metadata_feature_size).to(device)
 
         # Used to push 768dim contextual vecs to 1D vectors for attention computation during span embedding creation
-        self.span_attend_projection = torch.nn.Linear(config.hidden_size, 1).to(config.device)
+        self.span_attend_projection = torch.nn.Linear(hidden_size, 1).to(device)
 
-        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim).to(config.device)
-        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=n_coref_metadata_dim).to(
-            config.device)
-        self.distance_projection = nn.Linear(n_coref_metadata_dim, 1).to(config.device)
+        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size).to(device)
+        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size).to(
+            device)
+        self.distance_projection = nn.Linear(coref_metadata_feature_size, 1).to(device)
 
         # Mention scorer (Unary, hdim) takes span representations and passes them through a 2 layer FF NN to score
         #   whether they are valid spans or not.
         #   NOTE: its use is conflated because it tries to do two things
         #       (i) find syntactically incoherent spans
         #       (ii) find spans that are not anaphoric
-        span_embedding_dim = 3 * config.hidden_size + n_coref_metadata_dim
+        span_embedding_dim = 3 * hidden_size + coref_metadata_feature_size
         self.unary_coref = nn.Sequential(
-            nn.Linear(span_embedding_dim, config.unary_hdim),
+            nn.Linear(span_embedding_dim, unary_hdim),
             nn.ReLU(),
-            nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
-        ).to(config.device)
+            nn.Dropout(coref_dropout),
+            nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
+        ).to(device)
         self.unary_width = nn.Sequential(
-            nn.Linear(n_coref_metadata_dim, config.unary_hdim),
+            nn.Linear(coref_metadata_feature_size, unary_hdim),
             nn.ReLU(),
-            nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
-        ).to(config.device)
+            nn.Dropout(coref_dropout),
+            nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
+        ).to(device)
 
         self.binary_coref_slow = nn.Sequential(
-            nn.Linear((span_embedding_dim * 3) + 2 * n_coref_metadata_dim, config.unary_hdim),
+            nn.Linear((span_embedding_dim * 3) + 2 * coref_metadata_feature_size, unary_hdim),
             nn.ReLU(),
-            nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, 1, bias=self.config.bias_in_last_layers),
-        ).to(config.device)
+            nn.Dropout(coref_dropout),
+            nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
+        ).to(device)
 
         # self.binary_coref = nn.Sequential(
-        #     nn.Linear((span_embedding_dim * 3), config.binary_hdim),
+        #     nn.Linear((span_embedding_dim * 3), binary_hdim),
         #     nn.ReLU(),
-        #     nn.Dropout(config.coref_dropout),
-        #     nn.Linear(config.binary_hdim, 1),
-        # ).to(config.device)
+        #     nn.Dropout(coref_dropout),
+        #     nn.Linear(binary_hdim, 1),
+        # ).to(device)
 
         self.unary_ner = nn.Sequential(
-            nn.Linear(span_embedding_dim, config.unary_hdim),
+            nn.Linear(span_embedding_dim, unary_hdim),
             nn.ReLU(),
-            nn.Dropout(config.coref_dropout),
-            nn.Linear(config.unary_hdim, self.n_classes_ner, bias=self.config.bias_in_last_layers),
-        ).to(config.device)
+            nn.Dropout(coref_dropout),
+            nn.Linear(unary_hdim, n_classes_ner, bias=bias_in_last_layers),
+        ).to(device)
 
-        self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim).to(config.device)
+        self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim).to(device)
         # TODO: why are no grads coming here?
-        self.slow_antecedent_projection = torch.nn.Linear(span_embedding_dim * 2, span_embedding_dim).to(config.device)
+        self.slow_antecedent_projection = torch.nn.Linear(span_embedding_dim * 2, span_embedding_dim).to(device)
 
         # Initialising Losses
         self.ner_loss = nn.functional.cross_entropy
         self.pruner_loss = self._rescaling_weights_bce_loss_
-        self.coref_loss_agg = torch.mean if config.coref_loss_mean else torch.sum
+        self.coref_loss_agg = torch.mean if coref_loss_mean else torch.sum
         try:
-            self.ner_unweighted = self.config.ner_unweighted
+            self.ner_unweighted = ner_unweighted
         except AttributeError:
             self.ner_unweighted = False
         try:
-            self.pruner_unweighted = self.config.pruner_unweighted
+            self.pruner_unweighted = pruner_unweighted
         except AttributeError:
             self.pruner_unweighted = False
+
+        # Some variables are needed everywhere
+        self._device = device
+        self.coref_dropout = coref_dropout
+        self.coref_max_training_segments = coref_max_training_segments
+        self.top_span_ratio = top_span_ratio
+        self.max_top_antecedents = max_top_antecedents
+        self.coref_higher_order = coref_higher_order
+        self.max_span_width = max_span_width
+        self.hidden_size = hidden_size
 
     @staticmethod
     def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.Tensor] = None):
@@ -631,7 +655,7 @@ class BasicMTL(nn.Module):
         """
         document_range = (
             torch.arange(
-                start=0, end=hidden_states.shape[0], device=self.config.device
+                start=0, end=hidden_states.shape[0], device=self._device
             ).unsqueeze(0).repeat(span_starts.shape[0], 1)
         )  # [num_cand, num_words]
         # noinspection PyTypeChecker
@@ -698,7 +722,7 @@ class BasicMTL(nn.Module):
         span_width_index = span_width - 1  # [num_cand]
         span_width_emb = self.span_width_embeddings(span_width_index)  # [num_cand, emb]
         span_width_emb = F.dropout(
-            span_width_emb, p=self.config.coref_dropout, training=self.training
+            span_width_emb, p=self.coref_dropout, training=self.training
         )
         emb.append(span_width_emb)
 
@@ -726,8 +750,8 @@ class BasicMTL(nn.Module):
             tensor of size (candidates, span_embedding_size)
         """
         source_emb = F.dropout(self.fast_antecedent_projection(span_emb),
-                               p=self.config.coref_dropout, training=self.training)  # [cand, emb]
-        target_emb = F.dropout(span_emb, p=self.config.coref_dropout, training=self.training)  # [cand, emb]
+                               p=self.coref_dropout, training=self.training)  # [cand, emb]
+        target_emb = F.dropout(span_emb, p=self.coref_dropout, training=self.training)  # [cand, emb]
         return torch.mm(source_emb, target_emb.t())  # [cand, cand]
 
     def _get_slow_antecedent_scores_(
@@ -779,11 +803,11 @@ class BasicMTL(nn.Module):
 
         # segment distance
         segment_distance_emb = self.segment_dist_embeddings(
-            torch.arange(start=0, end=self.config.coref_max_training_segments, device=top_span_emb.device))
+            torch.arange(start=0, end=self.coref_max_training_segments, device=top_span_emb.device))
         feature_emb_list.append(segment_distance_emb[segment_distance])  # [cand, ant, feature_size]
 
         feature_emb = torch.cat(feature_emb_list, 2)  # [cand, ant, emb]
-        feature_emb = F.dropout(feature_emb, p=self.config.coref_dropout,
+        feature_emb = F.dropout(feature_emb, p=self.coref_dropout,
                                 training=self.training)  # [cand, ant, emb]
         target_emb = top_span_emb.unsqueeze(1)  # [cand, 1, emb]
         similarity_emb = top_antecedent_emb * target_emb  # [cand, ant, emb]
@@ -827,7 +851,7 @@ class BasicMTL(nn.Module):
         # add distance scores
         antecedent_distance_buckets = self._bucket_distance_(antecedent_offsets).to(span_emb.device)  # [cand, cand]
         bucket_embeddings = F.dropout(self.distance_embeddings(torch.arange(start=0, end=10, device=span_emb.device)),
-                                      p=self.config.coref_dropout, training=self.training)  # [10, feature_size]
+                                      p=self.coref_dropout, training=self.training)  # [10, feature_size]
         bucket_scores = self.distance_projection(bucket_embeddings)  # [10, 1]
         fast_antecedent_scores += bucket_scores[antecedent_distance_buckets].squeeze(-1)  # [cand, cand]
         # get top antecedent scores/features
@@ -1012,8 +1036,8 @@ class BasicMTL(nn.Module):
         candidate_span_scores += self.unary_width(span_width_emb).squeeze(1)
 
         # get beam size
-        n_top_spans = int(float(n_subwords * self.config.top_span_ratio))
-        n_top_ante = min(self.config.max_top_antecedents, n_top_spans)
+        n_top_spans = int(float(n_subwords * self.top_span_ratio))
+        n_top_ante = min(self.max_top_antecedents, n_top_spans)
 
         # Get top mention scores and sort by span order (avoiding overlaps in selected spans)
         top_span_indices = self._extract_spans_(
@@ -1027,7 +1051,7 @@ class BasicMTL(nn.Module):
         top_span_mention_scores = candidate_span_scores[top_span_indices]  # [top_cand]
 
         # Make another field which is one hot in cand. space, indicating the top_span_indices
-        logits_after_pruning = torch.zeros_like(candidate_starts, device=self.config.device, dtype=torch.float)
+        logits_after_pruning = torch.zeros_like(candidate_starts, device=self._device, dtype=torch.float)
         logits_after_pruning[top_span_indices] = 1
 
         return {
@@ -1068,7 +1092,7 @@ class BasicMTL(nn.Module):
         """
 
         # c2f block
-        dummy_scores = torch.zeros([n_top_spans, 1], device=self.config.device)  # [top_cand, 1]
+        dummy_scores = torch.zeros([n_top_spans, 1], device=self._device)  # [top_cand, 1]
         top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedent_offsets = \
             self._coarse_to_fine_pruning_(top_span_emb, top_span_mention_scores, n_top_antecedents)
 
@@ -1080,7 +1104,7 @@ class BasicMTL(nn.Module):
         mention_segments = flat_word_segments[top_span_starts].view(-1, 1)  # [top_cand, 1]
         antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]]  # [top_cand, top_ant]
         segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
-                                       self.config.coref_max_training_segments - 1)  # [top_cand, top_ant]
+                                       self.coref_max_training_segments - 1)  # [top_cand, top_ant]
 
         # # calculate final slow scores (this was a higher order for loop that we paved over)
         # top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
@@ -1107,7 +1131,7 @@ class BasicMTL(nn.Module):
             Now we've even added higher order stuff in. I just want it to work :crying:
         """
         # calculate final slow scores
-        for i in range(self.config.coref_higher_order):
+        for i in range(self.coref_higher_order):
             top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
             top_antecedent_scores = top_antecedents_fast_scores + \
                                     self._get_slow_antecedent_scores_(top_span_emb,
@@ -1211,13 +1235,13 @@ class BasicMTL(nn.Module):
         # # The [n_ana, n_ana] lower triangular mat now has sorted span indices.
         # # We further need to clamp them to k.
         # # For that, we just crop top_antecedents_ind__filtered
-        # top_antecedents_ind__filtered = top_antecedents_ind__filtered[:, : self.config.max_top_antecedents]
+        # top_antecedents_ind__filtered = top_antecedents_ind__filtered[:, : self.max_top_antecedents]
         # # [n_ana, n_ante]
         #
         # # # Below is garbage, ignore
         # # # For that, a simple col mul. will suffice
         # # column_mask = torch.zeros((num_top_mentions,), device=encoded.device, dtype=torch.float)
-        # # column_mask[:config.max_top_antecedents] = 1
+        # # column_mask[:max_top_antecedents] = 1
         # # top_antecedents_ind__filtered = top_antecedents_ind__filtered*column_mask
         #
         # # At this point, top_antecedents_ind__filtered has -1 representing masked out things,
@@ -1232,7 +1256,7 @@ class BasicMTL(nn.Module):
         # # top_antecedents_ind__filtered = torch.hstack(
         # #     [
         # #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
-        # #                     dtype=torch.int64, device=self.config.device) - 1,
+        # #                     dtype=torch.int64, device=self.device) - 1,
         # #         top_antecedents_ind__filtered
         # #     ]
         # # )
@@ -1240,7 +1264,7 @@ class BasicMTL(nn.Module):
         #     [
         #         top_antecedents_ind__filtered,
         #         torch.zeros((top_antecedents_ind__filtered.shape[0], 1),
-        #                     dtype=torch.int64, device=self.config.device) - 1,
+        #                     dtype=torch.int64, device=self.device) - 1,
         #     ]
         # )  # TODO: try putting dummies to left and taking care of the rest of the code
         # top_antecedents_mask = torch.ones_like(top_antecedents_ind__filtered)
@@ -1259,7 +1283,7 @@ class BasicMTL(nn.Module):
         #     1
         # )  # [n_ana, n_ante, span_emb]
         # anaphor_emb = top_span_emb.unsqueeze(1).repeat(
-        #     1, min(n_top_spans, self.config.max_top_antecedents), 1
+        #     1, min(n_top_spans, self.max_top_antecedents), 1
         # )  # [n_ana, n_ante, span_emb]
         # pair_emb = torch.cat(
         #     [anaphor_emb, top_antecedents_emb__filtered, similarity_emb], 2
@@ -1370,11 +1394,11 @@ class BasicMTL(nn.Module):
             f"encoder: {self.bert.device}, input_ids: {input_ids.device}, attn_mask: {attention_mask.device}"
 
         encoded = self.bert(input_ids, attention_mask)[0]  # n_seq, m_len, h_dim
-        encoded = encoded.reshape((-1, self.n_hid_dim))  # n_seq * m_len, h_dim
+        encoded = encoded.reshape((-1, self.hidden_size))  # n_seq * m_len, h_dim
 
         # Remove all the padded tokens, using info from attention masks
         encoded = torch.masked_select(encoded, attention_mask.bool().view(-1, 1)).view(
-            -1, self.n_hid_dim
+            -1, self.hidden_size
         )  # n_words, h_dim
         input_ids = torch.masked_select(input_ids, attention_mask.bool()).view(
             -1, 1
@@ -1387,9 +1411,9 @@ class BasicMTL(nn.Module):
         """
         candidate_starts = torch.arange(start=0,
                                         end=input_ids.shape[0],
-                                        device=self.config.device).view(-1, 1).repeat(1, self.config.max_span_width)
-        candidate_ends = candidate_starts + torch.arange(start=0, end=self.config.max_span_width,
-                                                         device=self.config.device).unsqueeze(0)
+                                        device=self._device).view(-1, 1).repeat(1, self.max_span_width)
+        candidate_ends = candidate_starts + torch.arange(start=0, end=self.max_span_width,
+                                                         device=self._device).unsqueeze(0)
         candidate_start_sentence_indices = sentence_map[candidate_starts]  # [num_words, max_span_width]
         candidate_end_sentence_indices = sentence_map[
             torch.clamp(candidate_ends, max=input_ids.shape[0] - 1)]  # [num_words, max_span_width]
@@ -1502,8 +1526,6 @@ class BasicMTL(nn.Module):
         :param word_map: list of word ID for each subword (excluding padded stuff)
         :param n_words: number of words (not subwords) in the original doc
         :param n_subwords: number of subwords
-        :param candidate_starts: subword ID for candidate span starts
-        :param candidate_ends: subword ID for candidate span ends
         :param tasks: list of which forward functions to compute (and which labels to expect) e.g. ['coref', 'ner']
         :param coref: A dict containing gold annotations for coref for this document.
         It is expected to be there if 'coref' is a element in arg "tasks"
@@ -1655,7 +1677,7 @@ class BasicMTL(nn.Module):
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
-            coref_loss = self.coref_loss_agg(coref_loss)  # can be a mean or a sum depending on config.
+            coref_loss = self.coref_loss_agg(coref_loss)  # can be a mean or a sum depending on conf.
 
             predictions["loss"] = coref_loss
             coref_logits = top_antecedent_scores
@@ -1771,32 +1793,3 @@ class BasicMTL(nn.Module):
 
 if __name__ == "__main__":
     ...
-
-    # ce ne marche pas, desole
-    # config = transformers.BertConfig("bert-base-uncased")
-    # config.max_span_width = 5
-    # config.coref_dropout = 0.3
-    # config.coref_metadata_feature_size = 20
-    # config.unary_hdim = 1000
-    # config.binary_hdim = 2000
-    # config.top_span_ratio = 0.4
-    # config.max_top_antecedents = 50
-    # config.device = "cpu"
-    # config.name = "bert-base-uncased"
-    #
-    # # Init the tokenizer
-    # tokenizer = transformers.BertTokenizer.from_pretrained("bert-base-uncased")
-    #
-    # # Get the dataset up and running
-    # ds = MultiTaskDataIter(
-    #     "ontonotes", "train", tokenizer=tokenizer, config=config, tasks=("ner",)
-    # )
-    #
-    # # Make the model
-    # model = BasicMTL("bert-base-uncased", config=config)
-    #
-    # # Try to wrap it in a dataloader
-    # for x in ds:
-    #     pred = model.pred_with_labels(**x)
-    #     print(pred)
-    #     ...
