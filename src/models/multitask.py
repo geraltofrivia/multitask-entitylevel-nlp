@@ -559,7 +559,7 @@ class MangoesMTL(BertPreTrainedModel):
             n_subwords=n_subwords,
             coref_gold_starts=coref.get('gold_starts', None),
             coref_gold_ends=coref.get('gold_ends', None),
-            coref_gold_cluster_ids=coref.get('gold_cluster_ids', None),
+            coref_gold_cluster_ids=coref.get('gold_label_values', None),
             pruner_gold_labels=pruner.get('gold_labels', None),
             ner_gold_labels=ner.get('gold_labels', None)
         )
@@ -599,7 +599,7 @@ class MangoesMTL(BertPreTrainedModel):
 
             # And now, code that helps with eval
             gold_clusters = {}
-            _cluster_ids = coref["gold_cluster_ids"]
+            _cluster_ids = coref["gold_label_values"]
             _gold_starts = coref["gold_starts"]
             _gold_ends = coref["gold_ends"]
             ids = predictions["flattened_ids"]
