@@ -40,6 +40,8 @@ class MangoesMTL(BertPreTrainedModel):
             top_span_ratio: int,
             max_top_antecedents: int,
             coref_dropout: float,
+            unary_hdim,
+            binary_hdim,
             coref_higher_order: int,
             coref_metadata_feature_size: int,
             coref_max_training_segments: int,
@@ -52,27 +54,30 @@ class MangoesMTL(BertPreTrainedModel):
         self.bert = BertModel(base_config, add_pooling_layer=False)
         # self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False)
 
-        self.span_attend_projection = torch.nn.Linear(hidden_size, 1)
-        span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
+        ffnn_hidden_size = unary_hdim
+        bert_hidden_size = hidden_size
+
+        self.span_attend_projection = torch.nn.Linear(bert_hidden_size, 1)
+        span_embedding_dim = (bert_hidden_size * 3) + coref_metadata_feature_size
         self.coref_dropout = coref_dropout
         self.mention_scorer = nn.Sequential(
-            nn.Linear(span_embedding_dim, hidden_size),
+            nn.Linear(span_embedding_dim, ffnn_hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(hidden_size, 1),
+            nn.Linear(ffnn_hidden_size, 1),
         )
         self.width_scores = nn.Sequential(
-            nn.Linear(coref_metadata_feature_size, hidden_size),
+            nn.Linear(coref_metadata_feature_size, ffnn_hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(hidden_size, 1),
+            nn.Linear(ffnn_hidden_size, 1),
         )
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim)
         self.slow_antecedent_scorer = nn.Sequential(
-            nn.Linear((span_embedding_dim * 3) + (coref_metadata_feature_size * 2), hidden_size),
+            nn.Linear((span_embedding_dim * 3) + (coref_metadata_feature_size * 2), ffnn_hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(hidden_size, 1),
+            nn.Linear(ffnn_hidden_size, 1),
         )
         self.slow_antecedent_projection = torch.nn.Linear(span_embedding_dim * 2, span_embedding_dim)
         # metadata embeddings

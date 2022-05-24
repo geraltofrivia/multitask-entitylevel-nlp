@@ -318,7 +318,7 @@ def run(
     config.max_span_width = max_span_width
     config.coref_dropout = 0.3
     config.metadata_feature_size = 20
-    config.unary_hdim = 1000
+    config.unary_hdim = 3000
     config.binary_hdim = 2000
     config.top_span_ratio = 0.4
     config.max_top_antecedents = 50
