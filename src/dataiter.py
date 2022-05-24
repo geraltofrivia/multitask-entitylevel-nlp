@@ -123,9 +123,9 @@ class MultiTaskDataIter(Dataset):
                                                                   dtype=torch.float)
             # Update self.data with these class weights
             for i, item in enumerate(self.data):
-                if 'ner' in item:
+                if item['ner']:
                     self.data[i]['ner']['weights'] = self.task_weights['ner']
-                if 'pruner' in item:
+                if item['pruner']:
                     self.data[i]['pruner']['weights'] = self.task_weights['pruner']
 
             # Write this to disk
@@ -631,7 +631,10 @@ class MultiTaskDataIter(Dataset):
             "n_subwords": n_subwords,
             # "candidate_starts": candidate_starts,
             # "candidate_ends": candidate_ends,
-            "loss_scales": self.loss_scales
+            "loss_scales": self.loss_scales,
+            "coref": {},
+            "ner": {},
+            "pruner": {}
         }
 
         if "coref" in self._tasks_ or "pruner" in self._tasks_:

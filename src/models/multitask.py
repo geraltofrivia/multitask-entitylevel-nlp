@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import BertModel, BertConfig, BertTokenizer, BertPreTrainedModel
+from transformers import BertModel, BertConfig, BertPreTrainedModel
 
 # Local imports
 try:
@@ -31,44 +31,48 @@ torch.backends.cudnn.deterministic = True
 
 class MangoesMTL(BertPreTrainedModel):
 
-    def __init__(self, enc_nm: str, actual_config: BertConfig, tokenizer: BertTokenizer):
+    def __init__(
+            self,
+            enc_nm: str,
+            vocab_size: int,
+            hidden_size: int,
+            max_span_width: int,
+            top_span_ratio: int,
+            max_top_antecedents: int,
+            coref_dropout: float,
+            coref_higher_order: int,
+            coref_metadata_feature_size: int,
+            coref_max_training_segments: int,
+            *args, **kwargs
+    ):
 
-        base_config = BertConfig(vocab_size=len(tokenizer.get_vocab()))
+        base_config = BertConfig(vocab_size=vocab_size)
         super().__init__(base_config)
-
-        self.config = actual_config
-        max_training_segments = self.config.coref_max_training_segments
-        max_span_width: int = self.config.max_span_width
-        ffnn_hidden_size: int = self.config.hidden_size
-        coref_dropout = self.config.coref_dropout
-        metadata_feature_size = self.config.coref_metadata_feature_size
-        top_span_ratio = self.config.top_span_ratio
 
         self.bert = BertModel(base_config, add_pooling_layer=False)
         # self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False)
 
-        bert_emb_size = actual_config.hidden_size
-        self.span_attend_projection = torch.nn.Linear(bert_emb_size, 1)
-        span_embedding_dim = (bert_emb_size * 3) + metadata_feature_size
+        self.span_attend_projection = torch.nn.Linear(hidden_size, 1)
+        span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
         self.coref_dropout = coref_dropout
         self.mention_scorer = nn.Sequential(
-            nn.Linear(span_embedding_dim, ffnn_hidden_size),
+            nn.Linear(span_embedding_dim, hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(ffnn_hidden_size, 1),
+            nn.Linear(hidden_size, 1),
         )
         self.width_scores = nn.Sequential(
-            nn.Linear(metadata_feature_size, ffnn_hidden_size),
+            nn.Linear(coref_metadata_feature_size, hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(ffnn_hidden_size, 1),
+            nn.Linear(hidden_size, 1),
         )
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim)
         self.slow_antecedent_scorer = nn.Sequential(
-            nn.Linear((span_embedding_dim * 3) + (metadata_feature_size * 2), ffnn_hidden_size),
+            nn.Linear((span_embedding_dim * 3) + (coref_metadata_feature_size * 2), hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(ffnn_hidden_size, 1),
+            nn.Linear(hidden_size, 1),
         )
         self.slow_antecedent_projection = torch.nn.Linear(span_embedding_dim * 2, span_embedding_dim)
         # metadata embeddings
@@ -76,21 +80,22 @@ class MangoesMTL(BertPreTrainedModel):
         # self.genres = {g: i for i, g in enumerate(genres)}
         # self.genre_embeddings = nn.Embedding(num_embeddings=len(self.genres), embedding_dim=metadata_feature_size)
 
-        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=metadata_feature_size)
-        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=metadata_feature_size)
-        self.distance_projection = nn.Linear(metadata_feature_size, 1)
-        self.same_speaker_embeddings = nn.Embedding(num_embeddings=2, embedding_dim=metadata_feature_size)
-        self.span_width_embeddings = nn.Embedding(num_embeddings=max_span_width, embedding_dim=metadata_feature_size)
+        self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
+        self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
+        self.distance_projection = nn.Linear(coref_metadata_feature_size, 1)
+        self.same_speaker_embeddings = nn.Embedding(num_embeddings=2, embedding_dim=coref_metadata_feature_size)
+        self.span_width_embeddings = nn.Embedding(num_embeddings=max_span_width,
+                                                  embedding_dim=coref_metadata_feature_size)
         self.span_width_prior_embeddings = nn.Embedding(num_embeddings=max_span_width,
-                                                        embedding_dim=metadata_feature_size)
-        self.segment_dist_embeddings = nn.Embedding(num_embeddings=max_training_segments,
-                                                    embedding_dim=metadata_feature_size)
+                                                        embedding_dim=coref_metadata_feature_size)
+        self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
+                                                    embedding_dim=coref_metadata_feature_size)
 
         self.max_span_width = max_span_width
         self.top_span_ratio = top_span_ratio
-        self.max_top_antecendents = self.config.max_top_antecendents
-        self.max_training_segments = max_training_segments
-        self.coref_depth = self.config.coref_higher_order
+        self.max_top_antecendents = max_top_antecedents
+        self.coref_max_training_segments = coref_max_training_segments
+        self.coref_depth = coref_higher_order
 
         self.init_weights()
 
@@ -195,7 +200,7 @@ class MangoesMTL(BertPreTrainedModel):
 
         # segment distance
         segment_distance_emb = self.segment_dist_embeddings(
-            torch.arange(start=0, end=self.max_training_segments, device=top_span_emb.device))
+            torch.arange(start=0, end=self.coref_max_training_segments, device=top_span_emb.device))
         feature_emb_list.append(segment_distance_emb[segment_distance])  # [cand, ant, feature_size]
 
         feature_emb = torch.cat(feature_emb_list, 2)  # [cand, ant, emb]
@@ -487,7 +492,7 @@ class MangoesMTL(BertPreTrainedModel):
         mention_segments = flat_word_segments[top_span_starts].view(-1, 1)  # [top_cand, 1]
         antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]]  # [top_cand, top_ant]
         segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
-                                       self.max_training_segments - 1)  # [top_cand, top_ant]
+                                       self.coref_max_training_segments - 1)  # [top_cand, top_ant]
 
         # calculate final slow scores
         for i in range(self.coref_depth):
@@ -552,11 +557,11 @@ class MangoesMTL(BertPreTrainedModel):
             n_words=n_words,
             tasks=tasks,
             n_subwords=n_subwords,
-            coref_gold_starts=coref.get(['gold_starts'], None),
-            coref_gold_ends=coref.get(['gold_ends'], None),
-            coref_gold_cluster_ids=coref.get(['gold_cluster_ids'], None),
-            pruner_gold_labels=pruner.get(['gold_labels'], None),
-            ner_gold_labels=ner.get(['gold_labels'], None)
+            coref_gold_starts=coref.get('gold_starts', None),
+            coref_gold_ends=coref.get('gold_ends', None),
+            coref_gold_cluster_ids=coref.get('gold_cluster_ids', None),
+            pruner_gold_labels=pruner.get('gold_labels', None),
+            ner_gold_labels=ner.get('gold_labels', None)
         )
 
         candidate_starts = predictions['candidate_starts']
