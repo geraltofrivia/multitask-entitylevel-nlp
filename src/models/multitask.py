@@ -411,9 +411,9 @@ class MangoesMTL(BertPreTrainedModel):
             n_words: int,
             n_subwords: int,
             tasks: Iterable[str],
-            gold_starts: torch.tensor = None,
-            gold_ends: torch.tensor = None,
-            gold_cluster_ids: torch.tensor = None,
+            coref_gold_starts: torch.tensor = None,
+            coref_gold_ends: torch.tensor = None,
+            coref_gold_cluster_ids: torch.tensor = None,
             *args,
             **kwargs
     ):
@@ -446,9 +446,10 @@ class MangoesMTL(BertPreTrainedModel):
         candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # [candidates]
         candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # [candidates]
 
-        if gold_ends is not None and gold_starts is not None and gold_cluster_ids is not None:
-            candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends, gold_starts, gold_ends,
-                                                              gold_cluster_ids)  # [candidates]
+        if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
+            candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
+                                                              coref_gold_starts, coref_gold_ends,
+                                                              coref_gold_cluster_ids)  # [candidates]
 
         # get span embeddings and mention scores
         span_emb = self.get_span_embeddings(mention_doc, candidate_starts, candidate_ends)  # [candidates, span_emb]
@@ -469,17 +470,15 @@ class MangoesMTL(BertPreTrainedModel):
         top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
         top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
         top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
-        if gold_ends is not None and gold_starts is not None and gold_cluster_ids is not None:
+        if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
+            # noinspection PyUnboundLocalVariable
             top_span_cluster_ids = candidate_cluster_ids[top_span_indices]  # [top_cand]
 
         # course to fine pruning
         dummy_scores = torch.zeros([num_top_mentions, 1], device=top_span_indices.device)  # [top_cand, 1]
-        top_antecedents, \
-        top_antecedents_mask, \
-        top_antecedents_fast_scores, \
-        top_antecedent_offsets = self.coarse_to_fine_pruning(top_span_emb,
-                                                             top_span_mention_scores,
-                                                             num_top_antecedents)
+        top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedent_offsets = \
+            self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, num_top_antecedents)
+
         num_segments = input_ids.shape[0]
         segment_length = input_ids.shape[1]
         word_segments = torch.arange(start=0, end=num_segments, device=input_ids.device).view(-1, 1).repeat(
@@ -509,7 +508,167 @@ class MangoesMTL(BertPreTrainedModel):
                 self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
             top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
 
+        # noinspection PyUnboundLocalVariable
         top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
+
+        # noinspection PyUnboundLocalVariable
+        return {
+            "candidate_starts": candidate_starts,
+            "candidate_ends": candidate_ends,
+            "flattened_ids": flattened_ids,
+            "candidate_mention_scores": candidate_mention_scores,
+            "top_span_starts": top_span_starts,
+            "top_span_ends": top_span_ends,
+            "coref_top_antecedents": top_antecedents,
+            "coref_top_antecedent_scores": top_antecedent_scores,
+            "coref_top_antecedents_mask": top_antecedents_mask,
+            "coref_top_span_cluster_ids": top_span_cluster_ids,
+        }
+
+    def pred_with_labels(
+            self,
+            input_ids: torch.tensor,
+            attention_mask: torch.tensor,
+            token_type_ids: torch.tensor,
+            sentence_map: List[int],
+            word_map: List[int],
+            n_words: int,
+            n_subwords: int,
+            tasks: Iterable[str],
+            coref: dict = None,
+            ner: dict = None,
+            pruner: dict = None,
+            *args, **kwargs
+    ):
+
+        # Run the model.
+        # this will get all outputs regardless of whatever tasks are thrown atcha
+        predictions = self.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            sentence_map=sentence_map,
+            word_map=word_map,
+            n_words=n_words,
+            tasks=tasks,
+            n_subwords=n_subwords,
+            coref_gold_starts=coref.get(['gold_starts'], None),
+            coref_gold_ends=coref.get(['gold_ends'], None),
+            coref_gold_cluster_ids=coref.get(['gold_cluster_ids'], None),
+            pruner_gold_labels=pruner.get(['gold_labels'], None),
+            ner_gold_labels=ner.get(['gold_labels'], None)
+        )
+
+        candidate_starts = predictions['candidate_starts']
+        candidate_ends = predictions['candidate_ends']
+
+        outputs = {
+            "loss": {},
+            "num_candidates": candidate_starts.shape[0]
+        }
+
+        if "pruner" in tasks:
+            raise NotImplementedError
+
+        if "ner" in tasks:
+            raise NotImplementedError
+
+        if "coref" in tasks:
+
+            top_span_cluster_ids = predictions["coref_top_span_cluster_ids"]
+            top_antecedents = predictions["coref_top_antecedents"]
+            top_antecedents_mask = predictions["coref_top_antecedents_mask"]
+            top_antecedent_scores = predictions["coref_top_antecedent_scores"]
+
+            # Unpack everything we need
+            top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents]  # [top_cand, top_ant]
+            top_antecedent_cluster_ids += torch.log(top_antecedents_mask.float()).int()  # [top_cand, top_ant]
+            same_cluster_indicator = torch.eq(top_antecedent_cluster_ids,
+                                              top_span_cluster_ids.unsqueeze(1))  # [top_cand, top_ant]
+            non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
+            pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
+            dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
+            top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
+            coref_loss = self.softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
+            coref_loss = torch.sum(coref_loss)
+
+            # And now, code that helps with eval
+            gold_clusters = {}
+            _cluster_ids = coref["gold_cluster_ids"]
+            _gold_starts = coref["gold_starts"]
+            _gold_ends = coref["gold_ends"]
+            ids = predictions["flattened_ids"]
+            top_span_starts = predictions["top_span_starts"]
+            top_span_ends = predictions["top_span_ends"]
+            top_antecedents = predictions["coref_top_antecedents"]
+
+            for i in range(len(_cluster_ids)):
+                assert len(_cluster_ids) == len(_gold_starts) == len(_gold_ends)
+                cid = _cluster_ids[i].item()
+                if cid in gold_clusters:
+                    gold_clusters[cid].append((_gold_starts[i].item(),
+                                               _gold_ends[i].item()))
+                else:
+                    gold_clusters[cid] = [(_gold_starts[i].item(),
+                                           _gold_ends[i].item())]
+
+            gold_clusters = [tuple(v) for v in gold_clusters.values()]
+            mention_to_gold = {}
+            for c in gold_clusters:
+                for mention in c:
+                    mention_to_gold[mention] = c
+
+            top_indices = torch.argmax(top_antecedent_scores, dim=-1, keepdim=False)
+            mention_indices = []
+            antecedent_indices = []
+            predicted_antecedents = []
+            for i in range(len(top_span_ends)):
+                if top_indices[i] > 0:
+                    mention_indices.append(i)
+                    antecedent_indices.append(top_antecedents[i][top_indices[i] - 1].item())
+                    predicted_antecedents.append(top_indices[i] - 1)
+
+            cluster_sets = []
+            for i in range(len(mention_indices)):
+                new_cluster = True
+                for j in range(len(cluster_sets)):
+                    if mention_indices[i] in cluster_sets[j] or antecedent_indices[i] in cluster_sets[j]:
+                        cluster_sets[j].add(mention_indices[i])
+                        cluster_sets[j].add(antecedent_indices[i])
+                        new_cluster = False
+                        break
+                if new_cluster:
+                    cluster_sets.append({mention_indices[i], antecedent_indices[i]})
+
+            cluster_dicts = []
+            clusters = []
+            for i in range(len(cluster_sets)):
+                cluster_mentions = sorted(list(cluster_sets[i]))
+                current_ids = []
+                current_start_end = []
+                for mention_index in cluster_mentions:
+                    current_ids.append(ids[top_span_starts[mention_index]:top_span_ends[mention_index] + 1])
+                    current_start_end.append(
+                        (top_span_starts[mention_index].item(), top_span_ends[mention_index].item()))
+                cluster_dicts.append({"cluster_ids": current_ids})
+                clusters.append(tuple(current_start_end))
+
+            mention_to_predicted = {}
+            for c in clusters:
+                for mention in c:
+                    mention_to_predicted[mention] = c
+
+            coref_eval = {
+                "clusters": clusters,
+                "gold_clusters": gold_clusters,
+                "mention_to_predicted": mention_to_predicted,
+                "mention_to_gold": mention_to_gold
+            }
+
+            outputs["loss"]["coref"] = coref_loss
+            outputs["coref"] = {"eval": coref_eval}
+
+        return outputs
 
 
 class BasicMTL(BertPreTrainedModel):
@@ -1532,7 +1691,7 @@ class BasicMTL(BertPreTrainedModel):
         Specifically,
             gold_starts: subword ID for actual span starts [n_gold_spans,]
             gold_ends: subword ID for actual span ends [n_gold_spans,]
-            gold_cluster_ids_on_candidates: cluster ID for actual spans [n_gold_spans,]
+            gold_cluster_ids: cluster ID for actual spans [n_gold_spans,]
                 indexed according to the candidate spans i.e. 0 when candidate is not annotated,
                 >0 for actual cluster ID of the candidate span
                 (starts with 1)
@@ -1683,84 +1842,74 @@ class BasicMTL(BertPreTrainedModel):
             coref_logits = top_antecedent_scores
             coref_labels = top_antecedent_labels
 
-            if prep_coref_eval:
+            # We go for each cluster id. That's not too difficult
+            gold_clusters = {}
+            for i, val in enumerate(coref_gold_label_values):
+                cluster_id = val.item()
 
-                """
-                     Prepping things for evaluation (muc, b-cubed etc).
-                     Appropriating the second last cell of 
-                        https://gitlab.inria.fr/magnet/mangoes/-/blob/master/notebooks/BERT%20for%20Co-reference%20Resolution%20-%20Ontonotes.ipynb
-                """
-                # We go for each cluster id. That's not too difficult
-                gold_clusters = {}
-                for i, val in enumerate(coref_gold_label_values):
-                    cluster_id = val.item()
+                # Populate the dict
+                if cluster_id in gold_clusters:
+                    gold_clusters[cluster_id].append((coref_gold_starts[i].item(), coref_gold_ends[i].item()))
+                else:
+                    gold_clusters[cluster_id] = [(coref_gold_starts[i].item(), coref_gold_ends[i].item())]
 
-                    # Populate the dict
-                    if cluster_id in gold_clusters:
-                        gold_clusters[cluster_id].append((coref_gold_starts[i].item(), coref_gold_ends[i].item()))
-                    else:
-                        gold_clusters[cluster_id] = [(coref_gold_starts[i].item(), coref_gold_ends[i].item())]
+            # Gold clusters is a dict of tuple of (start, end), (start, end) corresponding to every cluster ID
+            gold_clusters = [tuple(v) for v in gold_clusters.values()]
 
-                # Gold clusters is a dict of tuple of (start, end), (start, end) corresponding to every cluster ID
-                gold_clusters = [tuple(v) for v in gold_clusters.values()]
+            mention_to_gold = {}
+            for cluster in gold_clusters:
+                for mention in cluster:
+                    mention_to_gold[mention] = cluster
 
-                mention_to_gold = {}
-                for cluster in gold_clusters:
-                    for mention in cluster:
-                        mention_to_gold[mention] = cluster
+            ids = input_ids
+            top_span_starts = top_span_starts
+            top_span_ends = top_span_ends
+            mention_indices = []
+            antecedent_indices = []
+            top_antecedents_DEBUG = torch.argmax(top_antecedent_scores, dim=-1, keepdim=False)
+            for i in range(len(top_span_ends)):
+                # If ith span is predicted to be related to an actual antecedent
+                # TODO top antecedents may not be made correctly!!!
+                if top_antecedents_DEBUG[i].item() > 0:
+                    mention_indices.append(i)
+                    antecedent_indices.append(top_antecedents_DEBUG[i].item())
 
-                ids = input_ids
-                top_span_starts = top_span_starts
-                top_span_ends = top_span_ends
-                mention_indices = []
-                antecedent_indices = []
-                top_antecedents_DEBUG = torch.argmax(top_antecedent_scores, dim=-1, keepdim=False)
-                for i in range(len(top_span_ends)):
-                    # If ith span is predicted to be related to an actual antecedent
-                    # TODO top antecedents may not be made correctly!!!
-                    if top_antecedents_DEBUG[i].item() > 0:
-                        mention_indices.append(i)
-                        antecedent_indices.append(top_antecedents_DEBUG[i].item())
+            cluster_sets = []
+            for i in range(len(mention_indices)):
+                new_cluster = True
+                for j in range(len(cluster_sets)):
+                    if mention_indices[i] in cluster_sets[j] or antecedent_indices[i] in cluster_sets[j]:
+                        cluster_sets[j].add(mention_indices[i])
+                        cluster_sets[j].add(antecedent_indices[i])
+                        new_cluster = False
+                        break
+                if new_cluster:
+                    cluster_sets.append({mention_indices[i], antecedent_indices[i]})
 
-                cluster_sets = []
-                for i in range(len(mention_indices)):
-                    new_cluster = True
-                    for j in range(len(cluster_sets)):
-                        if mention_indices[i] in cluster_sets[j] or antecedent_indices[i] in cluster_sets[j]:
-                            cluster_sets[j].add(mention_indices[i])
-                            cluster_sets[j].add(antecedent_indices[i])
-                            new_cluster = False
-                            break
-                    if new_cluster:
-                        cluster_sets.append({mention_indices[i], antecedent_indices[i]})
+            cluster_dicts = []
+            clusters = []
+            for i in range(len(cluster_sets)):
+                cluster_mentions = sorted(list(cluster_sets[i]))
+                current_ids = []
+                current_start_end = []
+                for mention_index in cluster_mentions:
+                    current_ids.append(ids[top_span_starts[mention_index]:top_span_ends[mention_index] + 1])
+                    current_start_end.append(
+                        (top_span_starts[mention_index].item(), top_span_ends[mention_index].item()))
+                cluster_dicts.append({"cluster_ids": current_ids})
+                clusters.append(tuple(current_start_end))
 
-                cluster_dicts = []
-                clusters = []
-                for i in range(len(cluster_sets)):
-                    cluster_mentions = sorted(list(cluster_sets[i]))
-                    current_ids = []
-                    current_start_end = []
-                    for mention_index in cluster_mentions:
-                        current_ids.append(ids[top_span_starts[mention_index]:top_span_ends[mention_index] + 1])
-                        current_start_end.append(
-                            (top_span_starts[mention_index].item(), top_span_ends[mention_index].item()))
-                    cluster_dicts.append({"cluster_ids": current_ids})
-                    clusters.append(tuple(current_start_end))
+            mention_to_predicted = {}
+            for c in clusters:
+                for mention in c:
+                    mention_to_predicted[mention] = c
 
-                mention_to_predicted = {}
-                for c in clusters:
-                    for mention in c:
-                        mention_to_predicted[mention] = c
-
-                coref_eval = {
-                    "clusters": clusters,
-                    "gold_clusters": gold_clusters,
-                    "mention_to_predicted": mention_to_predicted,
-                    "mention_to_gold": mention_to_gold
-                }
-
-            else:
-                coref_eval = None
+            coref_eval = {
+                "clusters": clusters,
+                "gold_clusters": gold_clusters,
+                "mention_to_predicted": mention_to_predicted,
+                "mention_to_gold": mention_to_gold
+            }
 
             outputs["loss"]["coref"] = coref_loss
             outputs["coref"] = {"logits": coref_logits, "labels": coref_labels, "eval": coref_eval}
