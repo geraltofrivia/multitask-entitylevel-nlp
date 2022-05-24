@@ -18,8 +18,8 @@ except ImportError:
     from . import _pathfix
 from utils.data import Tasks
 from loops import training_loop
-from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
+from models.multitask import BasicMTL, MangoesMTL
 from dataiter import MultiTaskDataIter, DataIterCombiner
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
@@ -358,7 +358,8 @@ def run(
     config.n_classes_ner = n_classes_ner
 
     # Make the model
-    model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
+    model = MangoesMTL.from_pretrained(dir_encoder, actual_config=config, **config.to_dict())
+    # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     # model = BasicMTL(dir_encoder, config=config)
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
