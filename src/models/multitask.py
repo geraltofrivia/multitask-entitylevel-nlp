@@ -416,13 +416,13 @@ class MangoesMTL(BertPreTrainedModel):
             attention_mask: torch.tensor,
             token_type_ids: torch.tensor,
             sentence_map: List[int],
-            word_map: List[int],
-            n_words: int,
-            n_subwords: int,
-            tasks: Iterable[str],
-            coref_gold_starts: torch.tensor = None,
-            coref_gold_ends: torch.tensor = None,
-            coref_gold_cluster_ids: torch.tensor = None,
+            # word_map: List[int],
+            # n_words: int,
+            # n_subwords: int,
+            # tasks: Iterable[str],
+            # coref_gold_starts: torch.tensor = None,
+            # coref_gold_ends: torch.tensor = None,
+            # coref_gold_cluster_ids: torch.tensor = None,
             *args,
             **kwargs
     ):
@@ -455,10 +455,10 @@ class MangoesMTL(BertPreTrainedModel):
         candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # [candidates]
         candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # [candidates]
 
-        if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
-            candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
-                                                              coref_gold_starts, coref_gold_ends,
-                                                              coref_gold_cluster_ids)  # [candidates]
+        # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
+        #     candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
+        #                                                       coref_gold_starts, coref_gold_ends,
+        #                                                       coref_gold_cluster_ids)  # [candidates]
 
         # get span embeddings and mention scores
         span_emb = self.get_span_embeddings(mention_doc, candidate_starts, candidate_ends)  # [candidates, span_emb]
@@ -479,9 +479,11 @@ class MangoesMTL(BertPreTrainedModel):
         top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
         top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
         top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
-        if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
-            # noinspection PyUnboundLocalVariable
-            top_span_cluster_ids = candidate_cluster_ids[top_span_indices]  # [top_cand]
+
+        # # COREF Specific things
+        # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
+        #     # noinspection PyUnboundLocalVariable
+        #     top_span_cluster_ids = candidate_cluster_ids[top_span_indices]  # [top_cand]
 
         # course to fine pruning
         dummy_scores = torch.zeros([num_top_mentions, 1], device=top_span_indices.device)  # [top_cand, 1]
@@ -528,10 +530,11 @@ class MangoesMTL(BertPreTrainedModel):
             "candidate_mention_scores": candidate_mention_scores,
             "top_span_starts": top_span_starts,
             "top_span_ends": top_span_ends,
+            "top_span_indices": top_span_indices,
             "coref_top_antecedents": top_antecedents,
             "coref_top_antecedent_scores": top_antecedent_scores,
             "coref_top_antecedents_mask": top_antecedents_mask,
-            "coref_top_span_cluster_ids": top_span_cluster_ids,
+            # "coref_top_span_cluster_ids": top_span_cluster_ids,
         }
 
     def pred_with_labels(
@@ -577,17 +580,33 @@ class MangoesMTL(BertPreTrainedModel):
         }
 
         if "pruner" in tasks:
-            raise NotImplementedError
+            pred_starts = predictions["top_span_starts"]
+            pred_ends = predictions["top_span_ends"]
+            gold_starts = pruner["gold_starts"]
+            gold_ends = pruner["gold_ends"]
+
+            # Now we do the equal thing (that we did previously)
+            # TODO convert gold starts and ends to the pruner candidate space?
 
         if "ner" in tasks:
             raise NotImplementedError
 
         if "coref" in tasks:
 
-            top_span_cluster_ids = predictions["coref_top_span_cluster_ids"]
+            # top_span_cluster_ids = predictions["coref_top_span_cluster_ids"]
             top_antecedents = predictions["coref_top_antecedents"]
             top_antecedents_mask = predictions["coref_top_antecedents_mask"]
             top_antecedent_scores = predictions["coref_top_antecedent_scores"]
+            top_span_indices = predictions["top_span_indices"]
+
+            gold_starts = coref["gold_starts"]
+            gold_ends = coref["gold_ends"]
+            gold_cluster_ids = coref["gold_label_values"]
+
+            gold_candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
+                                                                   gold_starts, gold_ends,
+                                                                   gold_cluster_ids)
+            top_span_cluster_ids = gold_candidate_cluster_ids[top_span_indices]
 
             # Unpack everything we need
             top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents]  # [top_cand, top_ant]
