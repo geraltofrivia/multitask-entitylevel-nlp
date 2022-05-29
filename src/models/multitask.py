@@ -44,6 +44,8 @@ class MangoesMTL(BertPreTrainedModel):
             coref_higher_order: int,
             coref_metadata_feature_size: int,
             coref_max_training_segments: int,
+            pruner_unweighted: bool = False,
+            ner_unweighted: bool = False,
             *args, **kwargs
     ):
 
@@ -95,11 +97,16 @@ class MangoesMTL(BertPreTrainedModel):
         self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
                                                     embedding_dim=coref_metadata_feature_size)
 
+        # Loss management for pruner
+        self.pruner_loss = self._rescaling_weights_bce_loss_
+
         self.max_span_width = max_span_width
         self.top_span_ratio = top_span_ratio
         self.max_top_antecendents = max_top_antecedents
         self.coref_max_training_segments = coref_max_training_segments
         self.coref_depth = coref_higher_order
+        self.pruner_unweighted = pruner_unweighted
+        self.ner_unweighted = ner_unweighted
 
         self.init_weights()
 
@@ -111,6 +118,16 @@ class MangoesMTL(BertPreTrainedModel):
         task_params = [p for n, p in self.named_parameters() if "bert" not in n]
         torch.nn.utils.clip_grad_norm_(base_params, max_norm)
         torch.nn.utils.clip_grad_norm_(task_params, max_norm)
+
+    @staticmethod
+    def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.Tensor] = None):
+        # if weights are provided, scale them based on labels
+        if weight is not None:
+            _weight = torch.zeros_like(labels, dtype=torch.float) + weight[0]
+            _weight[labels == 1] = weight[1]
+            return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
+        else:
+            return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
     @staticmethod
     def extract_spans(candidate_starts, candidate_ends, candidate_mention_scores, num_top_mentions):
@@ -389,7 +406,7 @@ class MangoesMTL(BertPreTrainedModel):
         return token_attn
 
     @staticmethod
-    def softmax_loss(top_antecedent_scores, top_antecedent_labels):
+    def coref_loss(top_antecedent_scores, top_antecedent_labels):
         """
         Calculate softmax loss
 
@@ -582,14 +599,46 @@ class MangoesMTL(BertPreTrainedModel):
         if "pruner" in tasks:
             pred_starts = predictions["top_span_starts"]
             pred_ends = predictions["top_span_ends"]
+            pred_indices = predictions["top_span_indices"]
             gold_starts = pruner["gold_starts"]
             gold_ends = pruner["gold_ends"]
 
-            # Now we do the equal thing (that we did previously)
-            # TODO convert gold starts and ends to the pruner candidate space?
+            logits_after_pruning = torch.zeros_like(candidate_starts, device=candidate_starts.device, dtype=torch.float)
+            logits_after_pruning[pred_indices] = 1
 
-        if "ner" in tasks:
-            raise NotImplementedError
+            # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
+            cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
+                                        candidate_starts.unsqueeze(1))
+            cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
+                                      candidate_ends.unsqueeze(1))
+            labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
+
+            # Calculate the loss !
+            # TODO: pruner weights are set at 0.5, 0.5. Fix that somehow?
+            if self.pruner_unweighted:
+                pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
+            else:
+                pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
+
+            # DEBUG
+            try:
+                assert not torch.isnan(pruner_loss), \
+                    f"Found nan in loss. Here are some details - \n\tLogits shape: {logits_after_pruning.shape}, " \
+                    f"\n\tLabels shape: {labels_after_pruning.shape}, " \
+                    f"\n\tNonZero lbls: {labels_after_pruning[labels_after_pruning != 0].shape}"
+            except AssertionError:
+                print('potato')
+
+            outputs["loss"]["pruner"] = pruner_loss
+            outputs["pruner"] = {"logits": logits_after_pruning, "labels": labels_after_pruning}
+
+            # labels_after_pruning = self.get_candidate_labels(candidate_starts, candidate_ends,
+            #                                                  gold_starts, gold_ends,)
+
+            # # Repeat pred to gold dims and then collapse the eq.
+            # start_eq = torch.eq(pred_starts.repeat(gold_starts.shape[0],1), gold_starts.unsqueeze(1)).any(dim=0)
+            # end_eq = torch.eq(pred_ends.repeat(gold_ends.shape[0],1), gold_ends.unsqueeze(1)).any(dim=0)
+            # same_spans = torch.logical_and(start_eq, end_eq)
 
         if "coref" in tasks:
 
@@ -617,7 +666,7 @@ class MangoesMTL(BertPreTrainedModel):
             pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
-            coref_loss = self.softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
+            coref_loss = self.coref_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
             coref_loss = torch.sum(coref_loss)
 
             # And now, code that helps with eval
@@ -695,6 +744,9 @@ class MangoesMTL(BertPreTrainedModel):
 
             outputs["loss"]["coref"] = coref_loss
             outputs["coref"] = coref_eval
+
+        if "ner" in tasks:
+            raise NotImplementedError
 
         return outputs
 
@@ -823,7 +875,6 @@ class BasicMTL(BertPreTrainedModel):
             _weight[labels == 1] = weight[1]
             return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
         else:
-            # TODO: fix {RuntimeError}:result type Float can't be cast to the desired output type Long
             return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
     def _get_span_word_attention_scores_(self, hidden_states, span_starts, span_ends):

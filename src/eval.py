@@ -359,30 +359,30 @@ class PrunerPR(Metric):
         self.values = ['p', 'r']
         self.task = 'pruner'
 
-    def compute(self, logits_after_pruning, labels, *args, **kwargs):
+    def compute(self, logits, labels, *args, **kwargs):
         """
-        :param logits_after_pruning: n_spans
+        :param logits: n_spans
         :param labels: n_spans
         :return: scalar
         """
-        p = torch.sum((logits_after_pruning > 0).to(float) * (labels > 0).to(float)) \
+        p = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
             / torch.sum((labels > 0).to(float))
-        r = torch.sum((logits_after_pruning > 0).to(float) * (labels > 0).to(float)) \
-            / torch.sum((logits_after_pruning > 0).to(float))
+        r = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
+            / torch.sum((logits > 0).to(float))
         # TODO: add f1
         op = {'p': p, 'r': r}
 
         # Check for nans.
         if p.isnan() and self.debug:
             raise NANsFound(f"There are NaNs in Pruner recall comp. Here are raw dumps of logits and labels:"
-                            f"Logits: {logits_after_pruning.shape}, Labels: {labels.shape}"
-                            f"{logits_after_pruning}"
+                            f"Logits: {logits.shape}, Labels: {labels.shape}"
+                            f"{logits}"
                             f"{labels}")
         # Check for nans.
         if r.isnan() and self.debug:
             raise NANsFound(f"There are NaNs in Pruner recall comp. Here are raw dumps of logits and labels:"
-                            f"Logits: {logits_after_pruning.shape}, Labels: {labels.shape}"
-                            f"{logits_after_pruning}"
+                            f"Logits: {logits.shape}, Labels: {labels.shape}"
+                            f"{logits}"
                             f"{labels}")
 
         for k, v in op.items():
