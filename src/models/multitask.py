@@ -675,7 +675,7 @@ class MangoesMTL(BertPreTrainedModel):
             }
 
             outputs["loss"]["coref"] = coref_loss
-            outputs["coref"] = {"eval": coref_eval}
+            outputs["coref"] = coref_eval
 
         return outputs
 
@@ -1913,7 +1913,7 @@ class BasicMTL(BertPreTrainedModel):
                 for mention in c:
                     mention_to_predicted[mention] = c
 
-            coref_eval = {
+            outputs["coref"] = {
                 "clusters": clusters,
                 "gold_clusters": gold_clusters,
                 "mention_to_predicted": mention_to_predicted,
@@ -1921,7 +1921,8 @@ class BasicMTL(BertPreTrainedModel):
             }
 
             outputs["loss"]["coref"] = coref_loss
-            outputs["coref"] = {"logits": coref_logits, "labels": coref_labels, "eval": coref_eval}
+            outputs["coref"]["logits"] = coref_logits
+            outputs["coref"]["labels"] = coref_labels
 
         if "ner" in tasks:
             ner_gold_starts = ner["gold_starts"]

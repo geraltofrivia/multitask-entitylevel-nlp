@@ -137,8 +137,8 @@ class MangoesCorefWrapper():
         }
 
         outputs['num_candidates'] = outputs['candidate_ends'].shape[0]
-        outputs['coref'] = {}
-        outputs['coref']['eval'] = coref_eval
+        # outputs['coref'] = {}
+        outputs['coref'] = coref_eval
         outputs['loss'] = {'coref': outputs['loss']}
 
         return outputs
