@@ -238,6 +238,8 @@ def get_dataiter_partials(
               help="If True, we report this run to WandB")
 @click.option('--wandb-comment', '-wbm', type=str, default=None,
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
+@click.option('--wandb-name', '-wbname', type=str, default=None,
+              help="You can specify a short name for the run here as well. ")
 @click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
               help="If true, dataiter ignores those candidates which have verbs in them "
                    "IF the doc has more than 10k candidates.")
@@ -272,6 +274,7 @@ def run(
         t2_ignore_task: str = None,
         use_wandb: bool = False,
         wandb_comment: str = '',
+        wandb_name: str = None,
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
@@ -479,7 +482,7 @@ def run(
             config.wandbid = wandb.util.generate_id()
             save_config = config.to_dict()
 
-        wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment,
+        wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment, name=wandb_name,
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
         wandb.config.update(config.to_dict(), allow_val_change=True)
 
