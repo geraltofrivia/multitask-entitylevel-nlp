@@ -68,21 +68,29 @@ def unalias_split(split: str) -> str:
 LOSS_RATIO_CNP = [1.0, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
 LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0 / 20000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
-DEFAULTS: dict = {
+DEFAULTS: dict = FancyDict({
     'filter_candidates_pos_threshold': 10000,
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
-    'learning_rate': 0.0001,
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
-    'encoder_learning_rate': 2e-05,  # the LR used for encoder IF encoder is not frozen.
-    'encoder_weight_decay': 0.01,  # the WD used for encoder. Used for everything else if task wd is not specified
+
     # TODO: implement code to turn these two below to TRUE
     'ner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
     'pruner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
-}
+    'trainer': FancyDict({
+        'encoder_learning_rate': 2e-05,  # the LR used for encoder IF encoder is not frozen.
+        'encoder_weight_decay': 0.01,  # the WD used for encoder. Used for everything else if task wd is not specified
+        'adam_beta1': 0.9,
+        'adam_beta2': 0.999,
+        'adam_epsilon': 1e-6,
+        'clip_gradients_norm': 1.0,
+        'learning_rate': 0.0001,
+
+    }),
+})
 LOSS_SCALES = {
     'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
     'loss_scales_coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),

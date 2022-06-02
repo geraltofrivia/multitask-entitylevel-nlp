@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import transformers
 import wandb
-from mytorch.utils.goodies import mt_save_dir
+from mytorch.utils.goodies import mt_save_dir, FancyDict
 
 # Local imports
 try:
@@ -18,9 +18,9 @@ except ImportError:
     from . import _pathfix
 from utils.data import Tasks
 from loops import training_loop
-from utils.misc import check_dumped_config
 from models.multitask import BasicMTL, MangoesMTL
 from dataiter import MultiTaskDataIter, DataIterCombiner
+from utils.misc import check_dumped_config, merge_configs
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
@@ -215,7 +215,7 @@ def get_dataiter_partials(
 @click.option("--tasks_2", "-t2", type=str, default=None, multiple=True,
               help="Multiple values are okay e.g. -t2 coref -t2 ner or just one of these", )
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
-@click.option("--learning-rate", "-lr", type=float, default=DEFAULTS['learning_rate'],
+@click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
@@ -279,10 +279,10 @@ def run(
         save: bool = False,
         resume_dir: int = -1,
         use_pretrained_model: str = None,  # @TODO: integrate this someday
-        learning_rate: float = DEFAULTS['learning_rate'],
-        max_span_width: int = DEFAULTS['max_span_width'],
-        coref_loss_mean: bool = DEFAULTS['coref_loss_mean'],
-        coref_higher_order: int = DEFAULTS['coref_higher_order'],
+        learning_rate: float = DEFAULTS.trainer.learning_rate,
+        max_span_width: int = DEFAULTS.max_span_width,
+        coref_loss_mean: bool = DEFAULTS.coref_loss_mean,
+        coref_higher_order: int = DEFAULTS.coref_higher_order,
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: enable specifying loss ratios for different tasks.
@@ -326,13 +326,13 @@ def run(
     config.top_span_ratio = 0.4
     config.max_top_antecedents = 50
     config.device = device
-    config.epochs = epochs
+    # config.epochs = epochs
+    # config.freeze_encoder = not train_encoder
+    # config.learning_rate = learning_rate
     config.trim = trim
     config.debug = debug
-    config.freeze_encoder = not train_encoder
     config.ner_unweighted = ner_unweighted
     config.pruner_unweighted = pruner_unweighted
-    config.learning_rate = learning_rate
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
@@ -344,12 +344,28 @@ def run(
     config.coref_higher_order = coref_higher_order
     config.vocab_size = tokenizer.get_vocab().__len__()
 
-    # merge all pre-typed config values into this bert config obj
-    for k, v in DEFAULTS.items():
-        try:
-            _ = config.__getattribute__(k)
-        except AttributeError:
-            config.__setattr__(k, v)
+    # Make a trainer dict and also
+    config.trainer = FancyDict()
+    config.trainer.learning_rate = learning_rate
+    config.trainer.epochs = epochs
+    config.trainer.freeze_encoder = not train_encoder
+    # config.trainer.adam_beta1
+
+    config = merge_configs(old=DEFAULTS, new=config)
+    #
+    # # merge all pre-typed config values into this bert config obj
+    # for k, v in DEFAULTS.items():
+    #     try:
+    #         _ = config.__getattribute__(k)
+    #     except AttributeError:
+    #         config.__setattr__(k, v)
+    #
+    # # similarly, merge all trainer values into the current trainer values
+    # for k, v in TRAINER.items():
+    #     try:
+    #         _ = config.__getattr__(k)
+    #     except (AttributeError, KeyError) as e
+    #         config
 
     # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
     if 'ner' in tasks:
@@ -372,12 +388,15 @@ def run(
     # opt_base = torch.optim.Adam
     opt = make_optimizer(
         model=model,
-        task_learning_rate=config.learning_rate,
-        freeze_encoder=config.freeze_encoder,
+        task_learning_rate=config.trainer.learning_rate,
+        freeze_encoder=config.trainer.freeze_encoder,
         base_keyword='bert',
         task_weight_decay=None,
-        encoder_learning_rate=config.encoder_learning_rate,
-        encoder_weight_decay=config.encoder_weight_decay
+        encoder_learning_rate=config.trainer.encoder_learning_rate,
+        encoder_weight_decay=config.trainer.encoder_weight_decay,
+        adam_beta1=config.trainer.adam_beta1,
+        adam_beta2=config.trainer.adam_beta2,
+        adam_epsilon=config.trainer.adam_epsilon,
     )
 
     """
@@ -474,7 +493,7 @@ def run(
         checkpoint = torch.load(savedir / 'torch.save')
         model.load_state_dict(checkpoint['model_state_dict'])
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
-        print(f"Successfully resuming training from Epoch {config.epoch}")
+        print(f"Successfully resuming training from Epoch {config.epochs_last_run}")
 
     # WandB stuff
     if use_wandb:
@@ -491,7 +510,7 @@ def run(
 
     training_loop(
         model=model,
-        epochs=epochs,
+        epochs=config.trainer.epochs,
         trn_dl=train_ds,
         forward_fn=model.pred_with_labels,
         device=device,
@@ -503,9 +522,10 @@ def run(
         flag_save=save,
         save_dir=savedir,
         save_config=save_config,
-        epochs_last_run=config.epoch if hasattr(config, 'epoch') else 0,
+        epochs_last_run=config.epochs_last_run if hasattr(config, 'epochs_last_run') else 0,
         filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
-        debug=config.debug
+        debug=config.debug,
+        clip_grad_norm=config.trainer.clip_gradients_norm
     )
     print("potato")
 

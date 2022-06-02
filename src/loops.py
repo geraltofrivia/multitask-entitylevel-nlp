@@ -42,6 +42,7 @@ def training_loop(
         save_config: dict = None,
         filter_candidates_len_threshold: int = -1,
         debug: bool = False,
+        clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
     TODO: write about every param
@@ -113,6 +114,11 @@ def training_loop(
             # Calc gradients
             loss.backward()
 
+            # Clip Gradients
+            if clip_grad_norm > 0:
+                torch.nn.utils.clip_grad_norm_([param for group in opt.param_groups for param in group['params']],
+                                               clip_grad_norm)
+
             # Backward Pass
             opt.step()
 
@@ -122,17 +128,9 @@ def training_loop(
             for task_nm in instance['tasks']:
                 per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
 
-            # Try to plug mem leaks
-            # del loss
-            # change_device(outputs, 'cpu')
-            # del outputs
-            # trn_dataset[i] = change_device(instance, 'cpu')
-
         # Evaluation (on the validation set)
         dev_eval.run()
 
-        # Try to plug mem leaks
-        # del trn_dataset
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
@@ -163,7 +161,7 @@ def training_loop(
 
             # Save config
             with (save_dir / 'config.json').open('w+', encoding='utf8') as f:
-                json.dump({**save_config, **{'epoch': e}}, f)
+                json.dump({**save_config, **{'epochs_last_run': e}}, f)
 
             # Save Traces
             with (save_dir / 'traces.pkl').open('wb+') as f:
@@ -171,7 +169,7 @@ def training_loop(
 
             # Save Model
             torch.save({
-                'epoch': e,
+                'epochs_last_run': e,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': opt.state_dict(),
             }, Path(save_dir) / 'torch.save')

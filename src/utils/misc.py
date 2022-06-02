@@ -6,6 +6,7 @@ from typing import List, Union, Optional
 import numpy as np
 import torch
 import transformers
+from mytorch.utils.goodies import FancyDict
 from transformers import BertConfig
 
 
@@ -284,6 +285,7 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'coref_higher_order',
         'curdir',
         'n_classes_ner',
+        'trainer'
     ]
 
     # If old is a dict, we don't need to pull
@@ -314,12 +316,6 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
 
     if not mismatches:
         # They're all same!
-        # Go through all elements of old config and put it on the new one
-
-        # TODO: i removed this pulling old items from disk thing. this is okay, right?
-        # for k, v in old_config.items():
-        #     if k not in config_d:
-        #         setattr(config, k, v)
         return True
     else:
         # There are some discrepancies
@@ -350,3 +346,28 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         else:
             return False
 
+
+def merge_configs(old, new):
+    """
+        we copy over elements from old and add them to new IF the element does not exist in new.
+            If the element is a dict, we do this recursively.
+
+        arg new may be a dict or a FancyDict or a BertConfig
+    """
+
+    if type(new) is dict:
+        new = FancyDict(new)
+
+    for k, v in old.items():
+
+        try:
+            _ = new.__getattribute__(k)
+            # Check if the Value is nested
+            if type(v) in [BertConfig, FancyDict, dict]:
+                # If so, call the fn recursively
+                v = merge_configs(v, new.__getattribute__(k))
+                new.__setattr__(k, v)
+        except AttributeError:
+            new.__setattr__(k, v)
+
+    return new
