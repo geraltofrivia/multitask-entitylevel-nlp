@@ -14,3 +14,4 @@ gensim
 torch
 wandb
 sklearn
+my-torch==0.0.9a

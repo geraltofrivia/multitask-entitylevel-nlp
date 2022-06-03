@@ -9,7 +9,9 @@ from utils.exceptions import UnknownDataSplitException
 # No local imports (is a good idea)
 
 # Random seeds
-SEED = 42
+_SEED_ = 42
+NPRSEED: int = _SEED_
+PYTSEED: int = _SEED_
 
 ROOT_LOC: Path = Path("..") if str(Path().cwd()).split("/")[-1] == "src" else Path(".")
 LOCATIONS: Dict[str, Path] = FancyDict(
@@ -69,7 +71,7 @@ LOSS_RATIO_CNP = [1.0, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner 
 LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0 / 20000, 1.0 / 2.5]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = FancyDict({
-    'filter_candidates_pos_threshold': 10000,
+    'filter_candidates_pos_threshold': 7500,
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref

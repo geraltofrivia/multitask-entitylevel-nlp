@@ -4,11 +4,12 @@
     One object corresponds to one document.
 """
 import re
+from pathlib import Path
+from typing import Union, List, Dict, Optional
+
 import click
 import spacy
 from spacy import tokens
-from pathlib import Path
-from typing import Union, List, Dict, Optional
 
 # Local imports
 try:
@@ -50,9 +51,9 @@ class CODICRACParser(GenericParser):
         self.dataset = raw_dir.name
         self.crac_src = self.dataset.split('-')[1]
         possible_suffixes = {
-            'codicrac-ami': ['AMI_dev.CONLLUA'],
-            'codicrac-persuasion': ['Persuasion_dev.CONLLUA'],
-            'codicrac-light': ['light_dev.CONLLUA'],
+            'codicrac-ami': ['2022_AMI_train_v0.CONLLUA', '2022_AMI_dev_v0.CONLLUA'],
+            'codicrac-persuasion': ['Persuasion_dev.2022.CONLLUA', 'Persuasion_train.2022.CONLLUA'],
+            'codicrac-light': ['light_dev.2022.CONLLUA', 'light_train.2022.CONLLUA'],
             'codicrac-switchboard': ['Switchboard_3_dev.CONLL'],
             'codicrac-arrau-t91': ['Trains_91.CONLL'],
             'codicrac-arrau-t93': ['Trains_93.CONLL'],
