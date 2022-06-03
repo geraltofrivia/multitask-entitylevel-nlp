@@ -10,7 +10,7 @@
 # #############
 # Runs to see which LRs work best when just training the model, with a frozen encoder
 # #############
-oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --trim --debug --filter-candidates-pos -wb --wandb-name personal-baseline-redo"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --trim --debug --filter-candidates-pos -msw 30 -wb --wandb-name cr-on-tr-msw30"
 #oarsub -l gpu=1,walltime=3 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --wandb-name cr-on-tr-01 -lr 0.01"
 oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --wandb-name cr-on-tr-001 -lr 0.001"
 #oarsub -l gpu=1,walltime=3 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --wandb-name cr-on-tr-005 -lr 0.005"
@@ -26,5 +26,6 @@ oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/cor
 # #############
 # Runs to see if there's any sense in trying to train the encoder
 # #############
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --trim --debug --filter-candidates-pos -msw 30 -wb --wandb-name cr-on-tr-msw30"
 oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --trim --debug --filter-candidates-pos -wb --wandb-name personal-baseline-trim-trnenc --train-encoder"
 oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --wandb-name cr-on-tr-trnenc -lr 0.000005 --train-encoder"
