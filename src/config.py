@@ -42,16 +42,19 @@ LOCATIONS: Dict[str, Path] = FancyDict(
 )
 
 KNOWN_TASKS = ["coref", "ner", "ner_spacy", "pruner", "rel"]
-KNOWN_SPLITS = FancyDict(**{
-    'scierc': FancyDict(**{
+KNOWN_SPLITS = FancyDict({
+    'scierc': FancyDict({
         'train': 'train',
         'dev': 'dev',
         'test': 'test'
     }),
-    'ontonotes': FancyDict(**{
+    'ontonotes': FancyDict({
         'train': 'train',
         'dev': 'development',
         'test': 'test'
+    }),
+    'codicrac-ami': FancyDict({
+
     })
 })
 

@@ -91,19 +91,19 @@ class CODICRACParser(GenericParser):
             self.delete_preprocessed_files(split)
             outputs = self.parse(split)
 
-            # Dump them to disk
-            if self.dataset != 'codicrac-arrau-rst':
-                self.write_to_disk(suffix=None, instances=outputs)
+            # # Dump them to disk
+            # if self.dataset != 'codicrac-arrau-rst':
+            #     self.write_to_disk(suffix=None, instances=outputs)
+            # else:
+            # We are dealing with RST. Which split?
+            if '_dev' in split:
+                self.write_to_disk(suffix='dev', instances=outputs)
+            elif '_test' in split:
+                self.write_to_disk(suffix='test', instances=outputs)
+            elif '_train' in split:
+                self.write_to_disk(suffix='train', instances=outputs)
             else:
-                # We are dealing with RST. Which split?
-                if '_dev' in split:
-                    self.write_to_disk(suffix='dev', instances=outputs)
-                elif '_test' in split:
-                    self.write_to_disk(suffix='test', instances=outputs)
-                elif '_train' in split:
-                    self.write_to_disk(suffix='train', instances=outputs)
-                else:
-                    raise ValueError(f"RST filename: {split} is unknown.")
+                raise ValueError(f"RST filename: {split} is unknown.")
 
     @staticmethod
     def _parse_annotation_(annotation: str) -> Dict[str, str]:
