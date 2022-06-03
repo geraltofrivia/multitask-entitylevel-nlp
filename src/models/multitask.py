@@ -18,7 +18,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import SEED
+from config import _SEED_ as SEED
 
 random.seed(SEED)
 np.random.seed(SEED)

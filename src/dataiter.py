@@ -23,7 +23,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, SEED, KNOWN_TASKS, DEFAULTS, unalias_split
+from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, DEFAULTS, unalias_split
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks

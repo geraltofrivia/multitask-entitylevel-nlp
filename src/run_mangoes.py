@@ -25,7 +25,7 @@ from loops import training_loop
 from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
 from dataiter import MultiTaskDataIter, DataIterCombiner
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, SEED
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from mangoes.modeling import BERTForCoreferenceResolution
 from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
