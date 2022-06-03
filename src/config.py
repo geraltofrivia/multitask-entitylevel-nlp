@@ -54,7 +54,16 @@ KNOWN_SPLITS = FancyDict({
         'test': 'test'
     }),
     'codicrac-ami': FancyDict({
-
+        'train': 'train',
+        'dev': 'dev',
+    }),
+    'codicrac-persuasion': FancyDict({
+        'train': 'train',
+        'dev': 'dev',
+    }),
+    'codicrac-light': FancyDict({
+        'train': 'train',
+        'dev': 'dev',
     })
 })
 
