@@ -357,17 +357,19 @@ def merge_configs(old, new):
 
     if type(new) is dict:
         new = FancyDict(new)
+        # new_caller = __getattribute__
 
     for k, v in old.items():
 
         try:
-            _ = new.__getattribute__(k)
+            _ = new.__getattribute__(k) if type(new) is BertConfig else new.__getattr__(k)
+
             # Check if the Value is nested
             if type(v) in [BertConfig, FancyDict, dict]:
                 # If so, call the fn recursively
-                v = merge_configs(v, new.__getattribute__(k))
+                v = merge_configs(v, new.__getattribute__(k) if type(new) is BertConfig else new.__getattr__(k))
                 new.__setattr__(k, v)
-        except AttributeError:
+        except (AttributeError, KeyError) as e:
             new.__setattr__(k, v)
 
     return new
