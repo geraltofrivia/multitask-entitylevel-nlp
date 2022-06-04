@@ -23,6 +23,20 @@ oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/cor
 oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb -msw 30 --wandb-name cr-on-tr-msw30-0000001 -lr 0.0000001"
 oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb -msw 30 --wandb-name cr-on-tr-msw30-0000005 -lr 0.0000005"
 
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-01 -lr 0.01"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-001 -lr 0.001"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-005 -lr 0.005"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-0001 -lr 0.0001"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-0005 -lr 0.0005"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-00001 -lr 0.00001"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-00005 -lr 0.00005"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-000001 -lr 0.000001"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-000005 -lr 0.000005"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-0000001 -lr 0.0000001"
+oarsub -l gpu=1,walltime=8 "source ~/.bashrc; conda activate main; cd ~/work/coref; python src/run.py -d ontonotes -t coref -tok bert-base-cased -enc SpanBERT/spanbert-base-cased -e 300 -dv cuda --debug --filter-candidates-pos --trim -wb --train-encoder --wandb-name cr-on-tr-trnenc-0000005 -lr 0.0000005"
+
+
+
 # #############
 # Runs to see if there's any sense in trying to train the encoder
 # #############
