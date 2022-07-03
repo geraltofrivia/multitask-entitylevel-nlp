@@ -131,7 +131,6 @@ def training_loop(
         # Evaluation (on the validation set)
         dev_eval.run()
 
-
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
         dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())

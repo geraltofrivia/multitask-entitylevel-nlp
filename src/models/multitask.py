@@ -44,6 +44,8 @@ class MangoesMTL(BertPreTrainedModel):
             coref_higher_order: int,
             coref_metadata_feature_size: int,
             coref_max_training_segments: int,
+            n_classes_ner: int,
+            bias_in_last_layers: bool = False,
             pruner_unweighted: bool = False,
             ner_unweighted: bool = False,
             *args, **kwargs
@@ -97,12 +99,21 @@ class MangoesMTL(BertPreTrainedModel):
         self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
                                                     embedding_dim=coref_metadata_feature_size)
 
+        # Some NER stuff
+        self.unary_ner = nn.Sequential(
+            nn.Linear(span_embedding_dim, ffnn_hidden_size),
+            nn.ReLU(),
+            nn.Dropout(coref_dropout),
+            nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
+        )
+
         # Loss management for pruner
         self.pruner_loss = self._rescaling_weights_bce_loss_
+        self.ner_loss = nn.functional.cross_entropy
 
         self.max_span_width = max_span_width
         self.top_span_ratio = top_span_ratio
-        self.max_top_antecendents = max_top_antecedents
+        self.max_top_antecedents = max_top_antecedents
         self.coref_max_training_segments = coref_max_training_segments
         self.coref_depth = coref_higher_order
         self.pruner_unweighted = pruner_unweighted
@@ -496,7 +507,7 @@ class MangoesMTL(BertPreTrainedModel):
 
             # get beam size
             num_top_mentions = int(float(num_words * self.top_span_ratio))
-            num_top_antecedents = min(self.max_top_antecendents, num_top_mentions)
+            num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
 
             # get top mention scores and sort by sort by span order
             top_span_indices = self.extract_spans(candidate_starts, candidate_ends, candidate_mention_scores,
@@ -557,7 +568,14 @@ class MangoesMTL(BertPreTrainedModel):
         else:
             coref_specific = {}
 
-        # if 'ner' in tasks or
+        if 'ner' in tasks:
+            # We just need span embeddings here
+            logits = self.unary_ner(span_emb)
+            logits = torch.nn.functional.softmax(logits, dim=1)
+            ner_specific = {"ner_logits": logits}
+
+        else:
+            ner_specific = {}
 
         # noinspection PyUnboundLocalVariable
         return {
@@ -568,7 +586,8 @@ class MangoesMTL(BertPreTrainedModel):
             "top_span_starts": top_span_starts,
             "top_span_ends": top_span_ends,
             "top_span_indices": top_span_indices,
-            **coref_specific
+            **coref_specific,
+            **ner_specific
         }
 
     def pred_with_labels(
@@ -763,7 +782,27 @@ class MangoesMTL(BertPreTrainedModel):
             outputs["coref"] = coref_eval
 
         if "ner" in tasks:
-            raise NotImplementedError
+            ner_gold_starts = ner["gold_starts"]
+            ner_gold_ends = ner["gold_ends"]
+            ner_gold_label_values = ner["gold_label_values"]
+            ner_logits = predictions["ner_logits"]  # n_spans, n_classes
+            ner_labels = self.get_candidate_labels(candidate_starts, candidate_ends,
+                                                   ner_gold_starts, ner_gold_ends,
+                                                   ner_gold_label_values)
+
+            # Calculating the loss
+            if self.ner_unweighted:
+                ner_loss = self.ner_loss(ner_logits, ner_labels)
+            else:
+                ner_loss = self.ner_loss(ner_logits, ner_labels, weight=ner["weights"])
+
+            assert not torch.isnan(ner_loss), \
+                f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
+                f"\n\tLabels shape: {ner_labels.shape}, " \
+                f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
+
+            outputs["loss"]["ner"] = ner_loss
+            outputs["ner"] = {"logits": ner_logits, "labels": ner_labels}
 
         return outputs
 
