@@ -433,6 +433,7 @@ class MangoesMTL(BertPreTrainedModel):
             attention_mask: torch.tensor,
             token_type_ids: torch.tensor,
             sentence_map: List[int],
+            tasks: Iterable[str],
             # word_map: List[int],
             # n_words: int,
             # n_subwords: int,
@@ -477,67 +478,86 @@ class MangoesMTL(BertPreTrainedModel):
         #                                                       coref_gold_starts, coref_gold_ends,
         #                                                       coref_gold_cluster_ids)  # [candidates]
 
+        """
+            That's the Span Pruner.
+            Next we need to break out into Coref and NER parts
+        """
+
         # get span embeddings and mention scores
         span_emb = self.get_span_embeddings(mention_doc, candidate_starts, candidate_ends)  # [candidates, span_emb]
-        candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
-        # get span width scores and add to candidate mention scores
-        span_width_index = candidate_ends - candidate_starts  # [candidates]
-        span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
-        candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
 
-        # get beam size
-        num_top_mentions = int(float(num_words * self.top_span_ratio))
-        num_top_antecedents = min(self.max_top_antecendents, num_top_mentions)
+        if 'coref' in tasks or 'pruner' in tasks:
 
-        # get top mention scores and sort by sort by span order
-        top_span_indices = self.extract_spans(candidate_starts, candidate_ends, candidate_mention_scores,
-                                              num_top_mentions)
-        top_span_starts = candidate_starts[top_span_indices]  # [top_cand]
-        top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
-        top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
-        top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
+            candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
+            # get span width scores and add to candidate mention scores
+            span_width_index = candidate_ends - candidate_starts  # [candidates]
+            span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
+            candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
 
-        # # COREF Specific things
-        # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
-        #     # noinspection PyUnboundLocalVariable
-        #     top_span_cluster_ids = candidate_cluster_ids[top_span_indices]  # [top_cand]
+            # get beam size
+            num_top_mentions = int(float(num_words * self.top_span_ratio))
+            num_top_antecedents = min(self.max_top_antecendents, num_top_mentions)
 
-        # course to fine pruning
-        dummy_scores = torch.zeros([num_top_mentions, 1], device=top_span_indices.device)  # [top_cand, 1]
-        top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedent_offsets = \
-            self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, num_top_antecedents)
+            # get top mention scores and sort by sort by span order
+            top_span_indices = self.extract_spans(candidate_starts, candidate_ends, candidate_mention_scores,
+                                                  num_top_mentions)
+            top_span_starts = candidate_starts[top_span_indices]  # [top_cand]
+            top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
+            top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
+            top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
 
-        num_segments = input_ids.shape[0]
-        segment_length = input_ids.shape[1]
-        word_segments = torch.arange(start=0, end=num_segments, device=input_ids.device).view(-1, 1).repeat(
-            [1, segment_length])  # [segments, segment_len]
-        flat_word_segments = torch.masked_select(word_segments.view(-1), attention_mask.bool().view(-1))
-        mention_segments = flat_word_segments[top_span_starts].view(-1, 1)  # [top_cand, 1]
-        antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]]  # [top_cand, top_ant]
-        segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
-                                       self.coref_max_training_segments - 1)  # [top_cand, top_ant]
+            # # COREF Specific things
+            # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
+            #     # noinspection PyUnboundLocalVariable
+            #     top_span_cluster_ids = candidate_cluster_ids[top_span_indices]  # [top_cand]
 
-        # calculate final slow scores
-        for i in range(self.coref_depth):
-            top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
-            top_antecedent_scores = top_antecedents_fast_scores + \
-                                    self.get_slow_antecedent_scores(top_span_emb,
-                                                                    top_antecedents,
-                                                                    top_antecedent_emb,
-                                                                    top_antecedent_offsets,
-                                                                    segment_distance)  # [top_cand, top_ant]
-            top_antecedent_weights = F.softmax(
-                torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
-            top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
-                                           1)  # [top_cand, top_ant + 1, emb]
-            attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb,
-                                          1)  # [top_cand, emb]
-            gate_vectors = torch.sigmoid(
-                self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
-            top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
+            # course to fine pruning
+            dummy_scores = torch.zeros([num_top_mentions, 1], device=top_span_indices.device)  # [top_cand, 1]
+            top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedent_offsets = \
+                self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, num_top_antecedents)
 
-        # noinspection PyUnboundLocalVariable
-        top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
+            num_segments = input_ids.shape[0]
+            segment_length = input_ids.shape[1]
+            word_segments = torch.arange(start=0, end=num_segments, device=input_ids.device).view(-1, 1).repeat(
+                [1, segment_length])  # [segments, segment_len]
+            flat_word_segments = torch.masked_select(word_segments.view(-1), attention_mask.bool().view(-1))
+            mention_segments = flat_word_segments[top_span_starts].view(-1, 1)  # [top_cand, 1]
+            antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]]  # [top_cand, top_ant]
+            segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
+                                           self.coref_max_training_segments - 1)  # [top_cand, top_ant]
+
+            # calculate final slow scores
+            for i in range(self.coref_depth):
+                top_antecedent_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
+                top_antecedent_scores = top_antecedents_fast_scores + \
+                                        self.get_slow_antecedent_scores(top_span_emb,
+                                                                        top_antecedents,
+                                                                        top_antecedent_emb,
+                                                                        top_antecedent_offsets,
+                                                                        segment_distance)  # [top_cand, top_ant]
+                top_antecedent_weights = F.softmax(
+                    torch.cat([dummy_scores, top_antecedent_scores], 1), dim=-1)  # [top_cand, top_ant + 1]
+                top_antecedent_emb = torch.cat([top_span_emb.unsqueeze(1), top_antecedent_emb],
+                                               1)  # [top_cand, top_ant + 1, emb]
+                attended_span_emb = torch.sum(top_antecedent_weights.unsqueeze(2) * top_antecedent_emb,
+                                              1)  # [top_cand, emb]
+                gate_vectors = torch.sigmoid(
+                    self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
+                top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
+
+            # noinspection PyUnboundLocalVariable
+            top_antecedent_scores = torch.cat([dummy_scores, top_antecedent_scores], 1)
+
+            coref_specific = {
+                "coref_top_antecedents": top_antecedents,
+                "coref_top_antecedent_scores": top_antecedent_scores,
+                "coref_top_antecedents_mask": top_antecedents_mask,
+                # "coref_top_span_cluster_ids": top_span_cluster_ids,
+            }
+        else:
+            coref_specific = {}
+
+        # if 'ner' in tasks or
 
         # noinspection PyUnboundLocalVariable
         return {
@@ -548,10 +568,7 @@ class MangoesMTL(BertPreTrainedModel):
             "top_span_starts": top_span_starts,
             "top_span_ends": top_span_ends,
             "top_span_indices": top_span_indices,
-            "coref_top_antecedents": top_antecedents,
-            "coref_top_antecedent_scores": top_antecedent_scores,
-            "coref_top_antecedents_mask": top_antecedents_mask,
-            # "coref_top_span_cluster_ids": top_span_cluster_ids,
+            **coref_specific
         }
 
     def pred_with_labels(
