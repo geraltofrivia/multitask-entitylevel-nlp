@@ -227,9 +227,9 @@ def get_dataiter_partials(
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
-@click.option('--ner-unweighted', is_flag=True, default=DEFAULTS['ner_unweighted'],
+@click.option('--ner-unweighted', is_flag=True,
               help="If True, we do not input priors of classes into Model -> NER CE loss.")
-@click.option('--pruner-unweighted', is_flag=True, default=DEFAULTS['pruner_unweighted'],
+@click.option('--pruner-unweighted', is_flag=True,
               help="If True, we do not input priors of classes into Model -> Pruner BCEwL loss.")
 @click.option('--t1-ignore-task', default=None, type=str,
               help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
