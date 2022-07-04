@@ -419,7 +419,9 @@ def run(
     metrics = []
     metrics += [TraceCandidates]
     if 'ner' in tasks + tasks_2:
-        metrics += [NERAcc, NERSpanRecognitionMicro, partial(NERSpanRecognitionMacro, n_classes=n_classes_ner)]
+        metrics += [NERAcc,
+                    partial(NERSpanRecognitionMicro, device=config.device),
+                    partial(NERSpanRecognitionMacro, n_classes=n_classes_ner, device=config.device)]
     if 'pruner' in tasks + tasks_2:
         metrics += [PrunerPR]
     if 'coref' in tasks + tasks_2:

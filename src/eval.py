@@ -9,7 +9,7 @@ from typing import Dict, Callable, List, Union, Optional, Type
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment as linear_assignment
-from torchmetrics import F1Score, Precision, Recall
+from torchmetrics import Precision, Recall, F1Score
 from tqdm.auto import tqdm
 
 # Local imports
@@ -310,16 +310,33 @@ class TraceCandidates(Trace):
 
 class NERSpanRecognitionMicro(CustomMetric):
 
-    def __init__(self, debug: bool = True):
+    def __init__(self, device: str = 'cpu', debug: bool = True):
         super().__init__(debug=debug)
-        self._p = Precision()
-        self._r = Recall()
-        self._f1 = F1Score()
+        self._p = Precision().to(device)
+        self._r = Recall().to(device)
+        self._f1 = F1Score().to(device)
         self.task = 'ner'
-        self.prefix = 'spanrec-micro'
+        self.prefix = 'spanrec_micro'
         self.values = ['p', 'r', 'f1']
 
+    def compute(self):
+        summary = {
+            'p': self._p.compute(),
+            'r': self._r.compute(),
+            'f1': self._f1.compute()
+        }
+        if self.prefix is not None:
+            return {
+                self.prefix + '_' + nm: vl for nm, vl in summary.items()
+            }
+        else:
+            return summary
+
     def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
+
+        if logits.device != labels.device:
+            raise AssertionError(f'Logits: {logits.device}, Labels: {labels.device}')
+
         p = self._p(logits, labels)
         r = self._r(logits, labels)
         f1 = self._f1(logits, labels)
@@ -328,18 +345,37 @@ class NERSpanRecognitionMicro(CustomMetric):
 
         for k, v in op.items():
             self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
+
+    def reset(self):
+        super().reset()
+        self._p.reset()
+        self._r.reset()
+        self._f1.reset()
 
 
 class NERSpanRecognitionMacro(CustomMetric):
 
-    def __init__(self, n_classes: int, debug: bool = True):
+    def __init__(self, n_classes: int, device: str = 'cpu', debug: bool = True):
         super().__init__(debug=debug)
-        self._p = Precision(average='macro', num_classes=n_classes)
-        self._r = Recall(average='macro', num_classes=n_classes)
-        self._f1 = F1Score(average='macro', num_classes=n_classes)
+        self._p = Precision(average='macro', num_classes=n_classes).to(device)
+        self._r = Recall(average='macro', num_classes=n_classes).to(device)
+        self._f1 = F1Score(average='macro', num_classes=n_classes).to(device)
         self.task = 'ner'
-        self.prefix = 'spanrec-macro'
+        self.prefix = 'spanrec_macro'
         self.values = ['p', 'r', 'f1']
+
+    def compute(self):
+        summary = {
+            'p': self._p.compute(),
+            'r': self._r.compute(),
+            'f1': self._f1.compute()
+        }
+        if self.prefix is not None:
+            return {
+                self.prefix + '_' + nm: vl for nm, vl in summary.items()
+            }
+        else:
+            return summary
 
     def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
         p = self._p(logits, labels)
@@ -350,6 +386,12 @@ class NERSpanRecognitionMacro(CustomMetric):
 
         for k, v in op.items():
             self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
+
+    def reset(self):
+        super().reset()
+        self._p.reset()
+        self._r.reset()
+        self._f1.reset()
 
 
 class NERAcc(CustomMetric):
