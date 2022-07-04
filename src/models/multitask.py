@@ -687,7 +687,7 @@ class MangoesMTL(BertPreTrainedModel):
             top_antecedents = predictions["coref_top_antecedents"]
             top_antecedents_mask = predictions["coref_top_antecedents_mask"]
             top_antecedent_scores = predictions["coref_top_antecedent_scores"]
-            top_span_indices = predictions["top_span_indices"]
+            top_span_indices = predictions["pruned_span_indices"]
 
             gold_starts = coref["gold_starts"]
             gold_ends = coref["gold_ends"]
@@ -721,8 +721,8 @@ class MangoesMTL(BertPreTrainedModel):
             _gold_starts = coref["gold_starts"]
             _gold_ends = coref["gold_ends"]
             ids = predictions["flattened_ids"]
-            top_span_starts = predictions["top_span_starts"]
-            top_span_ends = predictions["top_span_ends"]
+            top_span_starts = predictions["pruned_span_starts"]
+            top_span_ends = predictions["pruned_span_ends"]
             top_antecedents = predictions["coref_top_antecedents"]
 
             for i in range(len(_cluster_ids)):
