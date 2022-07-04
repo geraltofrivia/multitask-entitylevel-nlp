@@ -124,6 +124,7 @@ class MangoesMTL(BertPreTrainedModel):
         self.init_weights()
 
     def task_separate_gradient_clipping(self):
+        # noinspection PyAttributeOutsideInit
         self.clip_grad_norm_ = self.separate_max_norm_base_task
 
     def separate_max_norm_base_task(self, max_norm):
@@ -218,7 +219,8 @@ class MangoesMTL(BertPreTrainedModel):
 
         # if self.use_metadata:
         #     top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
-        #     same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)  # [top_cand, top_ant]
+        #     # [top_cand, top_ant]
+        #     same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
         #     speaker_pair_emb = self.same_speaker_embeddings(
         #         torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
         #     feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
@@ -499,33 +501,33 @@ class MangoesMTL(BertPreTrainedModel):
         # get span embeddings and mention scores
         span_emb = self.get_span_embeddings(mention_doc, candidate_starts, candidate_ends)  # [candidates, span_emb]
 
-        candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
-        # get span width scores and add to candidate mention scores
-        span_width_index = candidate_ends - candidate_starts  # [candidates]
-        span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
-        candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
-
-        # get beam size
-        num_top_mentions = int(float(num_words * self.top_span_ratio))
-        num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
-
-        # get top mention scores and sort by sort by span order
-        top_span_indices = self.extract_spans(candidate_starts, candidate_ends, candidate_mention_scores,
-                                              num_top_mentions)
-        top_span_starts = candidate_starts[top_span_indices]  # [top_cand]
-        top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
-        top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
-        top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
-
         if 'coref' in tasks or 'pruner' in tasks:
+
+            pruned_candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
+            # get span width scores and add to candidate mention scores
+            span_width_index = candidate_ends - candidate_starts  # [candidates]
+            span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
+            pruned_candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
+
+            # get beam size
+            num_top_mentions = int(float(num_words * self.top_span_ratio))
+            num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
+
+            # get top mention scores and sort by sort by span order
+            pruned_span_indices = self.extract_spans(candidate_starts, candidate_ends, pruned_candidate_mention_scores,
+                                                     num_top_mentions)
+            pruned_span_starts = candidate_starts[pruned_span_indices]  # [top_cand]
+            pruned_span_ends = candidate_ends[pruned_span_indices]  # [top_cand]
+            top_span_emb = span_emb[pruned_span_indices]  # [top_cand, span_emb]
+            top_span_mention_scores = pruned_candidate_mention_scores[pruned_span_indices]  # [top_cand]
 
             # # COREF Specific things
             # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
             #     # noinspection PyUnboundLocalVariable
-            #     top_span_cluster_ids = candidate_cluster_ids[top_span_indices]  # [top_cand]
+            #     top_span_cluster_ids = candidate_cluster_ids[pruned_span_indices]  # [top_cand]
 
             # course to fine pruning
-            dummy_scores = torch.zeros([num_top_mentions, 1], device=top_span_indices.device)  # [top_cand, 1]
+            dummy_scores = torch.zeros([num_top_mentions, 1], device=pruned_span_indices.device)  # [top_cand, 1]
             top_antecedents, top_antecedents_mask, top_antecedents_fast_scores, top_antecedent_offsets = \
                 self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, num_top_antecedents)
 
@@ -534,8 +536,8 @@ class MangoesMTL(BertPreTrainedModel):
             word_segments = torch.arange(start=0, end=num_segments, device=input_ids.device).view(-1, 1).repeat(
                 [1, segment_length])  # [segments, segment_len]
             flat_word_segments = torch.masked_select(word_segments.view(-1), attention_mask.bool().view(-1))
-            mention_segments = flat_word_segments[top_span_starts].view(-1, 1)  # [top_cand, 1]
-            antecedent_segments = flat_word_segments[top_span_starts[top_antecedents]]  # [top_cand, top_ant]
+            mention_segments = flat_word_segments[pruned_span_starts].view(-1, 1)  # [top_cand, 1]
+            antecedent_segments = flat_word_segments[pruned_span_starts[top_antecedents]]  # [top_cand, top_ant]
             segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
                                            self.coref_max_training_segments - 1)  # [top_cand, top_ant]
 
@@ -565,6 +567,10 @@ class MangoesMTL(BertPreTrainedModel):
                 "coref_top_antecedents": top_antecedents,
                 "coref_top_antecedent_scores": top_antecedent_scores,
                 "coref_top_antecedents_mask": top_antecedents_mask,
+                "pruned_candidate_mention_scores": pruned_candidate_mention_scores,
+                "pruned_span_starts": pruned_span_starts,
+                "pruned_span_ends": pruned_span_ends,
+                "pruned_span_indices": pruned_span_indices,
                 # "coref_top_span_cluster_ids": top_span_cluster_ids,
             }
         else:
@@ -583,11 +589,7 @@ class MangoesMTL(BertPreTrainedModel):
         return {
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
-            "candidate_mention_scores": candidate_mention_scores,
             "flattened_ids": flattened_ids,
-            "top_span_starts": top_span_starts,
-            "top_span_ends": top_span_ends,
-            "top_span_indices": top_span_indices,
             **coref_specific,
             **ner_specific
         }
@@ -609,7 +611,7 @@ class MangoesMTL(BertPreTrainedModel):
     ):
 
         # Run the model.
-        # this will get all outputs regardless of whatever tasks are thrown atcha
+        # this will get all outputs regardless of whatever tasks are thrown at ya
         predictions = self.forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
@@ -649,6 +651,7 @@ class MangoesMTL(BertPreTrainedModel):
                                         candidate_starts.unsqueeze(1))
             cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
                                       candidate_ends.unsqueeze(1))
+            # noinspection PyArgumentList
             labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
 
             # Calculate the loss !
@@ -702,6 +705,7 @@ class MangoesMTL(BertPreTrainedModel):
                                               top_span_cluster_ids.unsqueeze(1))  # [top_cand, top_ant]
             non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
             pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
+            # noinspection PyArgumentList
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
@@ -1974,6 +1978,7 @@ class BasicMTL(BertPreTrainedModel):
                                               gold_cluster_ids_on_pruned.unsqueeze(1))  # [top_cand, top_ant]
             non_dummy_indicator = (gold_cluster_ids_on_pruned > 0).unsqueeze(1)  # [top_cand, 1]
             pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
+            # noinspection PyArgumentList
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_softmax_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
