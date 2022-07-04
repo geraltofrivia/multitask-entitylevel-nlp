@@ -499,25 +499,25 @@ class MangoesMTL(BertPreTrainedModel):
         # get span embeddings and mention scores
         span_emb = self.get_span_embeddings(mention_doc, candidate_starts, candidate_ends)  # [candidates, span_emb]
 
+        candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
+        # get span width scores and add to candidate mention scores
+        span_width_index = candidate_ends - candidate_starts  # [candidates]
+        span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
+        candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
+
+        # get beam size
+        num_top_mentions = int(float(num_words * self.top_span_ratio))
+        num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
+
+        # get top mention scores and sort by sort by span order
+        top_span_indices = self.extract_spans(candidate_starts, candidate_ends, candidate_mention_scores,
+                                              num_top_mentions)
+        top_span_starts = candidate_starts[top_span_indices]  # [top_cand]
+        top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
+        top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
+        top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
+
         if 'coref' in tasks or 'pruner' in tasks:
-
-            candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
-            # get span width scores and add to candidate mention scores
-            span_width_index = candidate_ends - candidate_starts  # [candidates]
-            span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
-            candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
-
-            # get beam size
-            num_top_mentions = int(float(num_words * self.top_span_ratio))
-            num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
-
-            # get top mention scores and sort by sort by span order
-            top_span_indices = self.extract_spans(candidate_starts, candidate_ends, candidate_mention_scores,
-                                                  num_top_mentions)
-            top_span_starts = candidate_starts[top_span_indices]  # [top_cand]
-            top_span_ends = candidate_ends[top_span_indices]  # [top_cand]
-            top_span_emb = span_emb[top_span_indices]  # [top_cand, span_emb]
-            top_span_mention_scores = candidate_mention_scores[top_span_indices]  # [top_cand]
 
             # # COREF Specific things
             # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
@@ -583,8 +583,8 @@ class MangoesMTL(BertPreTrainedModel):
         return {
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
-            "flattened_ids": flattened_ids,
             "candidate_mention_scores": candidate_mention_scores,
+            "flattened_ids": flattened_ids,
             "top_span_starts": top_span_starts,
             "top_span_ends": top_span_ends,
             "top_span_indices": top_span_indices,
