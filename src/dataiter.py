@@ -13,7 +13,6 @@ import numpy as np
 import torch
 import transformers
 from mytorch.utils.goodies import FancyDict
-from sklearn.utils import compute_class_weight
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
 from transformers import BertConfig
@@ -27,7 +26,7 @@ from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, DEFAULTS, unal
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
-from utils.misc import check_dumped_config
+from utils.misc import check_dumped_config, compute_class_weight_sparse
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -140,10 +139,18 @@ class MultiTaskDataIter(Dataset):
             A sense of prior prob of predicting a class, based on the data available.
             Expect them to be extremely heavily twisted in the case of __na__ of course.
         """
+
+        def approx_n_spans(n: int, k: int) -> int:
+            """n is total words, k is max span len"""
+            return int(n * k - (k * k * 0.5) + (k * 0.5))
+
         # Create a flat (long, long) list of all labels
         # print(self.data[0][task]['gold_labels'])
-        y = torch.cat([datum[task]['gold_labels'] for datum in self.data]).to('cpu')
-        return compute_class_weight('balanced', np.unique(y), y.numpy()).tolist()
+        y = torch.cat([datum[task]['gold_label_values'] for datum in self.data]).to('cpu')
+        zero_spans = sum(approx_n_spans(datum['n_subwords'], self.config.max_span_width) for datum in self.data) - len(
+            y)
+        return compute_class_weight_sparse(np.unique(y), class_frequencies=np.bincount(y), class_zero_freq=zero_spans)
+        # return compute_class_weight('balanced', np.unique(you), y.numpy()).tolist()
 
     def write_to_disk(self):
         """

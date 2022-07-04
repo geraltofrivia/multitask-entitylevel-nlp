@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Iterable
 
 import numpy as np
 import torch
@@ -373,3 +373,14 @@ def merge_configs(old, new):
             new.__setattr__(k, v)
 
     return new
+
+
+def compute_class_weight_sparse(class_names, class_frequencies: Iterable[int], class_zero_freq: int = 0) -> List[int]:
+    """ if class zero freq is provided, we replace the first value of bincount with it """
+    if class_zero_freq > 0:
+        class_frequencies[0] = class_zero_freq
+
+    total = np.sum(class_frequencies)
+    return [total / (len(class_names) * freq) for freq in class_frequencies]
+
+    ...
