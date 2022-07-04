@@ -45,6 +45,7 @@ class MangoesMTL(BertPreTrainedModel):
             coref_metadata_feature_size: int,
             coref_max_training_segments: int,
             n_classes_ner: int,
+            coref_loss_mean: bool,
             bias_in_last_layers: bool = False,
             pruner_unweighted: bool = False,
             ner_unweighted: bool = False,
@@ -118,6 +119,7 @@ class MangoesMTL(BertPreTrainedModel):
         self.coref_depth = coref_higher_order
         self.pruner_unweighted = pruner_unweighted
         self.ner_unweighted = ner_unweighted
+        self.coref_loss_mean = coref_loss_mean
 
         self.init_weights()
 
@@ -703,7 +705,11 @@ class MangoesMTL(BertPreTrainedModel):
             dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
             top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
             coref_loss = self.coref_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
-            coref_loss = torch.sum(coref_loss)
+
+            if self.coref_loss_mean:
+                coref_loss = torch.mean(coref_loss)
+            else:
+                coref_loss = torch.sum(coref_loss)
 
             # And now, code that helps with eval
             gold_clusters = {}
