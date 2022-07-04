@@ -1,5 +1,6 @@
 """
     Collection of evaluation functions for different tasks.
+    We use torch metrics whenever possible.
 """
 from abc import ABC, abstractmethod
 from collections import Counter
@@ -8,6 +9,7 @@ from typing import Dict, Callable, List, Union, Optional, Type
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment as linear_assignment
+from torchmetrics import F1Score, Precision, Recall
 from tqdm.auto import tqdm
 
 # Local imports
@@ -37,7 +39,7 @@ from eval_mangoes import CorefEvaluator
 """
 
 
-class Metric(ABC):
+class CustomMetric(ABC):
     """
         Abstract class with some metadata like metric name, a logs dict array,
         a common generate summary function, a common rest function (empties value array)
@@ -54,7 +56,7 @@ class Metric(ABC):
         # Here, we store the interim values which can be returned by a simple 'mean' at the end
         self.logs: Dict[str, List] = {}
 
-    def summarise(self):
+    def compute(self):
         summary = {
             nm: torch.mean(torch.tensor(vl, dtype=torch.float, device='cpu')).item()
             for nm, vl in self.logs.items()
@@ -70,7 +72,7 @@ class Metric(ABC):
         return self.task if self.prefix is None else self.task + '_' + self.prefix
 
     @abstractmethod
-    def compute(self, *args, **kwargs):
+    def update(self, *args, **kwargs):
         """ the fn called with inputs and outputs for each instance. you're expected to store results in self.logs """
         ...
 
@@ -78,7 +80,7 @@ class Metric(ABC):
         self.logs: Dict[str, List] = {}
 
 
-class Trace(Metric, ABC):
+class Trace(CustomMetric, ABC):
     """
         Traces are a different kind of metric: one which does not do a comparison between pred and gold but reports
             some statistics
@@ -86,7 +88,7 @@ class Trace(Metric, ABC):
     ...
 
 
-class MacroMetric(Metric, ABC):
+class CustomMacroMetric(CustomMetric, ABC):
 
     def __init__(self, beta=1, debug: bool = True):
         super().__init__(debug=debug)
@@ -100,7 +102,7 @@ class MacroMetric(Metric, ABC):
         self.beta = beta
 
     @abstractmethod
-    def compute(self, *args, **kwargs):
+    def update(self, *args, **kwargs):
         ...
 
     @staticmethod
@@ -130,7 +132,7 @@ class MacroMetric(Metric, ABC):
         self.r_num = 0
         self.r_den = 0
 
-    def summarise(self):
+    def compute(self):
         summary = {
             'p': self.get_precision(),
             'r': self.get_recall(),
@@ -164,7 +166,7 @@ class Evaluator:
             self,
             predict_fn: Callable,
             dataset_partial: Callable,
-            metrics: List[Type[Metric]],
+            metrics: List[Type[CustomMetric]],
             device: Union[str, torch.device],
             debug: bool = True
     ):
@@ -214,17 +216,17 @@ class Evaluator:
         if self.has_general_traces:
             # We also want to compute the debug cases
             for metric in self.metrics['general']:
-                metric.compute(**outputs)
+                metric.update(**outputs)
 
         for task_nm in instance['tasks']:
 
             if task_nm == 'coref':
                 for metric in self.metrics['coref']:
-                    metric.compute(**outputs['coref'])
+                    metric.update(**outputs['coref'])
 
             else:
                 for metric in self.metrics[task_nm]:
-                    metric.compute(**outputs[task_nm])
+                    metric.update(**outputs[task_nm])
 
     def run(self):
 
@@ -260,7 +262,7 @@ class Evaluator:
                 self.results[task_nm] = {}
 
             for metric in task_metrics:
-                summary = metric.summarise()
+                summary = metric.compute()
                 for nm, vl in summary.items():
                     self.results[task_nm][nm] = vl
 
@@ -299,14 +301,58 @@ class TraceCandidates(Trace):
         self.values = ['unfiltered']
         self.prefix = None
 
-    def compute(self, num_candidates: torch.Tensor, *args, **kwargs):
+    def update(self, num_candidates: torch.Tensor, *args, **kwargs):
         op = {'unfiltered': num_candidates}
 
         for k, v in op.items():
             self.logs[k] = self.logs.get(k, []) + [v]
 
 
-class NERAcc(Metric):
+class NERSpanRecognitionMicro(CustomMetric):
+
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
+        self._p = Precision()
+        self._r = Recall()
+        self._f1 = F1Score()
+        self.task = 'ner'
+        self.prefix = 'spanrec-micro'
+        self.values = ['p', 'r', 'f1']
+
+    def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
+        p = self._p(logits, labels)
+        r = self._r(logits, labels)
+        f1 = self._f1(logits, labels)
+
+        op = {'p': p, 'r': r, 'f1': f1}
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
+
+
+class NERSpanRecognitionMacro(CustomMetric):
+
+    def __init__(self, n_classes: int, debug: bool = True):
+        super().__init__(debug=debug)
+        self._p = Precision(average='macro', num_classes=n_classes)
+        self._r = Recall(average='macro', num_classes=n_classes)
+        self._f1 = F1Score(average='macro', num_classes=n_classes)
+        self.task = 'ner'
+        self.prefix = 'spanrec-macro'
+        self.values = ['p', 'r', 'f1']
+
+    def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
+        p = self._p(logits, labels)
+        r = self._r(logits, labels)
+        f1 = self._f1(logits, labels)
+
+        op = {'p': p, 'r': r, 'f1': f1}
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
+
+
+class NERAcc(CustomMetric):
 
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
@@ -314,7 +360,7 @@ class NERAcc(Metric):
         self.task = 'ner'
         self.prefix = None
 
-    def compute(self, logits, labels, *args, **kwargs):
+    def update(self, logits, labels, *args, **kwargs):
         """
             Does not distinguish b/w invalid spans, and actually annotated spans.
         :param logits: n_spans, n_classes
@@ -330,45 +376,50 @@ class NERAcc(Metric):
             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
-class NERSpanRecognitionPR(Metric):
+# class NERSpanRecognitionPR(CustomMetric):
+#
+#     def __init__(self, debug: bool = True):
+#         super().__init__(debug=debug)
+#         self.values = ['p', 'r']
+#         self.prefix = 'spanrec'
+#         self.task = 'ner'
+#
+#     def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
+#         """
+#             Treat as binary clf. And find proportion of spans which were correctly recognized as being spans
+#             (regardless of the label).
+#         """
+#         _logits = torch.argmax(logits, dim=1)  # n_spans, 1
+#         p = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
+#         r = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((_logits > 0).to(float))
+#         op = {'p': p, 'r': r}
+#
+#         for k, v in op.items():
+#             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
-    def __init__(self, debug: bool = True):
-        super().__init__(debug=debug)
-        self.values = ['p', 'r']
-        self.prefix = 'spanrec'
-        self.task = 'ner'
 
-    def compute(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
-        """
-            Treat as binary clf. And find proportion of spans which were correctly recognized as being spans
-            (regardless of the label).
-        """
-        _logits = torch.argmax(logits, dim=1)  # n_spans, 1
-        p = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
-        r = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((_logits > 0).to(float))
-        op = {'p': p, 'r': r}
-
-        for k, v in op.items():
-            self.logs[k] = self.logs.get(k, []) + [v.item()]
-
-
-class PrunerPR(Metric):
+class PrunerPR(CustomMetric):
 
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
         self.values = ['p', 'r']
         self.task = 'pruner'
 
-    def compute(self, logits, labels, *args, **kwargs):
+    def update(self, logits, labels, *args, **kwargs):
         """
         :param logits: n_spans
         :param labels: n_spans
         :return: scalar
         """
-        p = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
-            / torch.sum((labels > 0).to(float))
-        r = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
-            / torch.sum((logits > 0).to(float))
+
+        if torch.sum((logits > 0).to(float)) == 0:
+            p = 0
+            r = 0
+        else:
+            p = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
+                / torch.sum((labels > 0).to(float))
+            r = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
+                / torch.sum((logits > 0).to(float))
         # TODO: add f1
         op = {'p': p, 'r': r}
 
@@ -390,7 +441,7 @@ class PrunerPR(Metric):
 
 
 # noinspection PyUnusedLocal
-class CorefCeafe(MacroMetric):
+class CorefCeafe(CustomMacroMetric):
 
     def __init__(self, beta=1, debug: bool = True):
         super().__init__(beta=beta, debug=debug)
@@ -409,7 +460,7 @@ class CorefCeafe(MacroMetric):
         # similarity = sum(scores[matching[:, 0], matching[:, 1]])
         return similarity, len(clusters), similarity, len(gold_clusters)
 
-    def compute(self, clusters, gold_clusters, mention_to_gold, *args, **kwargs):
+    def update(self, clusters, gold_clusters, mention_to_gold, *args, **kwargs):
         pn, pd, rn, rd = self._compute_(clusters, gold_clusters)
         self.p_num += pn
         self.p_den += pd
@@ -421,14 +472,14 @@ class CorefCeafe(MacroMetric):
         return 2 * len([m for m in c1 if m in c2]) / float(len(c1) + len(c2))
 
 
-class CorefBCubed(MacroMetric):
+class CorefBCubed(CustomMacroMetric):
 
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
         self.prefix = 'b_cubed'
         self.task = 'coref'
 
-    def compute(self, clusters, gold_clusters, mention_to_predicted, mention_to_gold, *args, **kwargs):
+    def update(self, clusters, gold_clusters, mention_to_predicted, mention_to_gold, *args, **kwargs):
         pn, pd = self._compute_(clusters, mention_to_gold)
         rn, rd = self._compute_(gold_clusters, mention_to_predicted)
         self.p_num += pn
@@ -459,7 +510,7 @@ class CorefBCubed(MacroMetric):
         return num, dem
 
 
-class CorefMUC(MacroMetric):
+class CorefMUC(CustomMacroMetric):
 
     def __init__(self, debug: bool = True):
         super().__init__(debug=debug)
@@ -481,7 +532,7 @@ class CorefMUC(MacroMetric):
             tp -= len(linked)
         return tp, p
 
-    def compute(self, clusters, gold_clusters, mention_to_predicted, mention_to_gold, *args, **kwargs):
+    def update(self, clusters, gold_clusters, mention_to_predicted, mention_to_gold, *args, **kwargs):
         pn, pd = self._compute_(clusters, mention_to_gold)
         rn, rd = self._compute_(gold_clusters, mention_to_predicted)
         self.p_num += pn

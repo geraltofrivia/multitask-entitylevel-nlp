@@ -23,7 +23,8 @@ from dataiter import MultiTaskDataIter, DataIterCombiner
 from utils.misc import check_dumped_config, merge_configs
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
-from eval import Evaluator, NERAcc, NERSpanRecognitionPR, PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
+from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
+    PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -418,7 +419,7 @@ def run(
     metrics = []
     metrics += [TraceCandidates]
     if 'ner' in tasks + tasks_2:
-        metrics += [NERAcc, NERSpanRecognitionPR]
+        metrics += [NERAcc, NERSpanRecognitionMicro, partial(NERSpanRecognitionMacro, n_classes=n_classes_ner)]
     if 'pruner' in tasks + tasks_2:
         metrics += [PrunerPR]
     if 'coref' in tasks + tasks_2:
