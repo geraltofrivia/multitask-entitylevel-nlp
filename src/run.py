@@ -24,7 +24,7 @@ from utils.misc import check_dumped_config, merge_configs
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
-    PrunerPR, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
+    PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -423,7 +423,8 @@ def run(
                     partial(NERSpanRecognitionMicro, device=config.device),
                     partial(NERSpanRecognitionMacro, n_classes=n_classes_ner, device=config.device)]
     if 'pruner' in tasks + tasks_2:
-        metrics += [PrunerPR]
+        metrics += [partial(PrunerPRMicro, device=config.device),
+                    partial(PrunerPRMacro, n_classes=n_classes_ner, device=config.device)]
     if 'coref' in tasks + tasks_2:
         metrics += [CorefBCubed, CorefMUC, CorefCeafe]
 

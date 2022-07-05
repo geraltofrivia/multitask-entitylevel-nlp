@@ -18,7 +18,6 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device
-from utils.exceptions import NANsFound
 from eval_mangoes import CorefEvaluator
 
 """
@@ -78,6 +77,84 @@ class CustomMetric(ABC):
 
     def reset(self):
         self.logs: Dict[str, List] = {}
+
+
+class PRF1Micro(CustomMetric):
+
+    def __init__(self, debug: bool, device: str):
+        super().__init__(debug=debug)
+        self._p = Precision().to(device)
+        self._r = Recall().to(device)
+        self._f1 = F1Score().to(device)
+        self.values = ['p', 'r', 'f1']
+
+    def update(self, logits, labels, *args, **kwargs):
+        p = self._p(logits, labels)
+        r = self._r(logits, labels)
+        f1 = self._f1(logits, labels)
+
+        op = {'p': p, 'r': r, 'f1': f1}
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
+
+    def reset(self):
+        super().reset()
+        self._p.reset()
+        self._r.reset()
+        self._f1.reset()
+
+    def compute(self):
+        summary = {
+            'p': self._p.compute(),
+            'r': self._r.compute(),
+            'f1': self._f1.compute()
+        }
+        if self.prefix is not None:
+            return {
+                self.prefix + '_' + nm: vl for nm, vl in summary.items()
+            }
+        else:
+            return summary
+
+
+class PRF1Macro(CustomMetric):
+
+    def __init__(self, n_classes: int, debug: bool, device: str):
+        super().__init__(debug=debug)
+        self._p = Precision(average='macro', num_classes=n_classes).to(device)
+        self._r = Recall(average='macro', num_classes=n_classes).to(device)
+        self._f1 = F1Score(average='macro', num_classes=n_classes).to(device)
+        self.values = ['p', 'r', 'f1']
+
+    def update(self, logits, labels, *args, **kwargs):
+        p = self._p(logits, labels)
+        r = self._r(logits, labels)
+        f1 = self._f1(logits, labels)
+
+        op = {'p': p, 'r': r, 'f1': f1}
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
+
+    def reset(self):
+        super().reset()
+        self._p.reset()
+        self._r.reset()
+        self._f1.reset()
+
+    def compute(self):
+        summary = {
+            'p': self._p.compute(),
+            'r': self._r.compute(),
+            'f1': self._f1.compute()
+        }
+        if self.prefix is not None:
+            return {
+                self.prefix + '_' + nm: vl for nm, vl in summary.items()
+            }
+        else:
+            return summary
 
 
 class Trace(CustomMetric, ABC):
@@ -308,90 +385,20 @@ class TraceCandidates(Trace):
             self.logs[k] = self.logs.get(k, []) + [v]
 
 
-class NERSpanRecognitionMicro(CustomMetric):
+class NERSpanRecognitionMicro(PRF1Micro):
 
     def __init__(self, device: str = 'cpu', debug: bool = True):
-        super().__init__(debug=debug)
-        self._p = Precision().to(device)
-        self._r = Recall().to(device)
-        self._f1 = F1Score().to(device)
+        super().__init__(debug=debug, device=device)
         self.task = 'ner'
         self.prefix = 'spanrec_micro'
-        self.values = ['p', 'r', 'f1']
-
-    def compute(self):
-        summary = {
-            'p': self._p.compute(),
-            'r': self._r.compute(),
-            'f1': self._f1.compute()
-        }
-        if self.prefix is not None:
-            return {
-                self.prefix + '_' + nm: vl for nm, vl in summary.items()
-            }
-        else:
-            return summary
-
-    def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
-
-        if logits.device != labels.device:
-            raise AssertionError(f'Logits: {logits.device}, Labels: {labels.device}')
-
-        p = self._p(logits, labels)
-        r = self._r(logits, labels)
-        f1 = self._f1(logits, labels)
-
-        op = {'p': p, 'r': r, 'f1': f1}
-
-        for k, v in op.items():
-            self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
-
-    def reset(self):
-        super().reset()
-        self._p.reset()
-        self._r.reset()
-        self._f1.reset()
 
 
-class NERSpanRecognitionMacro(CustomMetric):
+class NERSpanRecognitionMacro(PRF1Macro):
 
     def __init__(self, n_classes: int, device: str = 'cpu', debug: bool = True):
-        super().__init__(debug=debug)
-        self._p = Precision(average='macro', num_classes=n_classes).to(device)
-        self._r = Recall(average='macro', num_classes=n_classes).to(device)
-        self._f1 = F1Score(average='macro', num_classes=n_classes).to(device)
+        super().__init__(debug=debug, device=device, n_classes=n_classes)
         self.task = 'ner'
         self.prefix = 'spanrec_macro'
-        self.values = ['p', 'r', 'f1']
-
-    def compute(self):
-        summary = {
-            'p': self._p.compute(),
-            'r': self._r.compute(),
-            'f1': self._f1.compute()
-        }
-        if self.prefix is not None:
-            return {
-                self.prefix + '_' + nm: vl for nm, vl in summary.items()
-            }
-        else:
-            return summary
-
-    def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
-        p = self._p(logits, labels)
-        r = self._r(logits, labels)
-        f1 = self._f1(logits, labels)
-
-        op = {'p': p, 'r': r, 'f1': f1}
-
-        for k, v in op.items():
-            self.logs[k] = self.logs.get(k, []) + [v.item() if type(v) is torch.Tensor else v]
-
-    def reset(self):
-        super().reset()
-        self._p.reset()
-        self._r.reset()
-        self._f1.reset()
 
 
 class NERAcc(CustomMetric):
@@ -440,46 +447,20 @@ class NERAcc(CustomMetric):
 #             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
-class PrunerPR(CustomMetric):
+class PrunerPRMacro(PRF1Macro):
 
-    def __init__(self, debug: bool = True):
-        super().__init__(debug=debug)
-        self.values = ['p', 'r']
+    def __init__(self, n_classes: int, debug: bool = True, device: str = 'cpu'):
+        super().__init__(debug=debug, n_classes=n_classes, device=device)
         self.task = 'pruner'
+        self.suffix = 'macro'
 
-    def update(self, logits, labels, *args, **kwargs):
-        """
-        :param logits: n_spans
-        :param labels: n_spans
-        :return: scalar
-        """
 
-        if torch.sum((logits > 0).to(float)) == 0:
-            p = 0
-            r = 0
-        else:
-            p = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
-                / torch.sum((labels > 0).to(float))
-            r = torch.sum((logits > 0).to(float) * (labels > 0).to(float)) \
-                / torch.sum((logits > 0).to(float))
-        # TODO: add f1
-        op = {'p': p, 'r': r}
+class PrunerPRMicro(PRF1Micro):
 
-        # Check for nans.
-        if p.isnan() and self.debug:
-            raise NANsFound(f"There are NaNs in Pruner recall comp. Here are raw dumps of logits and labels:"
-                            f"Logits: {logits.shape}, Labels: {labels.shape}"
-                            f"{logits}"
-                            f"{labels}")
-        # Check for nans.
-        if r.isnan() and self.debug:
-            raise NANsFound(f"There are NaNs in Pruner recall comp. Here are raw dumps of logits and labels:"
-                            f"Logits: {logits.shape}, Labels: {labels.shape}"
-                            f"{logits}"
-                            f"{labels}")
-
-        for k, v in op.items():
-            self.logs[k] = self.logs.get(k, []) + [v.item()]
+    def __init__(self, debug: bool = True, device: str = 'cpu'):
+        super().__init__(debug=debug, device=device)
+        self.task = 'pruner'
+        self.suffix = 'micro'
 
 
 # noinspection PyUnusedLocal
