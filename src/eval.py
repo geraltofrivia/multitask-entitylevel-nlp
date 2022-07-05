@@ -89,6 +89,9 @@ class PRF1Micro(CustomMetric):
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
+        logits = logits.int()
+        labels = labels.int()
+
         p = self._p(logits, labels)
         r = self._r(logits, labels)
         f1 = self._f1(logits, labels)
@@ -128,6 +131,9 @@ class PRF1Macro(CustomMetric):
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
+        logits = logits.int()
+        labels = labels.int()
+
         p = self._p(logits, labels)
         r = self._r(logits, labels)
         f1 = self._f1(logits, labels)
