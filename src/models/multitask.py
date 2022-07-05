@@ -637,9 +637,9 @@ class MangoesMTL(BertPreTrainedModel):
         }
 
         if "pruner" in tasks:
-            pred_starts = predictions["top_span_starts"]
-            pred_ends = predictions["top_span_ends"]
-            pred_indices = predictions["top_span_indices"]
+            pred_starts = predictions["pruned_span_starts"]
+            pred_ends = predictions["pruned_span_ends"]
+            pred_indices = predictions["pruned_span_indices"]
             gold_starts = pruner["gold_starts"]
             gold_ends = pruner["gold_ends"]
 
@@ -655,7 +655,6 @@ class MangoesMTL(BertPreTrainedModel):
             labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
 
             # Calculate the loss !
-            # TODO: pruner weights are set at 0.5, 0.5. Fix that somehow?
             if self.pruner_unweighted:
                 pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
             else:
@@ -721,8 +720,8 @@ class MangoesMTL(BertPreTrainedModel):
             _gold_starts = coref["gold_starts"]
             _gold_ends = coref["gold_ends"]
             ids = predictions["flattened_ids"]
-            top_span_starts = predictions["pruned_span_starts"]
-            top_span_ends = predictions["pruned_span_ends"]
+            pruned_span_starts = predictions["pruned_span_starts"]
+            pruned_span_ends = predictions["pruned_span_ends"]
             top_antecedents = predictions["coref_top_antecedents"]
 
             for i in range(len(_cluster_ids)):
@@ -745,7 +744,7 @@ class MangoesMTL(BertPreTrainedModel):
             mention_indices = []
             antecedent_indices = []
             predicted_antecedents = []
-            for i in range(len(top_span_ends)):
+            for i in range(len(pruned_span_ends)):
                 if top_indices[i] > 0:
                     mention_indices.append(i)
                     antecedent_indices.append(top_antecedents[i][top_indices[i] - 1].item())
@@ -770,9 +769,9 @@ class MangoesMTL(BertPreTrainedModel):
                 current_ids = []
                 current_start_end = []
                 for mention_index in cluster_mentions:
-                    current_ids.append(ids[top_span_starts[mention_index]:top_span_ends[mention_index] + 1])
+                    current_ids.append(ids[pruned_span_starts[mention_index]:pruned_span_ends[mention_index] + 1])
                     current_start_end.append(
-                        (top_span_starts[mention_index].item(), top_span_ends[mention_index].item()))
+                        (pruned_span_starts[mention_index].item(), pruned_span_ends[mention_index].item()))
                 cluster_dicts.append({"cluster_ids": current_ids})
                 clusters.append(tuple(current_start_end))
 
