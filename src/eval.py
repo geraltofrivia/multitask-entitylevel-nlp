@@ -458,7 +458,7 @@ class PrunerPRMacro(PRF1Macro):
     def __init__(self, n_classes: int, debug: bool = True, device: str = 'cpu'):
         super().__init__(debug=debug, n_classes=n_classes, device=device)
         self.task = 'pruner'
-        self.suffix = 'macro'
+        self.prefix = 'macro'
 
 
 class PrunerPRMicro(PRF1Micro):
@@ -466,7 +466,7 @@ class PrunerPRMicro(PRF1Micro):
     def __init__(self, debug: bool = True, device: str = 'cpu'):
         super().__init__(debug=debug, device=device)
         self.task = 'pruner'
-        self.suffix = 'micro'
+        self.prefix = 'micro'
 
 
 # noinspection PyUnusedLocal
