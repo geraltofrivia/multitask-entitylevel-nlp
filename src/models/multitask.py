@@ -60,10 +60,10 @@ class MangoesMTL(BertPreTrainedModel):
 
         ffnn_hidden_size = unary_hdim
         bert_hidden_size = hidden_size
+        self.coref_dropout = coref_dropout
 
         self.span_attend_projection = torch.nn.Linear(bert_hidden_size, 1)
         span_embedding_dim = (bert_hidden_size * 3) + coref_metadata_feature_size
-        self.coref_dropout = coref_dropout
         self.mention_scorer = nn.Sequential(
             nn.Linear(span_embedding_dim, ffnn_hidden_size),
             nn.ReLU(),
@@ -122,6 +122,30 @@ class MangoesMTL(BertPreTrainedModel):
         self.coref_loss_mean = coref_loss_mean
 
         self.init_weights()
+
+    def get_gradnorm_param_group(self):
+
+        coref_params = nn.ModuleList([
+            self.span_attend_projection,
+            self.mention_scorer,
+            self.width_scores,
+            self.fast_antecedent_projection,
+            self.slow_antecedent_scorer,
+            self.slow_antecedent_projection,
+            self.distance_embeddings,
+            self.slow_distance_embeddings,
+            self.distance_projection,
+            self.span_width_embeddings,
+            self.span_width_prior_embeddings,
+            self.segment_dist_embeddings,
+        ])
+
+        ner_params = nn.ModuleList([
+            self.unary_ner
+        ])
+
+        # TODO divide pruner and coref here !
+        return nn.ModuleDict({'coref': coref_params, 'ner': ner_params})
 
     def task_separate_gradient_clipping(self):
         # noinspection PyAttributeOutsideInit
