@@ -504,10 +504,14 @@ def run(
         if 'wandbid' not in config.to_dict():
             config.wandbid = wandb.util.generate_id()
             save_config = config.to_dict()
+            save_config['dataset'] = dataset
+            save_config['dataset_2'] = dataset_2
+            save_config['tasks'] = list(tasks)
+            save_config['tasks_2'] = list(tasks_2)
 
         wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment, name=wandb_name,
                    id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
-        wandb.config.update(config.to_dict(), allow_val_change=True)
+        wandb.config.update(save_config, allow_val_change=True)
 
     print(config)
     print("Training commences!")
