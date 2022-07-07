@@ -309,6 +309,7 @@ def run(
         raise BadParameters(f"Unknown dataset: {dataset}.")
     # If there is overlap in tasks and tasks_2
     if set(tasks).intersection(tasks_2):
+        # TODO: relax this condition
         raise BadParameters("Tasks are overlapping between the two sources. That should not happen.")
 
     # Convert task args to a proper tasks obj
@@ -377,6 +378,9 @@ def run(
         n_classes_ner = 1
     config.n_classes_ner = n_classes_ner
 
+    n_classes_pruner = 2
+    config.n_classes_pruner = n_classes_pruner
+
     # Make the model
     model = MangoesMTL.from_pretrained(dir_encoder, config=config, **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
@@ -424,7 +428,7 @@ def run(
                     partial(NERSpanRecognitionMacro, n_classes=n_classes_ner, device=config.device)]
     if 'pruner' in tasks + tasks_2:
         metrics += [partial(PrunerPRMicro, device=config.device),
-                    partial(PrunerPRMacro, n_classes=n_classes_ner, device=config.device)]
+                    partial(PrunerPRMacro, n_classes=n_classes_pruner, device=config.device)]
     if 'coref' in tasks + tasks_2:
         metrics += [CorefBCubed, CorefMUC, CorefCeafe]
 
