@@ -29,7 +29,7 @@ def training_loop(
         model: torch.nn.Module,
         epochs: int,
         tasks: Iterable[str],
-        opt: Type[torch.optim],
+        opt: torch.optim,
         forward_fn: Callable,
         device: Union[str, torch.device],
         trn_dl: Callable,
