@@ -42,7 +42,7 @@ def training_loop(
         save_config: dict = None,
         filter_candidates_len_threshold: int = -1,
         debug: bool = False,
-        scheduler=Optional[Type[torch.optim.lr_scheduler]],
+        scheduler=Optional[Type[torch.optim.lr_scheduler._LRScheduler]],
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """

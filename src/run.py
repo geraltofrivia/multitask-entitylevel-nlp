@@ -2,7 +2,7 @@ import json
 import random
 from functools import partial
 from pathlib import Path
-from typing import List, Callable, Union, Optional
+from typing import List, Callable, Union, Optional, Type
 
 import click
 import numpy as np
@@ -102,7 +102,7 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
-def make_scheduler(opt, lr_schedule: Optional[str]):
+def make_scheduler(opt, lr_schedule: Optional[str]) -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
     if not lr_schedule:
         return None
 
