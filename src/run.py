@@ -2,7 +2,7 @@ import json
 import random
 from functools import partial
 from pathlib import Path
-from typing import List, Callable, Union, Optional
+from typing import List, Callable, Union, Optional, Tuple
 
 import click
 import numpy as np
@@ -209,32 +209,38 @@ def get_dataiter_partials(
 
 # noinspection PyDefaultArgument
 @click.command()
-@click.option("--dataset", "-d", type=str, help="The name of dataset e.g. ontonotes etc")
-@click.option("--tasks", "-t", type=str, multiple=True,
-              help="Multiple values are okay e.g. -t coref -t ner or just one of these", )
-@click.option("--dataset-2", "-d2", type=str, help="The name of dataset e.g. ontonotes etc for a secondary thing.")
-@click.option("--tasks_2", "-t2", type=str, default=None, multiple=True,
-              help="Multiple values are okay e.g. -t2 coref -t2 ner or just one of these", )
+@click.option("--dataset", "-d", type=str, required=True,
+              help="The name of the first (or only) dataset e.g. ontonotes etc")
+@click.option("--tasks", "-t", type=(str, float, bool, float), multiple=True, required=True,
+              help="We are expected to have a tuple of three elements where each signifies: "
+                   "1. a string denoting task name (in coref, ner, pruner) "
+                   "2. a float denoting loss weight. if its negative, we ignore the value "
+                   "3. a bool signifying if the class should be weighted or not."
+                   "4. a float signifying sampling ratio. 1.0 is normal. 0.5 would be undersampling, 3 would be over..."
+                   "Some example of correct: -t coref -1 True -t pruner 3.5 False")
+@click.option("--dataset-2", "-d2", type=str,
+              help="The name of dataset e.g. ontonotes etc for a secondary task. Optional. ")
+@click.option("--tasks_2", "-t2", type=(str, float, bool), default=None, multiple=True,
+              help="We are expected to have a tuple of three elements where each signifies: "
+                   "1. a string denoting task name (in coref, ner, pruner) "
+                   "2. a float denoting loss weight. if its negative, we ignore the value "
+                   "3. a bool signifying if the class should be weighted or not."
+                   "4. a float signifying sampling ratio. 1.0 is normal. 0.5 would be undersampling, 3 would be over..."
+                   "Some example of correct: -t coref -1 True -t pruner 3.5 False")
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
+# TODO is this the encoder learning rate or the task learning rate?
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
 @click.option('--trim', is_flag=True,
-              help="If True, We only consider 50 documents in one dataset. For quick iterations. ")
+              help="If True, We only consider 50 documents in one dataset. For quick iterations. NOTE:"
+                   "if d1, d2 are both provided, documents are trimmed for both.")
 @click.option('--debug', is_flag=True,
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
-@click.option('--ner-unweighted', is_flag=True,
-              help="If True, we do not input priors of classes into Model -> NER CE loss.")
-@click.option('--pruner-unweighted', is_flag=True,
-              help="If True, we do not input priors of classes into Model -> Pruner BCEwL loss.")
-@click.option('--t1-ignore-task', default=None, type=str,
-              help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
-@click.option('--t2-ignore-task', default=None, type=str,
-              help="Whatever task is mentioned here, we'll set its loss scale to zero. So it does not train.")
 @click.option('--use-wandb', '-wb', is_flag=True, default=False,
               help="If True, we report this run to WandB")
 @click.option('--wandb-comment', '-wbm', type=str, default=None,
@@ -249,7 +255,7 @@ def get_dataiter_partials(
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--max-span-width', '-msw', type=int, default=DEFAULTS['max_span_width'],
-              help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
+              help="Max subwords to consider when making span. Use carefully. 5 alre    ady is too high.")
 @click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'], is_flag=True,
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
@@ -262,31 +268,25 @@ def run(
         encoder: str,
         epochs: int,
         dataset: str,
-        tasks: List[str],
+        tasks: List[Tuple[str, float, bool, float]],
         dataset_2: str,
         tasks_2: List[str] = [],
         device: str = "cpu",
         trim: bool = False,
         debug: bool = False,
         train_encoder: bool = False,
-        ner_unweighted: bool = False,
-        pruner_unweighted: bool = False,
-        t1_ignore_task: str = None,
-        t2_ignore_task: str = None,
         use_wandb: bool = False,
         wandb_comment: str = '',
         wandb_name: str = None,
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
-        use_pretrained_model: str = None,  # @TODO: integrate this someday
+        use_pretrained_model: str = None,
         learning_rate: float = DEFAULTS.trainer.learning_rate,
         max_span_width: int = DEFAULTS.max_span_width,
         coref_loss_mean: bool = DEFAULTS.coref_loss_mean,
         coref_higher_order: int = DEFAULTS.coref_higher_order,
 ):
-    # TODO: enable specifying data sampling ratio when we have 2 datasets
-    # TODO: enable specifying loss ratios for different tasks.
     # TODO: implement soft loading the model parameters somehow.
 
     if not tokenizer:
@@ -298,6 +298,22 @@ def run(
     # If we are to "resume" training things from somewhere, we should also have the save flag enabled
     if resume_dir >= 0:
         save = True
+
+    """
+        Sanity Checks
+        -> At least one dataset and task 1 are provided
+        -> If dataset2 is specified, at least one task2 is specified
+        -> If at least one task2 is specified, dataset2 is specified
+        -> Datasets, Tasks are all known
+    """
+    if not dataset or not tasks:
+        raise BadParameters(f"Dataset 1, or Task 1 or both are not provided! ")
+    if (not tasks_2 and dataset_2) or (tasks_2 and not dataset_2):
+        raise BadParameters(f"Either one of dataset or task is not provided for the second domain")
+    for task in tasks:
+    # Check if Task is legit
+
+    _is_multidomain: bool = dataset_2 is not None
 
     # Sanity Checks
     if dataset_2:
@@ -333,8 +349,8 @@ def run(
     # config.learning_rate = learning_rate
     config.trim = trim
     config.debug = debug
-    config.ner_unweighted = ner_unweighted
-    config.pruner_unweighted = pruner_unweighted
+    # config.ner_unweighted = ner_unweighted
+    # config.pruner_unweighted = pruner_unweighted
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
@@ -417,7 +433,7 @@ def run(
     """
 
     train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
-                                             ignore_task=t1_ignore_task)
+                                             ignore_task=None)  # FORCE: ignore tasks here
 
     # Collect all metrics
     metrics = []
@@ -434,7 +450,7 @@ def run(
 
     if dataset_2 and tasks_2:
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,
-                                                     ignore_task=t2_ignore_task)
+                                                     ignore_task=None)  # TODO: force ignore tasks here
         # Make combined iterators since we have two sets of datasets and tasks
         train_ds = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
         dev_ds = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])

@@ -102,7 +102,6 @@ DEFAULTS: dict = FancyDict({
         'adam_epsilon': 1e-6,
         'clip_gradients_norm': 1.0,
         'learning_rate': 0.0001,
-
     }),
 })
 LOSS_SCALES = {
