@@ -21,7 +21,7 @@ from loops import training_loop
 from models.multitask import BasicMTL, MangoesMTL
 from dataiter import MultiTaskDataIter, DataIterCombiner
 from utils.misc import check_dumped_config, merge_configs
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED, SCHEDULER_CONFIG
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
     PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
@@ -100,6 +100,19 @@ def make_optimizer(
 
     optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": encoder_learning_rate}
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
+
+
+def make_scheduler(opt: torch.optim, lr_schedule: Optional[str]) -> Optional[torch.optim.lr_scheduler]:
+    if not lr_schedule:
+        return None
+
+    if lr_schedule == 'gamma':
+        lambda1 = lambda epoch: SCHEDULER_CONFIG['gamma']['decay_rate'] ** epoch
+        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda1)
+        return scheduler
+
+    else:
+        raise BadParameters(f"Unknown LR Schedule Recipe Name - {lr_schedule}")
 
 
 def get_pretrained_dirs(enc_nm: str, tok_nm: str):
@@ -218,6 +231,8 @@ def get_dataiter_partials(
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
+@click.option("--lr-schedule", "-lrs", default=None, type=str,
+              help="Write 'gamma' to decay the lr. TODO: add more recipes here")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
@@ -279,6 +294,7 @@ def run(
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
+        lr_schedule: str = None,
         use_pretrained_model: str = None,  # @TODO: integrate this someday
         learning_rate: float = DEFAULTS.trainer.learning_rate,
         max_span_width: int = DEFAULTS.max_span_width,
@@ -351,6 +367,7 @@ def run(
     config.trainer.learning_rate = learning_rate
     config.trainer.epochs = epochs
     config.trainer.freeze_encoder = not train_encoder
+    config.trainer.lr_schedule = lr_schedule
     # config.trainer.adam_beta1
 
     config = merge_configs(old=DEFAULTS, new=config)
@@ -403,6 +420,7 @@ def run(
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
+    scheduler = make_scheduler(opt, lr_schedule)
 
     """
         Prep datasets.
@@ -537,7 +555,8 @@ def run(
         epochs_last_run=config.epochs_last_run if hasattr(config, 'epochs_last_run') else 0,
         filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
         debug=config.debug,
-        clip_grad_norm=config.trainer.clip_gradients_norm
+        clip_grad_norm=config.trainer.clip_gradients_norm,
+        scheduler=scheduler
     )
     print("potato")
 

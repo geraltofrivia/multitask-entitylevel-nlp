@@ -113,3 +113,6 @@ LOSS_SCALES = {
     'loss_scales_ner': [1.0, ],
     'loss_scales_pruner': [1.0, ],
 }
+SCHEDULER_CONFIG = {
+    'gamma': {'decay_rate': 0.9}
+}

@@ -42,6 +42,7 @@ def training_loop(
         save_config: dict = None,
         filter_candidates_len_threshold: int = -1,
         debug: bool = False,
+        scheduler: Optional[torch.optim.lr_scheduler] = None,
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
@@ -177,5 +178,9 @@ def training_loop(
         # Reset eval benches
         train_eval.reset()
         dev_eval.reset()
+
+        # If LR scheulder is provided, run it
+        if scheduler is not None:
+            scheduler.step()
 
     return train_metrics, dev_metrics, train_loss
