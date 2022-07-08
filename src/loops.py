@@ -2,7 +2,7 @@ import json
 import pickle
 import warnings
 from pathlib import Path
-from typing import Iterable, Callable, Union, Optional
+from typing import Iterable, Callable, Union, Optional, Type
 
 import numpy as np
 import torch
@@ -29,7 +29,7 @@ def training_loop(
         model: torch.nn.Module,
         epochs: int,
         tasks: Iterable[str],
-        opt: torch.optim,
+        opt: Type[torch.optim],
         forward_fn: Callable,
         device: Union[str, torch.device],
         trn_dl: Callable,
@@ -42,7 +42,7 @@ def training_loop(
         save_config: dict = None,
         filter_candidates_len_threshold: int = -1,
         debug: bool = False,
-        scheduler=None,
+        scheduler=Optional[Type[torch.optim.lr_scheduler]],
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
@@ -64,7 +64,7 @@ def training_loop(
     :param save_config:
     :param filter_candidates_len_threshold: this is LEN threshold, not POS threshold.
         You divide the POS threshold by max span width and send that here.
-    :return:
+    :param scheduler: a lr_scheduler object (or none), preconfigured with our optimizer.
     """
     if flag_save and save_config is None:
         save_config = {}
@@ -132,11 +132,17 @@ def training_loop(
         # Evaluation (on the validation set)
         dev_eval.run()
 
+        # If LR scheduler is provided, run it
+        if scheduler is not None:
+            scheduler.step()
+
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
         dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        lrs = [param_group['lr'] for param_group in opt.param_groups]
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
+            wandb.log({'lr': lrs}, step=e)
         for task_nm in tasks:
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
 
@@ -178,9 +184,5 @@ def training_loop(
         # Reset eval benches
         train_eval.reset()
         dev_eval.reset()
-
-        # If LR scheulder is provided, run it
-        if scheduler is not None:
-            scheduler.step()
 
     return train_metrics, dev_metrics, train_loss
