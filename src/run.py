@@ -102,7 +102,7 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
-def make_scheduler(opt: torch.optim, lr_schedule: Optional[str]) -> Optional[torch.optim.lr_scheduler]:
+def make_scheduler(opt, lr_schedule: Optional[str]):
     if not lr_schedule:
         return None
 
