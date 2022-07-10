@@ -799,7 +799,7 @@ class DataLoaderToHFTokenizer:
         return self.ds.__len__()
 
 
-class DataIterCombiner(Dataset):
+class MultiDomainDataCombiner(Dataset):
     def __init__(
             self,
             srcs: List[Callable],
@@ -816,7 +816,7 @@ class DataIterCombiner(Dataset):
             ontonotes_di_partial = partial(MultiTaskDataIter, src='ontonotes', split='train', ...)
             scierc_di_partial = partial(MultiTaskDataIter, src='scierc', split='train', ...)
 
-            dic = DataIterCombiner(src=[ontonotes_di_partial, scierc_di_partial])
+            dic = MultiDomainDataCombiner(src=[ontonotes_di_partial, scierc_di_partial])
             for inst in dic:
                 # sometime you get instances from ontonotes, sometimes from scierc
                 ...
@@ -835,6 +835,8 @@ class DataIterCombiner(Dataset):
         """
         self.source_indices = []
         self.source_pointers = [-1] * len(self.dataiters)
+
+        # TODO: interpret sampling ratios properly.
         if not sampling_ratio:
             sampling_ratio = [1] * len(self.dataiters)
 

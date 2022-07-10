@@ -19,7 +19,7 @@ except ImportError:
 from utils.data import Tasks
 from loops import training_loop
 from models.multitask import BasicMTL, MangoesMTL
-from dataiter import MultiTaskDataIter, DataIterCombiner
+from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED, SCHEDULER_CONFIG
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
@@ -231,7 +231,6 @@ def get_dataiter_partials(
                    "1. a string denoting task name (in coref, ner, pruner) "
                    "2. a float denoting loss weight. if its negative, we ignore the value "
                    "3. a bool signifying if the class should be weighted or not."
-                   "4. a float signifying sampling ratio. 1.0 is normal. 0.5 would be undersampling, 3 would be over..."
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
 @click.option("--dataset-2", "-d2", type=str,
               help="The name of dataset e.g. ontonotes etc for a secondary task. Optional. ")
@@ -242,6 +241,9 @@ def get_dataiter_partials(
                    "3. a bool signifying if the class should be weighted or not."
                    "4. a float signifying sampling ratio. 1.0 is normal. 0.5 would be undersampling, 3 would be over..."
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
+@click.option("--sampling-ratio", "-sr", type=(float, float), default=(1.0, 1.0), multiple=False,
+              help="A set of floats signifying sampling ratios. (1.0, 1.0) is normal (fully sample)."
+                   "(0.5, 1.0) would only get half instances from the first. ")
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
 # TODO is this the encoder learning rate or the task learning rate?
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
@@ -301,6 +303,7 @@ def run(
         resume_dir: int = -1,
         use_pretrained_model: str = None,
         lr_schedule: (str, float) = (None, None),
+        sampling_ratio: (float, float) = (1.0, 1.0),
         learning_rate: float = DEFAULTS.trainer.learning_rate,
         max_span_width: int = DEFAULTS.max_span_width,
         coref_loss_mean: bool = DEFAULTS.coref_loss_mean,
@@ -475,8 +478,8 @@ def run(
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,
                                                      ignore_task=None)  # TODO: force ignore tasks here
         # Make combined iterators since we have two sets of datasets and tasks
-        train_ds = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
-        dev_ds = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])
+        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2])
+        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2])
 
     # Make evaluators
     train_eval = Evaluator(

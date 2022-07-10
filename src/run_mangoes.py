@@ -24,7 +24,7 @@ from utils.data import Tasks
 from loops import training_loop
 from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
-from dataiter import MultiTaskDataIter, DataIterCombiner
+from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from mangoes.modeling import BERTForCoreferenceResolution
@@ -536,8 +536,8 @@ def run(
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,
                                                      ignore_task=t2_ignore_task)
         # Make combined iterators since we have two sets of datasets and tasks
-        train_ds = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
-        dev_ds = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])
+        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2])
+        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2])
 
     # Make evaluators
     train_eval = Evaluator(
