@@ -145,7 +145,7 @@ def training_loop(
         lrs = [param_group['lr'] for param_group in opt.param_groups]
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
-            wandb.log({'lr': lrs}, step=e)
+            wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
         for task_nm in tasks:
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
 
