@@ -102,13 +102,15 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
-def make_scheduler(opt, lr_schedule: Optional[str]) -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
+def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[float]) \
+        -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
     if not lr_schedule:
         return None
 
     if lr_schedule == 'gamma':
-        lambda1 = lambda epoch: SCHEDULER_CONFIG['gamma']['decay_rate'] ** epoch
-        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda1)
+        hyperparam = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['gamma']['decay_rate']
+        lambda_1 = lambda epoch: hyperparam ** epoch
+        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda_1)
         return scheduler
 
     else:
@@ -165,7 +167,7 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
             dataset_2, tasks_2 are scierc and ['ner'], the output will be
             parentdir/ontonotes_scierc/coref_pruner-ner
 
-        However, if we find that trim flag is active in config, or that the run is going to wandb-trials
+            However, if we find that trim flag is active in config, or that the run is going to wandb-trials
             then the output is
                 parentdir/trial/dataset+dataset2/'_'.join(sorted(tasks+tasks_2)).
     """
@@ -231,8 +233,9 @@ def get_dataiter_partials(
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
-@click.option("--lr-schedule", "-lrs", default=None, type=str,
-              help="Write 'gamma' to decay the lr. TODO: add more recipes here")
+@click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
+              help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule." \
+                   "TODO: add more recipes here")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
@@ -294,7 +297,7 @@ def run(
         filter_candidates_pos: bool = False,
         save: bool = False,
         resume_dir: int = -1,
-        lr_schedule: str = None,
+        lr_schedule: (str, float) = (None, None),
         use_pretrained_model: str = None,  # @TODO: integrate this someday
         learning_rate: float = DEFAULTS.trainer.learning_rate,
         max_span_width: int = DEFAULTS.max_span_width,
@@ -367,7 +370,7 @@ def run(
     config.trainer.learning_rate = learning_rate
     config.trainer.epochs = epochs
     config.trainer.freeze_encoder = not train_encoder
-    config.trainer.lr_schedule = lr_schedule
+    config.trainer.lr_schedule = lr_schedule[0]
     # config.trainer.adam_beta1
 
     config = merge_configs(old=DEFAULTS, new=config)
@@ -420,7 +423,7 @@ def run(
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
-    scheduler = make_scheduler(opt, lr_schedule)
+    scheduler = make_scheduler(opt, lr_schedule[0], lr_schedule[1])
 
     """
         Prep datasets.

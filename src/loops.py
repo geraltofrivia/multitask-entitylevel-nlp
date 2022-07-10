@@ -25,6 +25,7 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
     return inter_epoch
 
 
+# noinspection PyProtectedMember
 def training_loop(
         model: torch.nn.Module,
         epochs: int,
@@ -42,12 +43,14 @@ def training_loop(
         save_config: dict = None,
         filter_candidates_len_threshold: int = -1,
         debug: bool = False,
-        scheduler=Optional[Type[torch.optim.lr_scheduler._LRScheduler]],
+        scheduler: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
     TODO: write about every param
 
+    :param debug:
+    :param clip_grad_norm:
     :param model:
     :param epochs:
     :param tasks:
@@ -151,7 +154,7 @@ def training_loop(
                 wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         # Printing
-        print(f"\nEpoch: {e:3d}" +
+        print(f"\nEpoch: {e:5d}" +
               '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}\n" +
                            ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                     for metric_nm, metric_vls in train_metrics[task_nm].items()]) + '\n' +
