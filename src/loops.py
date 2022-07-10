@@ -2,7 +2,7 @@ import json
 import pickle
 import warnings
 from pathlib import Path
-from typing import Iterable, Callable, Union, Optional, Type
+from typing import List, Callable, Union, Optional, Type
 
 import numpy as np
 import torch
@@ -16,6 +16,7 @@ except ImportError:
     from . import _pathfix
 from utils.misc import change_device, weighted_addition_losses
 from eval import Evaluator
+from utils.data import Tasks
 
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
@@ -29,7 +30,7 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
 def training_loop(
         model: torch.nn.Module,
         epochs: int,
-        tasks: Iterable[str],
+        tasks: List[Tasks],
         opt: torch.optim,
         forward_fn: Callable,
         device: Union[str, torch.device],
@@ -72,7 +73,7 @@ def training_loop(
     if flag_save and save_config is None:
         save_config = {}
 
-    train_loss = {task_nm: [] for task_nm in tasks}
+    train_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj} for task_obj in tasks}
     train_metrics = {}
     dev_metrics = {}
 
@@ -83,7 +84,7 @@ def training_loop(
 
         # Make data
         # trn_dataset = trn_dl()
-        per_epoch_loss = {task_nm: [] for task_nm in tasks}
+        per_epoch_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
 
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
@@ -130,7 +131,7 @@ def training_loop(
             train_eval.update(instance=instance, outputs=outputs)
 
             for task_nm in instance['tasks']:
-                per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
+                per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
 
         # Evaluation (on the validation set)
         dev_eval.run()

@@ -357,6 +357,9 @@ class Evaluator:
 
     def report(self):
 
+        if self.results['primary'] or self.results['secondary']:
+            return self.results
+
         # Make the results different for primary and secondary domain.
 
         for task_nm, task_metrics in self.metrics_primary.items():
