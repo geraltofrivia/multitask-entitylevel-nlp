@@ -15,18 +15,17 @@ import transformers
 from mytorch.utils.goodies import FancyDict
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
-from transformers import BertConfig
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, DEFAULTS, unalias_split
+from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
-from utils.misc import check_dumped_config, compute_class_weight_sparse
+from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -43,7 +42,7 @@ class MultiTaskDataIter(Dataset):
             src: str,
             split: str,
             tasks: Tasks,
-            config: Union[FancyDict, BertConfig],
+            config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
             rebuild_cache: bool = False
@@ -54,7 +53,7 @@ class MultiTaskDataIter(Dataset):
                 - ideally you should delete the Dataset and make a new one every time you start a new epoch.
         :param src: the name of the main dataset (e.g. ontonotes)
         :param split: the name of the dataset split (e.g. 'train', or 'development')
-        :param config: the config dict (BertConfig + required params)
+        :param config: the config dict (SerializedBertConfig + required params)
         :param tokenizer: a pretrained BertTokenizer
         :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
         :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
@@ -115,8 +114,8 @@ class MultiTaskDataIter(Dataset):
             # Calculate actual class weights
             if not unalias_split(self._split_) == 'test':
                 for task_nm in self.tasks:
-                    if (task_nm == 'ner' and not self.tasks.ner_unweighted) or \
-                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted):
+                    if (task_nm == 'ner' and not self.tasks.ner_unweighted()) or \
+                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted()):
                         self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
                                                                   dtype=torch.float)
             # Update self.data with these class weights
@@ -851,7 +850,8 @@ class MultiDomainDataCombiner(Dataset):
             sampling_ratio = [1] * len(self.dataiters)
 
         # Normalise sampling_ratios, weighted by aggregate length of all dataiters
-        weights = [int(x * len(self) / float(sum(sampling_ratio))) for x in sampling_ratio]
+        weights = [len(dataiter) for dataiter in self.dataiters]
+        self.weights = [weight * ratio for weight, ratio in zip(weights, sampling_ratio)]
 
         # Create a list of ints based on these weights which dictate which iter to choose the next sample from
 
@@ -866,7 +866,7 @@ class MultiDomainDataCombiner(Dataset):
         self.history: Dict[int, Tuple[int, int]] = {}
 
     def __len__(self):
-        return sum(len(dataiter) for dataiter in self.dataiters)
+        return sum(self.weights)
 
     # def __iter__(self):
     #     for dataiter_index in self.source_indices:
@@ -911,59 +911,3 @@ class MultiDomainDataCombiner(Dataset):
             self.dataiters[dataiter_index][pointer_index % len(di)] = item
         except KeyError:
             raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
-
-
-if __name__ == "__main__":
-
-    dataset: str = 'scierc'
-    epochs: int = 10
-    encoder: str = "bert-base-uncased"
-    tasks: Tasks = Tasks(datasrc='scierc', position='primary', tuples=('ner', -1.0, True))
-    device: str = "cpu"
-    trim: bool = True
-    train_encoder: bool = False
-    ner_unweighted: bool = False
-    pruner_unweighted: bool = False
-    filter_candidates_pos = True
-
-    # # Attempt to pull from disk
-    # encoder = transformers.BertModel.from_pretrained(LOC.root / 'models' / 'huggingface'
-    # / 'bert-base-uncased' / 'encoder')
-    tokenizer = transformers.BertTokenizer.from_pretrained(
-        LOC.root / "models" / "huggingface" / "bert-base-uncased" / "tokenizer"
-    )
-    config = transformers.BertConfig(
-        LOC.root / "models" / "huggingface" / "bert-base-uncased" / "tokenizer"
-    )
-
-    config.max_span_width = 5
-    config.coref_dropout = 0.3
-    config.metadata_feature_size = 20
-    config.unary_hdim = 1000
-    config.binary_hdim = 2000
-    config.top_span_ratio = 0.4
-    config.max_top_antecedents = 50
-    config.device = device
-    config.epochs = epochs
-    config.trim = trim
-    config.freeze_encoder = not train_encoder
-    config.ner_unweighted = ner_unweighted
-    config.pruner_unweighted = pruner_unweighted
-    config.filter_candidates_pos_threshold = DEFAULTS['filter_candidates_pos_threshold'] \
-        if filter_candidates_pos else -1
-
-    ds = MultiTaskDataIter(
-        dataset,
-        "train",
-        config=config,
-        tokenizer=tokenizer,
-        tasks=tasks,
-        rebuild_cache=True,
-    )
-
-    # Custom fields in config
-    # config.
-
-    for x in ds:
-        # process_document(x, tokenizer, config)
-        break

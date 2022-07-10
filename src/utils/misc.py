@@ -1,13 +1,24 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
-from typing import List, Union, Optional, Iterable
+from typing import List, Union, Optional
 
 import numpy as np
 import torch
 import transformers
 from mytorch.utils.goodies import FancyDict
 from transformers import BertConfig
+
+
+class SerializedBertConfig(transformers.BertConfig):
+
+    def to_dict(self):
+        output = super().to_dict()
+        for k, v in output.items():
+            if is_dataclass(v):
+                output[k] = asdict(v)
+
+        return output
 
 
 def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
@@ -246,7 +257,7 @@ def is_equal(a, b) -> bool:
     return False
 
 
-def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, BertConfig],
+def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, SerializedBertConfig],
                         verbose: bool = True, find_alternatives: bool = True) -> bool:
     """
         If the config stored in the dir mismatches the config passed as param, find out places where it does mismatch
@@ -292,7 +303,7 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
     # If old is a dict, we don't need to pull
     if type(old) is dict:
         old_config = old
-    elif type(old) is BertConfig:
+    elif type(old) in [BertConfig, SerializedBertConfig]:
         old_config = old.to_dict()
     else:
         # Pull the old config
@@ -363,28 +374,27 @@ def merge_configs(old, new):
     for k, v in old.items():
 
         try:
-            _ = new.__getattribute__(k) if type(new) is BertConfig else new.__getattr__(k)
+            _ = new.__getattribute__(k) if type(new) in [BertConfig, SerializedBertConfig] else new.__getattr__(k)
 
             # Check if the Value is nested
             if type(v) in [BertConfig, FancyDict, dict]:
                 # If so, call the fn recursively
-                v = merge_configs(v, new.__getattribute__(k) if type(new) is BertConfig else new.__getattr__(k))
+                v = merge_configs(v, new.__getattribute__(k) if type(new) in [BertConfig, SerializedBertConfig] \
+                    else new.__getattr__(k))
                 new.__setattr__(k, v)
-        except (AttributeError, KeyError) as e:
+        except (AttributeError, KeyError) as _:
             new.__setattr__(k, v)
 
     return new
 
 
-def compute_class_weight_sparse(class_names, class_frequencies: Iterable[int], class_zero_freq: int = 0) -> List[int]:
+def compute_class_weight_sparse(class_names, class_frequencies: List[int], class_zero_freq: int = 0) -> List[int]:
     """ if class zero freq is provided, we replace the first value of bincount with it """
     if class_zero_freq > 0:
         class_frequencies[0] = class_zero_freq
 
     total = np.sum(class_frequencies)
     return [total / (len(class_names) * freq) for freq in class_frequencies]
-
-    ...
 
 
 def argsort(seq):

@@ -510,7 +510,8 @@ class Tasks:
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
 
-    def __init__(self, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], position: str = None):
+    @classmethod
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], position: str = None):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(
@@ -518,35 +519,39 @@ class Tasks:
                 f"Ensure that you're calling Tasks(datasource, tuples=task_tuples) and not"
                 f"Tasks(*task_tuples) or Tasks(tuples=task_tuples.")
 
-        self._raw_ = copy.deepcopy(tuples)
-        self.dataset = datasrc
+        _raw_ = copy.deepcopy(tuples)
+        dataset = datasrc
 
         # Check if every element is a tuple or not
         for tupl in tuples:
             if type(tupl) is not tuple:
                 raise TypeError(f"Expected a list of tuples as input. Got {type(tupl)}")
 
-        self.names = [tupl[0] for tupl in tuples]
+        names = [tupl[0] for tupl in tuples]
 
         # Check if every task name is known
-        for task_nm in self.names:
+        for task_nm in names:
             if task_nm not in KNOWN_TASKS:
                 raise UnknownTaskException(f"An unrecognized task name sent: {task_nm}. "
                                            f"So far, we can work with {KNOWN_TASKS}.")
 
         # Check for duplicates
-        if len(set(self.names)) != len(self.names):
+        if len(set(names)) != len(names):
             raise ValueError("Duplicates were passed in args. Please don't.")
 
         # Picking loss scales
-        self.loss_scales = self._parse_loss_scales_([arg[1] for arg in tuples])
-        self.use_class_weights = [arg[2] for arg in tuples]
+        loss_scales = cls._parse_loss_scales_(names=names, scales=[arg[1] for arg in tuples])
+        use_class_weights = [arg[2] for arg in tuples]
 
+        n_classes_ner = -1
+        n_classes_pruner = -1
+        position = position
+
+        return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights,
+                   position=position, dataset=dataset, n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner)
+
+    def __post_init__(self, *args, **kwargs):
         self.sort()
-
-        self.n_classes_ner = -1
-        self.n_classes_pruner = -1
-        self.position = position
 
     def sort(self):
         """ Rearranges all artefacts to sort them in the right order """
@@ -566,19 +571,17 @@ class Tasks:
         task_index = self.names.index(task_nm)
         return self.use_class_weights[task_index]
 
-    @property
     def ner_unweighted(self) -> bool:
         return self._task_unweighted_('ner')
 
-    @property
     def coref_unweighted(self) -> bool:
         return self._task_unweighted_('coref')
 
-    @property
     def pruner_unweighted(self) -> bool:
         return self._task_unweighted_('pruner')
 
-    def _parse_loss_scales_(self, scales: List[float]) -> List[float]:
+    @staticmethod
+    def _parse_loss_scales_(names: List[str], scales: List[float]) -> List[float]:
         """
             If all scales are negative, use the predefined scale in LOSS_SCALES (for the task combination).
             If there is at least one positive value, replace the negative values with the defaults given in LOSS_SCALES
@@ -593,14 +596,14 @@ class Tasks:
         all_neg = all([val < 0 for val in scales])
         if all_neg:
 
-            key = '_'.join(sorted(self.names))
+            key = '_'.join(sorted(names))
             return LOSS_SCALES[key]
 
         else:
             # There is at least one positive value
             for i, val in enumerate(scales):
                 if val < 0:
-                    scales[i] = LOSS_SCALES[self.names[i]][0]
+                    scales[i] = LOSS_SCALES[names[i]][0]
 
             return scales
 
@@ -619,7 +622,7 @@ class Tasks:
 
     @classmethod
     def create(cls):
-        return Tasks(datasrc=None, position=None, tuples=[])
+        return Tasks.parse(datasrc=None, position=None, tuples=[])
 
     def isempty(self):
         return self.dataset is None and len(self) == 0

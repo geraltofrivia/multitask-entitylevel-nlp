@@ -18,6 +18,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device
+from utils.exceptions import UnknownDomainException
 from eval_mangoes import CorefEvaluator
 
 """
@@ -283,10 +284,10 @@ class Evaluator:
             self.metrics_secondary[metric.task] = self.metrics_secondary.get(metric.task, []) + [metric]
 
         # If there are task agnostic metrics/traces, check the flag true
-        self.has_general_traces_primary = 'general' in self.metrics_primary.keys()
-        self.has_general_traces_secondary = 'general' in self.metrics_secondary.keys()
+        self.has_general_traces_primary: bool = 'general' in self.metrics_primary.keys()
+        self.has_general_traces_secondary: bool = 'general' in self.metrics_secondary.keys()
 
-        self.results = {}
+        self.results = {'primary': {}, 'secondary': {}}
 
     def update(self, instance: dict, outputs: dict):
         """
@@ -305,20 +306,29 @@ class Evaluator:
         """
 
         # Check the source of the prediction
+        if instance['domain'] == 'primary':
+            has_general_traces = self.has_general_traces_primary
+            metrics = self.metrics_primary
+        elif instance['domain'] == 'secondary':
+            has_general_traces = self.has_general_traces_secondary
+            metrics = self.metrics_secondary
+        else:
+            raise UnknownDomainException(f"Domain: {instance['domain']} is unrecognized.")
 
-        if self.has_general_traces:
+        # Now log the metrics
+        if has_general_traces:
             # We also want to compute the debug cases
-            for metric in self.metrics['general']:
+            for metric in metrics['general']:
                 metric.update(**outputs)
 
         for task_nm in instance['tasks']:
 
             if task_nm == 'coref':
-                for metric in self.metrics['coref']:
+                for metric in metrics['coref']:
                     metric.update(**outputs['coref'])
 
             else:
-                for metric in self.metrics[task_nm]:
+                for metric in metrics[task_nm]:
                     metric.update(**outputs[task_nm])
 
     def run(self):
@@ -347,17 +357,25 @@ class Evaluator:
 
     def report(self):
 
-        if self.results:
-            return self.results
+        # Make the results different for primary and secondary domain.
 
-        for task_nm, task_metrics in self.metrics.items():
-            if task_nm not in self.results:
-                self.results[task_nm] = {}
+        for task_nm, task_metrics in self.metrics_primary.items():
+            if task_nm not in self.results['primary']:
+                self.results['primary'][task_nm] = {}
 
             for metric in task_metrics:
                 summary = metric.compute()
                 for nm, vl in summary.items():
-                    self.results[task_nm][nm] = vl
+                    self.results['primary'][task_nm][nm] = vl
+
+        for task_nm, task_metrics in self.metrics_secondary.items():
+            if task_nm not in self.results['secondary']:
+                self.results['secondary'][task_nm] = {}
+
+            for metric in task_metrics:
+                summary = metric.compute()
+                for nm, vl in summary.items():
+                    self.results['secondary'][task_nm][nm] = vl
 
         return self.results
 
@@ -365,7 +383,11 @@ class Evaluator:
     #     raise NotImplementedError
 
     def reset(self):
-        for metrics in self.metrics.values():
+        for metrics in self.metrics_primary.values():
+            for metric in metrics:
+                metric.reset()
+
+        for metrics in self.metrics_secondary.values():
             for metric in metrics:
                 metric.reset()
 

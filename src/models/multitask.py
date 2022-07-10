@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import BertModel, BertConfig, BertPreTrainedModel
+from transformers import BertModel, BertPreTrainedModel
 
 # Local imports
 try:
@@ -20,6 +20,7 @@ except ImportError:
     from . import _pathfix
 from config import _SEED_ as SEED
 from utils.data import Tasks
+from utils.misc import SerializedBertConfig
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -46,14 +47,18 @@ class MangoesMTL(BertPreTrainedModel):
             coref_metadata_feature_size: int,
             coref_max_training_segments: int,
             coref_loss_mean: bool,
-            task_1: Tasks,
-            task_2: Tasks,
+            task_1: dict,
+            task_2: dict,
             bias_in_last_layers: bool = False,
             *args, **kwargs
     ):
 
-        base_config = BertConfig(vocab_size=vocab_size)
+        base_config = SerializedBertConfig(vocab_size=vocab_size)
         super().__init__(base_config)
+
+        # Convert task, task2 to Tasks object again (for now)
+        task_1 = Tasks(**task_1)
+        task_2 = Tasks(**task_2)
 
         self.bert = BertModel(base_config, add_pooling_layer=False)
         # self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False)
@@ -855,7 +860,10 @@ class BasicMTL(BertPreTrainedModel):
             vocab_size: int,
             *args, **kwargs
     ):
-        base_config = BertConfig(vocab_size=vocab_size)
+
+        raise NotImplementedError(f"Have not updated this with the multi-domain thing. "
+                                  f"Primarily, need to shift task management, and make domain specific ner clfs")
+        base_config = SerializedBertConfig(vocab_size=vocab_size)
         # super().__init__(config)
         super().__init__(base_config)
         # super().__init__() # TODO: change this

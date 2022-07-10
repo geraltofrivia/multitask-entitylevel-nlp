@@ -23,6 +23,11 @@ class UnknownTaskException(ValueError):
     pass
 
 
+class UnknownDomainException(ValueError):
+    """ Raised when a given domain is unknown. """
+    pass
+
+
 class UnknownDataSplitException(ValueError):
     """ Raised when a given data split is not recognized """
     ...

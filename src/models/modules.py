@@ -2,12 +2,10 @@
     Contains different NN modules that can be combined for the MTL task.
 """
 
-import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from typing import List
 import transformers
 
 # Local imports
@@ -15,6 +13,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
+from utils.misc import SerializedBertConfig
 
 
 class TextEncoder(nn.Module):
@@ -23,9 +22,11 @@ class TextEncoder(nn.Module):
         in a way that looks like a batch of inputs.
     """
 
-    def __init__(self, config: transformers.BertConfig):
+    def __init__(self, config: SerializedBertConfig):
         """
-        :param config:  The config, apart from being a usual BertConfig, also contains some domain specific parts.
+        :param config:  The config, apart from being a usual SerializedBertConfig,
+        also contains some domain specific parts.
+
         For sanity's sake, I recommend using this snippet to init it:
 
             ```py
@@ -90,11 +91,11 @@ class SpanEncoder(nn.Module):
         and creates representations for all of them.
     """
 
-    def __init__(self, config: transformers.BertConfig):
+    def __init__(self, config: SerializedBertConfig):
         """
-        :param config: BertConfig which as more things added to it, namely:
+        :param config: SerializedBertConfig which as more things added to it, namely:
             ```py
-                config = transformers.BertConfig('bert-base-uncased')
+                config = SerializedBertConfig('bert-base-uncased')
                 config.max_span_width = 5
                 config.metadata_feature_size = 20
                 config.use_span_width = True
@@ -209,11 +210,11 @@ class NERDecoder(nn.Module):
         and simply runs them through a 2 layer clf to get a distribution over number of classes
     """
 
-    def __init__(self, config: transformers.BertConfig):
+    def __init__(self, config: SerializedBertConfig):
         """
-            :param config: BertConfig which as more things added to it, namely:
+            :param config: SerializedBertConfig which as more things added to it, namely:
             ```py
-                config = transformers.BertConfig('bert-base-uncased')
+                config = SerializedBertConfig('bert-base-uncased')
                 config.max_span_width = 5
                 config.metadata_feature_size = 20
                 config.use_span_width = True

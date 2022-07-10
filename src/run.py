@@ -20,7 +20,7 @@ from utils.data import Tasks
 from loops import training_loop
 from models.multitask import BasicMTL, MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
-from utils.misc import check_dumped_config, merge_configs
+from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
@@ -151,7 +151,7 @@ def get_n_classes(task: str, dataset: str) -> int:
 
 def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
                         dataset_2: Optional[str], tasks_2: Optional[Tasks],
-                        config: Union[transformers.BertConfig, dict]) -> Path:
+                        config: Union[SerializedBertConfig, dict]) -> Path:
     """
         Normally returns parentdir/dataset+dataset2/'_'.join(sorted(tasks))+'-'+'_'.join(sorted(tasks_2)).
         E.g. if dataset, tasks are ontonotes and ['coref', 'pruner'] and
@@ -180,7 +180,7 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
 
 
 def get_dataiter_partials(
-        config: Union[dict, transformers.BertConfig],
+        config: Union[dict, SerializedBertConfig],
         tasks: Tasks,
         tokenizer: transformers.BertTokenizer,
 ):
@@ -323,13 +323,13 @@ def run(
 
     _is_multidomain: bool = dataset_2 is not None
 
-    tasks = Tasks(dataset, position='primary', tuples=tasks)
-    tasks_2 = Tasks(dataset_2, position='secondary', tuples=tasks_2)
+    tasks = Tasks.parse(dataset, position='primary', tuples=tasks)
+    tasks_2 = Tasks.parse(dataset_2, position='secondary', tuples=tasks_2)
 
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
-    config = transformers.BertConfig(dir_config)
+    config = SerializedBertConfig(dir_config)
     config.max_span_width = max_span_width
     config.coref_dropout = 0.3
     config.metadata_feature_size = 20
@@ -461,6 +461,7 @@ def run(
 
     # Saving stuff
     if save:
+        raise NotImplementedError
         savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config, dataset=dataset,
                                       tasks_2=tasks_2, dataset_2=dataset_2)
         savedir.mkdir(parents=True, exist_ok=True)
@@ -481,6 +482,7 @@ def run(
 
     # Resuming stuff
     if resume_dir >= 0:
+        raise NotImplementedError
         # We are resuming the model
         savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, config=config, dataset=dataset,
                                                             tasks_2=tasks_2, dataset_2=dataset_2), _newdir=False)
