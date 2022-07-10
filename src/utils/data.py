@@ -504,18 +504,19 @@ class Tasks:
     names: List[str]
     loss_scales: List[float]
     use_class_weights: List[bool]
+    position: str
     dataset: str
 
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
 
-    def __init__(self, datasrc: Optional[str], *tuples: Tuple[str, float, bool]):
+    def __init__(self, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], position: str = None):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(
                 f"datasrc is not a string but {type(datasrc)}. Maybe you forgot to pass the data source?"
-                f"Ensure that you're calling Tasks(datasource, *task_tuples) and not"
-                f"Tasks(*task_tuples).")
+                f"Ensure that you're calling Tasks(datasource, tuples=task_tuples) and not"
+                f"Tasks(*task_tuples) or Tasks(tuples=task_tuples.")
 
         self._raw_ = copy.deepcopy(tuples)
         self.dataset = datasrc
@@ -545,6 +546,7 @@ class Tasks:
 
         self.n_classes_ner = -1
         self.n_classes_pruner = -1
+        self.position = position
 
     def sort(self):
         """ Rearranges all artefacts to sort them in the right order """
@@ -617,7 +619,7 @@ class Tasks:
 
     @classmethod
     def create(cls):
-        return Tasks(datasrc=None, *[])
+        return Tasks(datasrc=None, position=None, tuples=[])
 
     def isempty(self):
         return self.dataset is None and len(self) == 0

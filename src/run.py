@@ -271,9 +271,9 @@ def run(
         encoder: str,
         epochs: int,
         dataset: str,
-        tasks: List[Tuple[str, float, bool, float]],
+        tasks: List[Tuple[str, float, bool]],
         dataset_2: str,
-        tasks_2: List[str] = [],
+        tasks_2: List[Tuple[str, float, bool]] = [],
         device: str = "cpu",
         trim: bool = False,
         debug: bool = False,
@@ -323,8 +323,8 @@ def run(
 
     _is_multidomain: bool = dataset_2 is not None
 
-    tasks = Tasks(dataset, *tasks)
-    tasks_2 = Tasks(dataset_2, *tasks_2)
+    tasks = Tasks(dataset, position='primary', tuples=tasks)
+    tasks_2 = Tasks(dataset_2, position='secondary', tuples=tasks_2)
 
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
 
@@ -413,7 +413,7 @@ def run(
 
     train_ds, dev_ds = get_dataiter_partials(config, tasks, tokenizer=tokenizer)
     if _is_multidomain:
-        # Make a specific singledomain multitask dataiter
+        # Make a specific single domain multitask dataiter
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, tokenizer=tokenizer)
 
         # Combine the two single domain dataset to make a multidomain dataiter
@@ -421,7 +421,7 @@ def run(
         dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2])
 
     # Collect all metrics
-    metrics, metrics_2 = [TraceCandidates], [TraceCandidates]
+    metrics, metrics_2 = [TraceCandidates], []
     if 'ner' in tasks:
         metrics += [NERAcc,
                     partial(NERSpanRecognitionMicro, device=config.device),
@@ -431,27 +431,31 @@ def run(
                     partial(PrunerPRMacro, n_classes=tasks.n_classes_pruner, device=config.device)]
     if 'coref' in tasks:
         metrics += [CorefBCubed, CorefMUC, CorefCeafe]
-    if 'ner' in tasks_2:
-        metrics_2 += [NERAcc,
-                      partial(NERSpanRecognitionMicro, device=config.device),
-                      partial(NERSpanRecognitionMacro, n_classes=tasks_2.n_classes_ner, device=config.device)]
-    if 'pruner' in tasks_2:
-        metrics += [partial(PrunerPRMicro, device=config.device),
-                    partial(PrunerPRMacro, n_classes=tasks_2.n_classes_pruner, device=config.device)]
-    if 'coref' in tasks_2:
-        metrics += [CorefBCubed, CorefMUC, CorefCeafe]
+    if _is_multidomain:
+        metrics_2 += [TraceCandidates]
+        if 'ner' in tasks_2:
+            metrics_2 += [NERAcc,
+                          partial(NERSpanRecognitionMicro, device=config.device),
+                          partial(NERSpanRecognitionMacro, n_classes=tasks_2.n_classes_ner, device=config.device)]
+        if 'pruner' in tasks_2:
+            metrics += [partial(PrunerPRMicro, device=config.device),
+                        partial(PrunerPRMacro, n_classes=tasks_2.n_classes_pruner, device=config.device)]
+        if 'coref' in tasks_2:
+            metrics += [CorefBCubed, CorefMUC, CorefCeafe]
 
     # Make evaluators
     train_eval = Evaluator(
         predict_fn=model.pred_with_labels,
         dataset_partial=train_ds,
-        metrics=metrics,
+        metrics_primary=metrics,
+        metrics_secondary=metrics_2,
         device=device
     )
     dev_eval = Evaluator(
         predict_fn=model.pred_with_labels,
         dataset_partial=dev_ds,
-        metrics=metrics,
+        metrics_primary=metrics,
+        metrics_secondary=metrics_2,
         device=device
     )
 

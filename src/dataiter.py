@@ -638,7 +638,7 @@ class MultiTaskDataIter(Dataset):
 
         return_dict = {
             "tasks": tasks,
-            "domain": self.tasks.dataset,
+            "domain": self.tasks.position,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
@@ -918,7 +918,7 @@ if __name__ == "__main__":
     dataset: str = 'scierc'
     epochs: int = 10
     encoder: str = "bert-base-uncased"
-    tasks: Tasks = Tasks('ner', )
+    tasks: Tasks = Tasks(datasrc='scierc', position='primary', tuples=('ner', -1.0, True))
     device: str = "cpu"
     trim: bool = True
     train_encoder: bool = False

@@ -249,7 +249,8 @@ class Evaluator:
             self,
             predict_fn: Callable,
             dataset_partial: Callable,
-            metrics: List[Type[CustomMetric]],
+            metrics_primary: List[Type[CustomMetric]],
+            metrics_secondary: Optional[List[Type[CustomMetric]]],
             device: Union[str, torch.device],
             debug: bool = True
     ):
@@ -270,13 +271,20 @@ class Evaluator:
         self.device = device
 
         # Initialise all metrics
-        self.metrics = {}
-        for metric_cls in metrics:
+        self.metrics_primary = {}
+        for metric_cls in metrics_primary:
             metric = metric_cls(debug=self.debug)
-            self.metrics[metric.task] = self.metrics.get(metric.task, []) + [metric]
+            self.metrics_primary[metric.task] = self.metrics_primary.get(metric.task, []) + [metric]
+
+        # Initialise all metrics
+        self.metrics_secondary = {}
+        for metric_cls in metrics_secondary:
+            metric = metric_cls(debug=self.debug)
+            self.metrics_secondary[metric.task] = self.metrics_secondary.get(metric.task, []) + [metric]
 
         # If there are task agnostic metrics/traces, check the flag true
-        self.has_general_traces = 'general' in self.metrics.keys()
+        self.has_general_traces_primary = 'general' in self.metrics_primary.keys()
+        self.has_general_traces_secondary = 'general' in self.metrics_secondary.keys()
 
         self.results = {}
 
@@ -295,6 +303,8 @@ class Evaluator:
         :param outputs:
         :return: None
         """
+
+        # Check the source of the prediction
 
         if self.has_general_traces:
             # We also want to compute the debug cases

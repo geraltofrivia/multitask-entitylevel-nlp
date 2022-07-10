@@ -116,7 +116,7 @@ class MangoesMTL(BertPreTrainedModel):
             # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
         )
         self.unary_ner_specific = {
-            task.dataset: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
+            task.position: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
             for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
         }
 
