@@ -2,13 +2,15 @@
     Contain multiple dataclasses and types to control the chaos that is a large python codebase.
 """
 
-from functools import cached_property
+import copy
 from dataclasses import dataclass, field
-from typing import List
+from functools import cached_property
+from typing import List, Optional, Tuple
 
+from config import KNOWN_TASKS, LOSS_SCALES
+from utils.exceptions import UnknownTaskException, BadParameters
+from utils.misc import argsort
 from utils.nlp import to_toks
-from config import KNOWN_TASKS
-from utils.exceptions import UnknownTaskException
 
 
 @dataclass
@@ -497,56 +499,125 @@ class Document:
         return [list(span) for span in set(spans)]
 
 
-class Tasks(list):
-    """
-        Custom list which has restricted values.
-        Also, you can't delete things from it :]
+@dataclass
+class Tasks:
+    names: List[str]
+    loss_scales: List[float]
+    use_class_weights: List[bool]
+    dataset: str
 
-        Can use it like
-            Tasks('coref', 'ner')
-        or
-            Tasks(['coref', 'ner'])
+    n_classes_ner: Optional[int] = field(default_factory=int)
+    n_classes_pruner: Optional[int] = field(default_factory=int)
 
-        PS: Don't bother deeply understanding this code, I wrote this in a fit of pseudo productive stupor
-            wherein I want to write something non trivial but also not important.
-    """
+    def __init__(self, datasrc: Optional[str], *tuples: Tuple[str, float, bool]):
 
-    # noinspection PyUnusedLocal
-    def __init__(self, *args, **kwargs):
+        if not type(datasrc) in [type(None), str]:
+            raise BadParameters(
+                f"datasrc is not a string but {type(datasrc)}. Maybe you forgot to pass the data source?"
+                f"Ensure that you're calling Tasks(datasource, *task_tuples) and not"
+                f"Tasks(*task_tuples).")
 
-        # First you want to allow for both forms of addressing (in comments above)
-        if type(args[0]) in [list, tuple]:
-            if len(args) != 1:
-                raise ValueError("You both provide a list in args[0] and provide other args? Please don't.")
-            args = args[0]
+        self._raw_ = copy.deepcopy(tuples)
+        self.dataset = datasrc
 
-        # Check Values
-        if len(set(args)) != len(args):
+        # Check if every element is a tuple or not
+        for tupl in tuples:
+            if type(tupl) is not tuple:
+                raise TypeError(f"Expected a list of tuples as input. Got {type(tupl)}")
+
+        self.names = [tupl[0] for tupl in tuples]
+
+        # Check if every task name is known
+        for task_nm in self.names:
+            if task_nm not in KNOWN_TASKS:
+                raise UnknownTaskException(f"An unrecognized task name sent: {task_nm}. "
+                                           f"So far, we can work with {KNOWN_TASKS}.")
+
+        # Check for duplicates
+        if len(set(self.names)) != len(self.names):
             raise ValueError("Duplicates were passed in args. Please don't.")
 
-        for val in args:
-            if not type(val) is str:
-                raise TypeError("We only expected to deal with strings here !?!")
+        # Picking loss scales
+        self.loss_scales = self._parse_loss_scales_([arg[1] for arg in tuples])
+        self.use_class_weights = [arg[2] for arg in tuples]
 
-            if val not in KNOWN_TASKS:
-                raise UnknownTaskException(f"{val} is not a known task.")
+        self.sort()
 
-        args = sorted(args)
+        self.n_classes_ner = -1
+        self.n_classes_pruner = -1
 
-        # Init List
-        super().__init__(args)
+    def sort(self):
+        """ Rearranges all artefacts to sort them in the right order """
 
-    def __hash__(self):
-        super().__hash__()
+        if len(self) == 0:
+            return
 
-    def __setitem__(self, ii, val):
-        raise ValueError("Es Ist Verboten !!")
+        sorted_ind = argsort(self)
+        self.names = [self.names[i] for i in sorted_ind]
+        self.loss_scales = [self.loss_scales[i] for i in sorted_ind]
+        self.use_class_weights = [self.use_class_weights[i] for i in sorted_ind]
 
-    def insert(self, ii, val):
-        raise ValueError("Es Ist Verboten !!")
+    def _task_unweighted_(self, task_nm: str) -> bool:
+        if task_nm not in self:
+            raise ValueError(f"Asked for {task_nm} but task does not exist.")
 
-    def pop(self, *args, **kwargs):
-        raise ValueError("Es Ist Verboten !!")
+        task_index = self.names.index(task_nm)
+        return self.use_class_weights[task_index]
 
-    def append(self, val):
-        raise ValueError("Es Ist Verboten !!")
+    @property
+    def ner_unweighted(self) -> bool:
+        return self._task_unweighted_('ner')
+
+    @property
+    def coref_unweighted(self) -> bool:
+        return self._task_unweighted_('coref')
+
+    @property
+    def pruner_unweighted(self) -> bool:
+        return self._task_unweighted_('pruner')
+
+    def _parse_loss_scales_(self, scales: List[float]) -> List[float]:
+        """
+            If all scales are negative, use the predefined scale in LOSS_SCALES (for the task combination).
+            If there is at least one positive value, replace the negative values with the defaults given in LOSS_SCALES
+            If they're all positive, well, just return it as-is.
+
+            If any value is zero, we consider it as positive.
+        """
+
+        if len(scales) == 0:
+            return []
+
+        all_neg = all([val < 0 for val in scales])
+        if all_neg:
+
+            key = '_'.join(sorted(self.names))
+            return LOSS_SCALES[key]
+
+        else:
+            # There is at least one positive value
+            for i, val in enumerate(scales):
+                if val < 0:
+                    scales[i] = LOSS_SCALES[self.names[i]][0]
+
+            return scales
+
+    def __len__(self):
+        return len(self.names)
+
+    def raw(self):
+        return [(self.names[i], self.loss_scales[i], self.use_class_weights[i]) for i in range(len(self))]
+
+    def __iter__(self):
+        for task in self.names:
+            yield task
+
+    def __getitem__(self, i):
+        return self.names[i]
+
+    @classmethod
+    def create(cls):
+        return Tasks(datasrc=None, *[])
+
+    def isempty(self):
+        return self.dataset is None and len(self) == 0

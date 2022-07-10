@@ -23,7 +23,7 @@ try:
 except ImportError:
     from . import _pathfix
 from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, DEFAULTS, unalias_split
-from utils.exceptions import NoValidAnnotations, LabelDictNotFound
+from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
 from utils.misc import check_dumped_config, compute_class_weight_sparse
@@ -42,11 +42,10 @@ class MultiTaskDataIter(Dataset):
             self,
             src: str,
             split: str,
+            tasks: Tasks,
             config: Union[FancyDict, BertConfig],
             tokenizer: transformers.BertTokenizer,
             shuffle: bool = False,
-            tasks: Iterable[str] = (),
-            loss_scales: Optional[np.ndarray] = None,
             rebuild_cache: bool = False
     ):
         """
@@ -58,27 +57,27 @@ class MultiTaskDataIter(Dataset):
         :param config: the config dict (BertConfig + required params)
         :param tokenizer: a pretrained BertTokenizer
         :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
-        :param tasks: a list of tasks we need to process (e.g. ['ner', 'coref', 'pruner'] or ['ner',] or ['coref',]
+        :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
         :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
         """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
-        self._tasks_ = sorted(tasks)
+        self.tasks = tasks
         self.tokenizer = tokenizer
         self.config = config
         self.uncased = config.uncased
         self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
             if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 
-        self.loss_scales = torch.tensor(loss_scales, dtype=torch.float)
+        self.loss_scales = torch.tensor(tasks.loss_scales, dtype=torch.float)
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
-        if 'ner' in self._tasks_:
+        if 'ner' in self.tasks:
             # We need a tag dictionary
 
             try:
@@ -88,7 +87,7 @@ class MultiTaskDataIter(Dataset):
                 # The tag dictionary does not exist. Report and quit.
                 raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
 
-        if 'rel' in self._tasks_:
+        if 'rel' in self.tasks:
 
             try:
                 with (LOC.manual / f"rel_{self._src_}_tag_dict.json").open("r") as f:
@@ -103,10 +102,10 @@ class MultiTaskDataIter(Dataset):
         if not flag_successfully_pulled_from_disk:
 
             # Init the list of documents (pull it from disk)
-            self.dataset = DocumentReader(src=src, split=split, tasks=self._tasks_, shuffle=shuffle)
+            self.dataset = DocumentReader(src=src, split=split, tasks=self.tasks, shuffle=shuffle)
 
             # Temporarily set class weights for all tasks as [0.5, 0.5]
-            for task_nm in self._tasks_:
+            for task_nm in self.tasks:
                 if task_nm in ['ner', 'pruner']:
                     self.task_weights[task_nm] = torch.ones(2, dtype=torch.float) / 2
 
@@ -115,9 +114,9 @@ class MultiTaskDataIter(Dataset):
 
             # Calculate actual class weights
             if not unalias_split(self._split_) == 'test':
-                for task_nm in self._tasks_:
-                    if (task_nm == 'ner' and not self.config.ner_unweighted) or \
-                            (task_nm == 'pruner' and not self.config.pruner_unweighted):
+                for task_nm in self.tasks:
+                    if (task_nm == 'ner' and not self.tasks.ner_unweighted) or \
+                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted):
                         self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
                                                                   dtype=torch.float)
             # Update self.data with these class weights
@@ -162,7 +161,7 @@ class MultiTaskDataIter(Dataset):
         """
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
-        for task in self._tasks_:
+        for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
 
@@ -186,7 +185,7 @@ class MultiTaskDataIter(Dataset):
 
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
-        for task in self._tasks_:
+        for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
 
@@ -205,6 +204,12 @@ class MultiTaskDataIter(Dataset):
         # Check if config matches
         if check_dumped_config(self.config, old=old_config, find_alternatives=False, verbose=True):
             print(f"Pulled {len(data)} instances from {dump_fname}.")
+
+            # This is the only time where we actually return data.
+            # In this situation, we want to update the loss scales, and maybe something else in the future.
+            for datum in data:
+                datum['loss_scales'] = self.loss_scales
+
             return data, True
         else:
             warnings.warn(
@@ -218,6 +223,10 @@ class MultiTaskDataIter(Dataset):
         return self.data.__len__()
 
     def __getitem__(self, item):
+        obj = self.data[item]
+
+        # Append relevant things to it
+        obj['tasks']
         return self.data[item]
 
     def __setitem__(self, i, item):
@@ -557,7 +566,7 @@ class MultiTaskDataIter(Dataset):
         """
             Span Iteration: find all valid contiguous sequences of inputs. 
         
-            We create subsequences from it, upto length K and pass them all through a span scorer.
+            We create subsequences from it, up to length K and pass them all through a span scorer.
             1. Create dumb start, end indices
             2. Exclude the ones which exist at the end of sentences (i.e. start in one, end in another)
         """
@@ -625,10 +634,11 @@ class MultiTaskDataIter(Dataset):
         # candidate_ends = torch.masked_select(
         #     candidate_ends.view(-1), candidate_mask
         # )  # n_subwords*max_span_width
-        tasks = [task if not task.startswith("ner") else "ner" for task in self._tasks_]
+        tasks = [task if not task.startswith("ner") else "ner" for task in self.tasks.names]
 
         return_dict = {
             "tasks": tasks,
+            "domain": self.tasks.dataset,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
@@ -644,21 +654,21 @@ class MultiTaskDataIter(Dataset):
             "pruner": {}
         }
 
-        if "coref" in self._tasks_ or "pruner" in self._tasks_:
+        if "coref" in self.tasks or "pruner" in self.tasks:
 
             coref_op = self.process_coref(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
-            if "coref" in self._tasks_:
+            if "coref" in self.tasks:
                 return_dict["coref"] = coref_op
 
-            if "pruner" in self._tasks_:
+            if "pruner" in self.tasks:
                 return_dict["pruner"] = self.process_pruner(
                     instance, return_dict, coref_op
                 )
 
-        if "ner" in self._tasks_:
+        if "ner" in self.tasks:
             return_dict["ner"] = self.process_ner(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
@@ -668,7 +678,7 @@ class MultiTaskDataIter(Dataset):
 
 class DocumentReader(Dataset):
     def __init__(
-            self, src: str, split: Optional[str] = None, shuffle: bool = False, tasks: Iterable[str] = ()
+            self, src: str, split: Optional[str] = None, shuffle: bool = False, tasks: Tasks = Tasks.create()
     ):
         """
             Returns an iterable that yields one document at a time.
@@ -691,12 +701,12 @@ class DocumentReader(Dataset):
         # Sanity check params
         for task in tasks:
             if task not in KNOWN_TASKS:
-                raise AssertionError(
+                raise UnknownTaskException(
                     f"An unrecognized task name sent: {task}. "
                     f"So far, we can work with {KNOWN_TASKS}."
                 )
             # if "ner" in task and "ner_spacy" in task:
-            #     raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
+            #     raise AssertionError("Multiple NER specific names passed. Pas bon!")
 
         # super().__init__()
         self._src_ = src
@@ -826,7 +836,7 @@ class MultiDomainDataCombiner(Dataset):
         :param sampling_ratio: list of weights for each dataiter. e.g. [0.5, 0.5] implies we sample equally from both.
         """
 
-        # Init all data iters.
+        # Init all data iterators.
         self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
 
         """

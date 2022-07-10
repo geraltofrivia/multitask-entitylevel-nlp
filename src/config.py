@@ -41,7 +41,7 @@ LOCATIONS: Dict[str, Path] = FancyDict(
     }
 )
 
-KNOWN_TASKS = ["coref", "ner", "ner_spacy", "pruner", "rel"]
+KNOWN_TASKS = ["coref", "ner", "pruner", "rel"]
 KNOWN_SPLITS = FancyDict({
     'scierc': FancyDict({
         'train': 'train',
@@ -105,12 +105,12 @@ DEFAULTS: dict = FancyDict({
     }),
 })
 LOSS_SCALES = {
-    'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
-    'loss_scales_coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
-    'loss_scales_coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
-    'loss_scales_coref': [1.0, ],
-    'loss_scales_ner': [1.0, ],
-    'loss_scales_pruner': [1.0, ],
+    'coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
+    'coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
+    'coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'coref': [1.0, ],
+    'ner': [1.0, ],
+    'pruner': [1.0, ],
 }
 SCHEDULER_CONFIG = {
     'gamma': {'decay_rate': 0.9}

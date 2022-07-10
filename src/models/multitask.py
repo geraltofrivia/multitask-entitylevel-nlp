@@ -19,6 +19,7 @@ try:
 except ImportError:
     from . import _pathfix
 from config import _SEED_ as SEED
+from utils.data import Tasks
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -44,11 +45,10 @@ class MangoesMTL(BertPreTrainedModel):
             coref_higher_order: int,
             coref_metadata_feature_size: int,
             coref_max_training_segments: int,
-            n_classes_ner: int,
             coref_loss_mean: bool,
+            task_1: Tasks,
+            task_2: Tasks,
             bias_in_last_layers: bool = False,
-            pruner_unweighted: bool = False,
-            ner_unweighted: bool = False,
             *args, **kwargs
     ):
 
@@ -100,13 +100,25 @@ class MangoesMTL(BertPreTrainedModel):
         self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
                                                     embedding_dim=coref_metadata_feature_size)
 
-        # Some NER stuff
-        self.unary_ner = nn.Sequential(
+        """
+            NER Stuff is domain specific.
+            Corresponding to domain, we will have individual "final" classifiers for NER.
+            
+            This of course because the final classes for NERs differ from each other.
+            However, this will be done in a two step process.
+            
+            The two layers of NER will be broken down into a common, and domian specific variant.
+        """
+        self.unary_ner_common = nn.Sequential(
             nn.Linear(span_embedding_dim, ffnn_hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
-            nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
+            # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
         )
+        self.unary_ner_specific = {
+            task.dataset: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
+            for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
+        }
 
         # Loss management for pruner
         self.pruner_loss = self._rescaling_weights_bce_loss_
@@ -117,8 +129,6 @@ class MangoesMTL(BertPreTrainedModel):
         self.max_top_antecedents = max_top_antecedents
         self.coref_max_training_segments = coref_max_training_segments
         self.coref_depth = coref_higher_order
-        self.pruner_unweighted = pruner_unweighted
-        self.ner_unweighted = ner_unweighted
         self.coref_loss_mean = coref_loss_mean
 
         self.init_weights()
@@ -449,6 +459,7 @@ class MangoesMTL(BertPreTrainedModel):
             token_type_ids: torch.tensor,
             sentence_map: List[int],
             tasks: Iterable[str],
+            domain: str,
             # word_map: List[int],
             # n_words: int,
             # n_subwords: int,
@@ -578,7 +589,11 @@ class MangoesMTL(BertPreTrainedModel):
 
         if 'ner' in tasks:
             # We just need span embeddings here
-            logits = self.unary_ner(span_emb)
+
+            fc1 = self.unary_ner_common(span_emb)
+
+            # Depending on the domain, select the right decoder
+            logits = self.unary_ner_specific[domain](fc1)
             logits = torch.nn.functional.softmax(logits, dim=1)
             ner_specific = {"ner_logits": logits}
 
@@ -604,6 +619,7 @@ class MangoesMTL(BertPreTrainedModel):
             n_words: int,
             n_subwords: int,
             tasks: Iterable[str],
+            domain: str,
             coref: dict = None,
             ner: dict = None,
             pruner: dict = None,
@@ -619,6 +635,7 @@ class MangoesMTL(BertPreTrainedModel):
             sentence_map=sentence_map,
             word_map=word_map,
             n_words=n_words,
+            domain=domain,
             tasks=tasks,
             n_subwords=n_subwords,
             coref_gold_starts=coref.get('gold_starts', None),

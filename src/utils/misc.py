@@ -279,13 +279,14 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'wandb_trial',
         'wandbid',
         'savedir',
-        'tasks',
         'debug',
         'coref_loss_mean',
         'coref_higher_order',
         'curdir',
         'n_classes_ner',
-        'trainer'
+        'trainer',
+        'tasks',
+        'tasks_2'
     ]
 
     # If old is a dict, we don't need to pull
@@ -384,3 +385,8 @@ def compute_class_weight_sparse(class_names, class_frequencies: Iterable[int], c
     return [total / (len(class_names) * freq) for freq in class_frequencies]
 
     ...
+
+
+def argsort(seq):
+    # http://stackoverflow.com/questions/3071415/efficient-method-to-calculate-the-rank-vector-of-a-list-in-python
+    return sorted(range(len(seq)), key=seq.__getitem__)

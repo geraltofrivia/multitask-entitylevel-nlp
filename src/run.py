@@ -21,7 +21,7 @@ from loops import training_loop
 from models.multitask import BasicMTL, MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED, SCHEDULER_CONFIG
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
     PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
@@ -132,15 +132,6 @@ def get_pretrained_dirs(enc_nm: str, tok_nm: str):
         return enc_nm, tok_nm, enc_nm
 
 
-def pick_loss_scale(tasks: Tasks, ignore_task: str):
-    key = 'loss_scales_' + '_'.join(sorted(tasks))
-    scales = LOSS_SCALES[key]
-    if ignore_task:
-        ignore_index = tasks.index(ignore_task)
-        scales[ignore_index] = 0
-    return scales
-
-
 def get_saved_wandb_id(loc: Path):
     with (loc / 'config.json').open('r', encoding='utf8') as f:
         config = json.load(f)
@@ -177,10 +168,10 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
         tasks_2, tasks = tasks, tasks_2
 
     dataset_prefix = dataset + '_' + dataset_2 if dataset_2 else dataset
-    tasks_prefix = '_'.join(tasks)
-    if tasks_2:
+    tasks_prefix = '_'.join(tasks.names)
+    if not tasks_2.isempty():
         tasks_prefix += '-'
-        tasks_prefix += '_'.join(tasks_2)
+        tasks_prefix += '_'.join(tasks_2.names)
 
     if config.trim or config.wandb_trial:
         return parentdir / 'trial' / dataset_prefix / tasks_prefix
@@ -191,32 +182,25 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
 def get_dataiter_partials(
         config: Union[dict, transformers.BertConfig],
         tasks: Tasks,
-        dataset: str,
         tokenizer: transformers.BertTokenizer,
-        ignore_task: str
 ):
-    # Assign loss scales based on task
-    loss_scales = pick_loss_scale(tasks, ignore_task=ignore_task)
-    # loss_scales = loss_scales.tolist() if not type(loss_scales) is list else loss_scales
 
     # Load the data
     train_ds = partial(
         MultiTaskDataIter,
-        src=dataset,
+        src=tasks.dataset,
         config=config,
         tasks=tasks,
-        split=KNOWN_SPLITS[dataset].train,
+        split=KNOWN_SPLITS[tasks.dataset].train,
         tokenizer=tokenizer,
-        loss_scales=loss_scales
     )
     dev_ds = partial(
         MultiTaskDataIter,
-        src=dataset,
+        src=tasks.dataset,
         config=config,
         tasks=tasks,
-        split=KNOWN_SPLITS[dataset].dev,
+        split=KNOWN_SPLITS[tasks.dataset].dev,
         tokenizer=tokenizer,
-        loss_scales=loss_scales
     )
 
     return train_ds, dev_ds
@@ -226,7 +210,7 @@ def get_dataiter_partials(
 @click.command()
 @click.option("--dataset", "-d", type=str, required=True,
               help="The name of the first (or only) dataset e.g. ontonotes etc")
-@click.option("--tasks", "-t", type=(str, float, bool, float), multiple=True, required=True,
+@click.option("--tasks", "-t", type=(str, float, bool), multiple=True, required=True,
               help="We are expected to have a tuple of three elements where each signifies: "
                    "1. a string denoting task name (in coref, ner, pruner) "
                    "2. a float denoting loss weight. if its negative, we ignore the value "
@@ -239,13 +223,12 @@ def get_dataiter_partials(
                    "1. a string denoting task name (in coref, ner, pruner) "
                    "2. a float denoting loss weight. if its negative, we ignore the value "
                    "3. a bool signifying if the class should be weighted or not."
-                   "4. a float signifying sampling ratio. 1.0 is normal. 0.5 would be undersampling, 3 would be over..."
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
+# TODO: understand the semantics of sampling ratios
 @click.option("--sampling-ratio", "-sr", type=(float, float), default=(1.0, 1.0), multiple=False,
               help="A set of floats signifying sampling ratios. (1.0, 1.0) is normal (fully sample)."
                    "(0.5, 1.0) would only get half instances from the first. ")
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
-# TODO is this the encoder learning rate or the task learning rate?
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
 @click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
@@ -261,12 +244,6 @@ def get_dataiter_partials(
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', is_flag=True, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
-@click.option('--use-wandb', '-wb', is_flag=True, default=False,
-              help="If True, we report this run to WandB")
-@click.option('--wandb-comment', '-wbm', type=str, default=None,
-              help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
-@click.option('--wandb-name', '-wbname', type=str, default=None,
-              help="You can specify a short name for the run here as well. ")
 @click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
               help="If true, dataiter ignores those candidates which have verbs in them "
                    "IF the doc has more than 10k candidates.")
@@ -283,6 +260,12 @@ def get_dataiter_partials(
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
+@click.option('--use-wandb', '-wb', is_flag=True, default=False,
+              help="If True, we report this run to WandB")
+@click.option('--wandb-comment', '-wbm', type=str, default=None,
+              help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
+@click.option('--wandb-name', '-wbname', type=str, default=None,
+              help="You can specify a short name for the run here as well. ")
 def run(
         tokenizer: str,
         encoder: str,
@@ -310,7 +293,6 @@ def run(
         coref_higher_order: int = DEFAULTS.coref_higher_order,
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
-    # TODO: enable specifying loss ratios for different tasks.
     # TODO: implement soft loading the model parameters somehow.
 
     if not tokenizer:
@@ -334,27 +316,15 @@ def run(
         raise BadParameters(f"Dataset 1, or Task 1 or both are not provided! ")
     if (not tasks_2 and dataset_2) or (tasks_2 and not dataset_2):
         raise BadParameters(f"Either one of dataset or task is not provided for the second domain")
-    for task in tasks:
-    # Check if Task is legit
+    if dataset not in KNOWN_SPLITS:
+        raise BadParameters(f"Unknown dataset: {dataset}.")
+    if dataset_2 not in list(KNOWN_SPLITS.keys()) + [None]:
+        raise BadParameters(f"Unknown dataset: {dataset_2}")
 
     _is_multidomain: bool = dataset_2 is not None
 
-    # Sanity Checks
-    if dataset_2:
-        if not tasks_2:
-            raise BadParameters(f"No tasks specified for dataset 2: {dataset_2}.")
-        if dataset_2 not in KNOWN_SPLITS.keys():
-            raise BadParameters(f"Unknown dataset: {dataset_2}.")
-    if dataset not in KNOWN_SPLITS:
-        raise BadParameters(f"Unknown dataset: {dataset}.")
-    # If there is overlap in tasks and tasks_2
-    if set(tasks).intersection(tasks_2):
-        # TODO: relax this condition
-        raise BadParameters("Tasks are overlapping between the two sources. That should not happen.")
-
-    # Convert task args to a proper tasks obj
-    tasks = Tasks(tasks)
-    tasks_2 = Tasks(tasks_2)
+    tasks = Tasks(dataset, *tasks)
+    tasks_2 = Tasks(dataset_2, *tasks_2)
 
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
 
@@ -368,13 +338,8 @@ def run(
     config.top_span_ratio = 0.4
     config.max_top_antecedents = 50
     config.device = device
-    # config.epochs = epochs
-    # config.freeze_encoder = not train_encoder
-    # config.learning_rate = learning_rate
     config.trim = trim
     config.debug = debug
-    # config.ner_unweighted = ner_unweighted
-    # config.pruner_unweighted = pruner_unweighted
     config.filter_candidates_pos_threshold = DEFAULTS[
         'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
     config.wandb = use_wandb
@@ -396,42 +361,29 @@ def run(
     # config.trainer.adam_beta1
 
     config = merge_configs(old=DEFAULTS, new=config)
-    #
-    # # merge all pre-typed config values into this bert config obj
-    # for k, v in DEFAULTS.items():
-    #     try:
-    #         _ = config.__getattribute__(k)
-    #     except AttributeError:
-    #         config.__setattr__(k, v)
-    #
-    # # similarly, merge all trainer values into the current trainer values
-    # for k, v in TRAINER.items():
-    #     try:
-    #         _ = config.__getattr__(k)
-    #     except (AttributeError, KeyError) as e
-    #         config
 
     # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
     if 'ner' in tasks:
         n_classes_ner = get_n_classes(task='ner', dataset=dataset)
-    elif 'ner' in tasks_2:
+        tasks.n_classes_ner = n_classes_ner
+    if 'ner' in tasks_2:
         n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
-    else:
-        n_classes_ner = 1
-    config.n_classes_ner = n_classes_ner
+        tasks_2.n_classes_ner = n_classes_ner
 
     n_classes_pruner = 2
-    config.n_classes_pruner = n_classes_pruner
+    tasks.n_classes_pruner = n_classes_pruner
+    tasks_2.n_classes_pruner = n_classes_pruner
+
+    # Log the tasks var into config as well
+    config.task_1 = tasks
+    config.task_2 = tasks_2
 
     # Make the model
     model = MangoesMTL.from_pretrained(dir_encoder, config=config, **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
-    # model = BasicMTL(dir_encoder, config=config)
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
     # Make the optimizer
-    # opt = make_optimizer(model=model, optimizer_class=torch.optim.SGD, lr=config.lr,
-    #                      freeze_encoder=config.freeze_encoder)
     # opt_base = torch.optim.Adam
     opt = make_optimizer(
         model=model,
@@ -459,28 +411,35 @@ def run(
         
     """
 
-    train_ds, dev_ds = get_dataiter_partials(config, tasks, dataset=dataset, tokenizer=tokenizer,
-                                             ignore_task=None)  # FORCE: ignore tasks here
+    train_ds, dev_ds = get_dataiter_partials(config, tasks, tokenizer=tokenizer)
+    if _is_multidomain:
+        # Make a specific singledomain multitask dataiter
+        train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, tokenizer=tokenizer)
 
-    # Collect all metrics
-    metrics = []
-    metrics += [TraceCandidates]
-    if 'ner' in tasks + tasks_2:
-        metrics += [NERAcc,
-                    partial(NERSpanRecognitionMicro, device=config.device),
-                    partial(NERSpanRecognitionMacro, n_classes=n_classes_ner, device=config.device)]
-    if 'pruner' in tasks + tasks_2:
-        metrics += [partial(PrunerPRMicro, device=config.device),
-                    partial(PrunerPRMacro, n_classes=n_classes_pruner, device=config.device)]
-    if 'coref' in tasks + tasks_2:
-        metrics += [CorefBCubed, CorefMUC, CorefCeafe]
-
-    if dataset_2 and tasks_2:
-        train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,
-                                                     ignore_task=None)  # TODO: force ignore tasks here
-        # Make combined iterators since we have two sets of datasets and tasks
+        # Combine the two single domain dataset to make a multidomain dataiter
         train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2])
         dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2])
+
+    # Collect all metrics
+    metrics, metrics_2 = [TraceCandidates], [TraceCandidates]
+    if 'ner' in tasks:
+        metrics += [NERAcc,
+                    partial(NERSpanRecognitionMicro, device=config.device),
+                    partial(NERSpanRecognitionMacro, n_classes=tasks.n_classes_ner, device=config.device)]
+    if 'pruner' in tasks:
+        metrics += [partial(PrunerPRMicro, device=config.device),
+                    partial(PrunerPRMacro, n_classes=tasks.n_classes_pruner, device=config.device)]
+    if 'coref' in tasks:
+        metrics += [CorefBCubed, CorefMUC, CorefCeafe]
+    if 'ner' in tasks_2:
+        metrics_2 += [NERAcc,
+                      partial(NERSpanRecognitionMicro, device=config.device),
+                      partial(NERSpanRecognitionMacro, n_classes=tasks_2.n_classes_ner, device=config.device)]
+    if 'pruner' in tasks_2:
+        metrics += [partial(PrunerPRMicro, device=config.device),
+                    partial(PrunerPRMacro, n_classes=tasks_2.n_classes_pruner, device=config.device)]
+    if 'coref' in tasks_2:
+        metrics += [CorefBCubed, CorefMUC, CorefCeafe]
 
     # Make evaluators
     train_eval = Evaluator(
