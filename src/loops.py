@@ -2,7 +2,7 @@ import json
 import pickle
 import warnings
 from pathlib import Path
-from typing import Iterable, Callable, Union, Optional
+from typing import Iterable, Callable, Union, Optional, Type
 
 import numpy as np
 import torch
@@ -25,6 +25,7 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
     return inter_epoch
 
 
+# noinspection PyProtectedMember
 def training_loop(
         model: torch.nn.Module,
         epochs: int,
@@ -42,11 +43,14 @@ def training_loop(
         save_config: dict = None,
         filter_candidates_len_threshold: int = -1,
         debug: bool = False,
+        scheduler: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
     TODO: write about every param
 
+    :param debug:
+    :param clip_grad_norm:
     :param model:
     :param epochs:
     :param tasks:
@@ -63,7 +67,7 @@ def training_loop(
     :param save_config:
     :param filter_candidates_len_threshold: this is LEN threshold, not POS threshold.
         You divide the POS threshold by max span width and send that here.
-    :return:
+    :param scheduler: a lr_scheduler object (or none), preconfigured with our optimizer.
     """
     if flag_save and save_config is None:
         save_config = {}
@@ -131,11 +135,17 @@ def training_loop(
         # Evaluation (on the validation set)
         dev_eval.run()
 
+        # If LR scheduler is provided, run it
+        if scheduler is not None:
+            scheduler.step()
+
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
         dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        lrs = [param_group['lr'] for param_group in opt.param_groups]
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
+            wandb.log({'lr': lrs}, step=e)
         for task_nm in tasks:
             train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
 
@@ -144,7 +154,7 @@ def training_loop(
                 wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         # Printing
-        print(f"\nEpoch: {e:3d}" +
+        print(f"\nEpoch: {e:5d}" +
               '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}\n" +
                            ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                     for metric_nm, metric_vls in train_metrics[task_nm].items()]) + '\n' +

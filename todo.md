@@ -1,19 +1,9 @@
-# Preprocessing Todos
+# TODOs
 
-1. Should replace URLs with something generic. This is what BERT tokenizer does to URLs:
+## 08-07-2022
 
-```py
-   ['http', ':', '/', '/', 'home', '.', 'hampton',
-    '##ro', '##ads', '.', 'com', '/', 'stories', '/',
-    'story', '.', 'cf', '##m', '?', 'story', '=', '105',
-    '##52', '##2', '&', 'ran', '=', '48', '##57', '##7', '`', '`'
-```
-
-2. Same for XML tags:
-
-```py
-    ['<', '$', 'blog', '##back', '##link', '##au', '##thor', '$', '>', '@', '<', '$', 'blog', '##back',
-     '##link', '##date', '##time', '$', '>']
-```
-
-3. Email Addresses as well. 
+[ ] Run baseline with more CRAC things
+[ ] Why is TRIM not working
+[ ] Effects of scheduling. Try with different schedules
+[ ] Run a grid of scheduling experiments - wire it up
+[ ] 

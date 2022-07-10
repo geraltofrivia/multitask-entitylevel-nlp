@@ -2,7 +2,7 @@ import json
 import random
 from functools import partial
 from pathlib import Path
-from typing import List, Callable, Union, Optional, Tuple
+from typing import List, Callable, Union, Optional, Tuple, Type
 
 import click
 import numpy as np
@@ -21,7 +21,7 @@ from loops import training_loop
 from models.multitask import BasicMTL, MangoesMTL
 from dataiter import MultiTaskDataIter, DataIterCombiner
 from utils.misc import check_dumped_config, merge_configs
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED, SCHEDULER_CONFIG
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
     PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
@@ -102,6 +102,21 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
+def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[float]) \
+        -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
+    if not lr_schedule:
+        return None
+
+    if lr_schedule == 'gamma':
+        hyperparam = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['gamma']['decay_rate']
+        lambda_1 = lambda epoch: hyperparam ** epoch
+        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda_1)
+        return scheduler
+
+    else:
+        raise BadParameters(f"Unknown LR Schedule Recipe Name - {lr_schedule}")
+
+
 def get_pretrained_dirs(enc_nm: str, tok_nm: str):
     """Check if the given nm is stored locally. If so, load that. Else, pass it on as is."""
     plausible_parent_dir: Path = LOC.root / "models" / "huggingface"
@@ -152,7 +167,7 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
             dataset_2, tasks_2 are scierc and ['ner'], the output will be
             parentdir/ontonotes_scierc/coref_pruner-ner
 
-        However, if we find that trim flag is active in config, or that the run is going to wandb-trials
+            However, if we find that trim flag is active in config, or that the run is going to wandb-trials
             then the output is
                 parentdir/trial/dataset+dataset2/'_'.join(sorted(tasks+tasks_2)).
     """
@@ -231,6 +246,9 @@ def get_dataiter_partials(
 # TODO is this the encoder learning rate or the task learning rate?
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
+@click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
+              help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule." \
+                   "TODO: add more recipes here")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
@@ -255,7 +273,7 @@ def get_dataiter_partials(
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--max-span-width', '-msw', type=int, default=DEFAULTS['max_span_width'],
-              help="Max subwords to consider when making span. Use carefully. 5 alre    ady is too high.")
+              help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
 @click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'], is_flag=True,
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
@@ -282,11 +300,14 @@ def run(
         save: bool = False,
         resume_dir: int = -1,
         use_pretrained_model: str = None,
+        lr_schedule: (str, float) = (None, None),
         learning_rate: float = DEFAULTS.trainer.learning_rate,
         max_span_width: int = DEFAULTS.max_span_width,
         coref_loss_mean: bool = DEFAULTS.coref_loss_mean,
         coref_higher_order: int = DEFAULTS.coref_higher_order,
 ):
+    # TODO: enable specifying data sampling ratio when we have 2 datasets
+    # TODO: enable specifying loss ratios for different tasks.
     # TODO: implement soft loading the model parameters somehow.
 
     if not tokenizer:
@@ -367,6 +388,7 @@ def run(
     config.trainer.learning_rate = learning_rate
     config.trainer.epochs = epochs
     config.trainer.freeze_encoder = not train_encoder
+    config.trainer.lr_schedule = lr_schedule[0]
     # config.trainer.adam_beta1
 
     config = merge_configs(old=DEFAULTS, new=config)
@@ -419,6 +441,7 @@ def run(
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
+    scheduler = make_scheduler(opt, lr_schedule[0], lr_schedule[1])
 
     """
         Prep datasets.
@@ -553,7 +576,8 @@ def run(
         epochs_last_run=config.epochs_last_run if hasattr(config, 'epochs_last_run') else 0,
         filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
         debug=config.debug,
-        clip_grad_norm=config.trainer.clip_gradients_norm
+        clip_grad_norm=config.trainer.clip_gradients_norm,
+        scheduler=scheduler
     )
     print("potato")
 
