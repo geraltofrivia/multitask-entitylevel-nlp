@@ -371,6 +371,7 @@ def run(
     config.trainer.epochs = epochs
     config.trainer.freeze_encoder = not train_encoder
     config.trainer.lr_schedule = lr_schedule[0]
+    config.trainer.lr_schedule_param = lr_schedule[1]
     # config.trainer.adam_beta1
 
     config = merge_configs(old=DEFAULTS, new=config)
