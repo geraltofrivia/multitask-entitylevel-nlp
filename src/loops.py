@@ -147,23 +147,27 @@ def training_loop(
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
-        for task_nm in tasks:
-            train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
 
-            if flag_wandb:
-                task_specific_wandb_logs = {"loss": train_loss[task_nm][-1]}
-                wandb.log({task_nm: task_specific_wandb_logs}, step=e)
+        for pos in train_loss.keys():
+            for task_nm in tasks:
+
+                train_loss[pos][task_nm].append(np.mean(per_epoch_loss[pos][task_nm]))
+
+                if flag_wandb:
+                    task_specific_wandb_logs = {pos + "loss": train_loss[pos][task_nm][-1]}
+                    wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         # Printing
         print(f"\nEpoch: {e:5d}" +
-              '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}\n" +
+              '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task.position][task_nm])):.5f}\n" +
                            ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in train_metrics[task_nm].items()]) + '\n' +
+                                    for metric_nm, metric_vls in
+                                    train_metrics[task.position][task_nm].items()]) + '\n' +
                            ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in dev_metrics[task_nm].items()])
+                                    for metric_nm, metric_vls in dev_metrics[task.position][task_nm].items()])
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
-                           for task_nm in tasks]))
+                           for task in tasks for task_nm in task]))
 
         # Saving code
         if flag_save:

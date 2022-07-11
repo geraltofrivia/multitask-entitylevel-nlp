@@ -136,6 +136,8 @@ class MangoesMTL(BertPreTrainedModel):
         self.coref_depth = coref_higher_order
         self.coref_loss_mean = coref_loss_mean
 
+        # TODO: add a pruner, ner unweighted thing here. FOr now its all weighted.
+
         self.init_weights()
 
     def task_separate_gradient_clipping(self):
@@ -677,7 +679,8 @@ class MangoesMTL(BertPreTrainedModel):
             labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
 
             # Calculate the loss !
-            if self.pruner_unweighted:
+            # if self.pruner_unweighted:
+            if False:  # TODO: wire this up
                 pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
             else:
                 pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
@@ -822,7 +825,8 @@ class MangoesMTL(BertPreTrainedModel):
                                                    ner_gold_label_values)
 
             # Calculating the loss
-            if self.ner_unweighted:
+            # if self.ner_unweighted:
+            if False:  # TODO: wire this up
                 ner_loss = self.ner_loss(ner_logits, ner_labels)
             else:
                 ner_loss = self.ner_loss(ner_logits, ner_labels, weight=ner["weights"])

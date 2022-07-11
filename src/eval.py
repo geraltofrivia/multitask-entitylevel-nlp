@@ -399,14 +399,16 @@ class Evaluator:
     @staticmethod
     def aggregate_reports(aggregate, current):
         """ expect every value in 'current' to also be there in the aggregate """
-        for task_nm, task_metrics in current.items():
-            if task_nm not in aggregate:
-                aggregate[task_nm] = {}
 
-            for metric_nm, metric_vl in task_metrics.items():
-                if metric_nm not in aggregate[task_nm]:
-                    aggregate[task_nm][metric_nm] = []
-                aggregate[task_nm][metric_nm].append(metric_vl)
+        for position in aggregate.keys():
+            for task_nm, task_metrics in current[position].items():
+                if task_nm not in aggregate[position]:
+                    aggregate[position][task_nm] = {}
+
+                for metric_nm, metric_vl in task_metrics.items():
+                    if metric_nm not in aggregate[position][task_nm]:
+                        aggregate[position][task_nm][metric_nm] = []
+                    aggregate[position][task_nm][metric_nm].append(metric_vl)
 
         return aggregate
 
