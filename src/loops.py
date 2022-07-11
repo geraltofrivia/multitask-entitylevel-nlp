@@ -150,12 +150,11 @@ def training_loop(
 
         for task in tasks:
             for task_nm in task:
-
                 train_loss[task.position][task_nm].append(np.mean(per_epoch_loss[task.position][task_nm]))
 
-                if flag_wandb:
-                    task_specific_wandb_logs = {task.position + "loss": train_loss[task.position][task_nm][-1]}
-                    wandb.log({task_nm: task_specific_wandb_logs}, step=e)
+            if flag_wandb:
+                _loss_logs = {task_nm: {"loss": train_loss[task.position][task_nm][-1]} for task_nm in task}
+                wandb.log({task.position: _loss_logs}, step=e)
 
         # print(train_metrics)
 
