@@ -184,7 +184,6 @@ def get_dataiter_partials(
         tasks: Tasks,
         tokenizer: transformers.BertTokenizer,
 ):
-
     # Load the data
     train_ds = partial(
         MultiTaskDataIter,
@@ -438,10 +437,10 @@ def run(
                           partial(NERSpanRecognitionMicro, device=config.device),
                           partial(NERSpanRecognitionMacro, n_classes=tasks_2.n_classes_ner, device=config.device)]
         if 'pruner' in tasks_2:
-            metrics += [partial(PrunerPRMicro, device=config.device),
-                        partial(PrunerPRMacro, n_classes=tasks_2.n_classes_pruner, device=config.device)]
+            metrics_2 += [partial(PrunerPRMicro, device=config.device),
+                          partial(PrunerPRMacro, n_classes=tasks_2.n_classes_pruner, device=config.device)]
         if 'coref' in tasks_2:
-            metrics += [CorefBCubed, CorefMUC, CorefCeafe]
+            metrics_2 += [CorefBCubed, CorefMUC, CorefCeafe]
 
     # Make evaluators
     train_eval = Evaluator(
