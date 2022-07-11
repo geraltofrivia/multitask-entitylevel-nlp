@@ -405,7 +405,7 @@ class Evaluator:
     def aggregate_reports(aggregate, current):
         """ expect every value in 'current' to also be there in the aggregate """
 
-        for position in aggregate.keys():
+        for position in current.keys():
             for task_nm, task_metrics in current[position].items():
                 if task_nm not in aggregate[position]:
                     aggregate[position][task_nm] = {}

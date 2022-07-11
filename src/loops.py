@@ -148,7 +148,7 @@ def training_loop(
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
 
-        for task in train_loss.keys():
+        for task in tasks:
             for task_nm in task:
 
                 train_loss[task.position][task_nm].append(np.mean(per_epoch_loss[task.position][task_nm]))
@@ -156,6 +156,8 @@ def training_loop(
                 if flag_wandb:
                     task_specific_wandb_logs = {task.position + "loss": train_loss[task.position][task_nm][-1]}
                     wandb.log({task_nm: task_specific_wandb_logs}, step=e)
+
+        # print(train_metrics)
 
         # Printing
         print(f"\nEpoch: {e:5d}" +
