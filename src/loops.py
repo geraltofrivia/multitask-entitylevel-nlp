@@ -148,13 +148,13 @@ def training_loop(
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
 
-        for pos in train_loss.keys():
-            for task_nm in tasks:
+        for task in train_loss.keys():
+            for task_nm in task:
 
-                train_loss[pos][task_nm].append(np.mean(per_epoch_loss[pos][task_nm]))
+                train_loss[task.position][task_nm].append(np.mean(per_epoch_loss[task.position][task_nm]))
 
                 if flag_wandb:
-                    task_specific_wandb_logs = {pos + "loss": train_loss[pos][task_nm][-1]}
+                    task_specific_wandb_logs = {task.position + "loss": train_loss[task.position][task_nm][-1]}
                     wandb.log({task_nm: task_specific_wandb_logs}, step=e)
 
         # Printing
