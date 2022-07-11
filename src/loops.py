@@ -161,11 +161,12 @@ def training_loop(
 
         # Printing
         print(f"\nEpoch: {e:5d}" +
-              '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task.position][task_nm])):.5f}\n" +
-                           ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+              '\n\t'.join([f" | {task.position + task_nm} Loss: "
+                           f"{float(np.mean(per_epoch_loss[task.position][task_nm])):.5f}\n" +
+                           ''.join([f" | {task.position + task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                     for metric_nm, metric_vls in
                                     train_metrics[task.position][task_nm].items()]) + '\n' +
-                           ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                           ''.join([f" | {task.position + task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                     for metric_nm, metric_vls in dev_metrics[task.position][task_nm].items()])
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"

@@ -406,6 +406,9 @@ class Evaluator:
         """ expect every value in 'current' to also be there in the aggregate """
 
         for position in current.keys():
+            if position not in aggregate:
+                aggregate[position] = {}
+
             for task_nm, task_metrics in current[position].items():
                 if task_nm not in aggregate[position]:
                     aggregate[position][task_nm] = {}
