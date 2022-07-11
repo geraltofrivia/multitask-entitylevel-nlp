@@ -399,7 +399,7 @@ class Evaluator:
             for metric in metrics:
                 metric.reset()
 
-        self.results = {}
+        self.results = {'primary': {}, 'secondary': {}}
 
     @staticmethod
     def aggregate_reports(aggregate, current):
