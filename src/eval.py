@@ -324,8 +324,13 @@ class Evaluator:
         for task_nm in instance['tasks']:
 
             if task_nm == 'coref':
-                for metric in metrics['coref']:
-                    metric.update(**outputs['coref'])
+                try:
+                    for metric in metrics['coref']:
+                        metric.update(**outputs['coref'])
+                except KeyError:
+                    print(instance['domain'])
+                    print(metrics)
+                    print(task_nm)
 
             else:
                 for metric in metrics[task_nm]:
