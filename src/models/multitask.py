@@ -120,10 +120,10 @@ class MangoesMTL(BertPreTrainedModel):
             nn.Dropout(coref_dropout),
             # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
         )
-        self.unary_ner_specific = {
+        self.unary_ner_specific = nn.ModuleDict({
             task.position: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
             for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
-        }
+        })
 
         # Loss management for pruner
         self.pruner_loss = self._rescaling_weights_bce_loss_
