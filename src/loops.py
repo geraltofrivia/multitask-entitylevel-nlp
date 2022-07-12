@@ -1,6 +1,5 @@
 import json
 import pickle
-import warnings
 from pathlib import Path
 from typing import List, Callable, Union, Optional, Type
 
@@ -43,7 +42,6 @@ def training_loop(
         save_dir: Optional[Path] = None,
         epochs_last_run: int = 0,
         save_config: dict = None,
-        filter_candidates_len_threshold: int = -1,
         debug: bool = False,
         scheduler: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
         clip_grad_norm: float = 0.0,
@@ -67,8 +65,6 @@ def training_loop(
     :param save_dir:
     :param epochs_last_run:
     :param save_config:
-    :param filter_candidates_len_threshold: this is LEN threshold, not POS threshold.
-        You divide the POS threshold by max span width and send that here.
     :param scheduler: a lr_scheduler object (or none), preconfigured with our optimizer.
     """
     if flag_save and save_config is None:
@@ -96,12 +92,6 @@ def training_loop(
             opt.zero_grad()
 
             instance["prep_coref_eval"] = True
-
-            # if there are more than a certain amount of (roughly) candidates, we skip the instance. save mem
-            if instance['attention_mask'].view(-1).sum().item() > filter_candidates_len_threshold > 0:
-                warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                              f"Input: {instance['attention_mask'].view(-1).sum().item()}.")
-                continue
 
             # Move all input tensors to the right devices
             instance = change_device(instance, device)

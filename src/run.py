@@ -543,7 +543,6 @@ def run(
         save_dir=savedir,
         save_config=save_config,
         epochs_last_run=config.epochs_last_run if hasattr(config, 'epochs_last_run') else 0,
-        filter_candidates_len_threshold=int(config.filter_candidates_pos_threshold / config.max_span_width),
         debug=config.debug,
         clip_grad_norm=config.trainer.clip_gradients_norm,
         scheduler=scheduler
