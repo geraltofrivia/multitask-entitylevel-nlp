@@ -569,7 +569,7 @@ class Tasks:
             raise ValueError(f"Asked for {task_nm} but task does not exist.")
 
         task_index = self.names.index(task_nm)
-        return self.use_class_weights[task_index]
+        return not self.use_class_weights[task_index]
 
     def ner_unweighted(self) -> bool:
         return self._task_unweighted_('ner')
