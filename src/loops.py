@@ -139,7 +139,7 @@ def training_loop(
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
-            wandb.log({"skipped": skipped[-1]})
+            wandb.log({"skipped": {k: v[-1] for k, v in skipped.items()}})
 
         for task in tasks:
             for task_nm in task:
