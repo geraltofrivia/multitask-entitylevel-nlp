@@ -339,8 +339,8 @@ def run(
     config.device = device
     config.trim = trim
     config.debug = debug
-    config.filter_candidates_pos_threshold = DEFAULTS[
-        'filter_candidates_pos_threshold'] if filter_candidates_pos else -1
+    config.skip_instance_after_nspan = DEFAULTS[
+        'skip_instance_after_nspan'] if filter_candidates_pos else -1
     config.wandb = use_wandb
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial

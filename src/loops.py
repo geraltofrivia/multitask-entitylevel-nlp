@@ -15,6 +15,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device, weighted_addition_losses
+from utils.exceptions import AnticipateOutOfMemException
 from eval import Evaluator
 from utils.data import Tasks
 
@@ -76,6 +77,7 @@ def training_loop(
     train_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj} for task_obj in tasks}
     train_metrics = {}
     dev_metrics = {}
+    skipped = {task_obj.position: [] for task_obj in tasks}
 
     trn_dataset = trn_dl()
 
@@ -85,6 +87,7 @@ def training_loop(
         # Make data
         # trn_dataset = trn_dl()
         per_epoch_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
+        per_epoch_skipped = {task_obj.position: 0 for task_obj in tasks}
 
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
@@ -103,15 +106,12 @@ def training_loop(
             # Move all input tensors to the right devices
             instance = change_device(instance, device)
 
-            # # DEBUG: if there are more than 9k candidates, skip the instance. save mem.
-            # if instance['candidate_starts'].shape[0] > 9000:
-            #     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-            #                   f"Input: {instance['input_ids'].shape}."
-            #                   f"Spans: {instance['candidate_starts'].shape}")
-            #     continue
-
             # Forward Pass
-            outputs = forward_fn(**instance)
+            try:
+                outputs = forward_fn(**instance)
+            except AnticipateOutOfMemException:
+                per_epoch_skipped[instance["domain"]] += 1
+                continue
 
             # Calc loss
             loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
@@ -143,10 +143,13 @@ def training_loop(
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
         dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        for k in skipped.keys():
+            skipped[k].append(per_epoch_skipped[k])
         lrs = [param_group['lr'] for param_group in opt.param_groups]
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
+            wandb.log({"skipped": skipped})
 
         for task in tasks:
             for task_nm in task:

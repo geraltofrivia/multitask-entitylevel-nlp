@@ -67,8 +67,6 @@ class MultiTaskDataIter(Dataset):
         self.tokenizer = tokenizer
         self.config = config
         self.uncased = config.uncased
-        self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
-            if config.filter_candidates_pos_threshold > 0 else 10 ** 20
 
         self.loss_scales = torch.tensor(tasks.loss_scales, dtype=torch.float)
 

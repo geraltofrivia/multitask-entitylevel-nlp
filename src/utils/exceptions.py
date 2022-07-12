@@ -1,6 +1,10 @@
 """
     Its a good idea to keep custom exceptions together.
 """
+from typing import Union, Optional
+
+import torch
+from mytorch.utils.goodies import estimate_memory
 
 
 class BadParameters(Exception):
@@ -53,3 +57,14 @@ class LabelDictNotFound(FileNotFoundError):
 class NANsFound(ValueError):
     """ There are nans where we didn't expect them (which is everywhere, pretty much). HALP! """
     ...
+
+
+class AnticipateOutOfMemException(Exception):
+    """ A model may throw this if it seems to be going out of memory. If not, well, bien. """
+
+    def __init__(self, reason: str, device: Optional[Union[str, torch.device]], *args):
+        super().__init__(*args)
+        self.reason = reason
+
+    def __str__(self):
+        return f"{self.reason}\n\t Currently Available Memory: {estimate_memory()} GBs."
