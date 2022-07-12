@@ -37,6 +37,7 @@ class MangoesMTL(BertPreTrainedModel):
 
     def __init__(
             self,
+            enc_nm: str,
             vocab_size: int,
             hidden_size: int,
             max_span_width: int,

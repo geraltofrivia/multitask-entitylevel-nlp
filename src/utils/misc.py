@@ -280,6 +280,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'ner_class_weights',
         'freeze_encoder',
         'filter_candidates_pos_threshold',
+        'skip_instance_after_nspan',
         'learning_rate',
         'bias_in_last_layers',
         'encoder_learning_rate',

@@ -849,11 +849,11 @@ class MultiDomainDataCombiner(Dataset):
 
         # Normalise sampling_ratios, weighted by aggregate length of all dataiters
         weights = [len(dataiter) for dataiter in self.dataiters]
-        self.weights = [weight * ratio for weight, ratio in zip(weights, sampling_ratio)]
+        self.weights = [int(weight * ratio) for weight, ratio in zip(weights, sampling_ratio)]
 
         # Create a list of ints based on these weights which dictate which iter to choose the next sample from
 
-        for i, dataset_specific_weight in enumerate(weights):
+        for i, dataset_specific_weight in enumerate(self.weights):
             self.source_indices += [i] * dataset_specific_weight
 
         # Now shuffle these

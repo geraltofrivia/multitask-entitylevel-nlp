@@ -18,7 +18,7 @@ except ImportError:
     from . import _pathfix
 from utils.data import Tasks
 from loops import training_loop
-from models.multitask import BasicMTL, MangoesMTL
+from models.multitask import MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG
@@ -44,7 +44,7 @@ torch.backends.cudnn.deterministic = True
 #     else:
 #         return optimizer_class(model.parameters(), lr=lr)
 def make_optimizer(
-        model: BasicMTL,
+        model: MangoesMTL,
         base_keyword: str,
         task_weight_decay: Optional[float],
         task_learning_rate: Optional[float],
@@ -231,7 +231,7 @@ def get_dataiter_partials(
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="Learning rate. Defaults to 0.005.")
 @click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
-              help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule." \
+              help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule."
                    "TODO: add more recipes here")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
@@ -416,8 +416,8 @@ def run(
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, tokenizer=tokenizer)
 
         # Combine the two single domain dataset to make a multidomain dataiter
-        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2])
-        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2])
+        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio)
+        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio)
 
     # Collect all metrics
     metrics, metrics_2 = [TraceCandidates], []
