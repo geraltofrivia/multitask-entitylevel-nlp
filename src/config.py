@@ -64,6 +64,10 @@ KNOWN_SPLITS = FancyDict({
     'codicrac-light': FancyDict({
         'train': 'train',
         'dev': 'dev',
+    }),
+    'codicrac-switchboard': FancyDict({
+        'train': 'train',
+        'dev': 'dev',
     })
 })
 
