@@ -177,6 +177,7 @@ def training_loop(
                 'epochs_last_run': e,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': opt.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
             }, Path(save_dir) / 'torch.save')
             print(f"Model saved on Epoch {e} at {save_dir}.")
 

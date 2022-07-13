@@ -483,10 +483,10 @@ def run(
 
     # Resuming stuff
     if resume_dir >= 0:
-        raise NotImplementedError
+        # raise NotImplementedError
         # We are resuming the model
-        savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, config=config, dataset=dataset,
-                                                            tasks_2=tasks_2, dataset_2=dataset_2), _newdir=False)
+        savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, config=config,
+                                                            tasks_2=tasks_2), _newdir=False)
 
         """
             First check if the config matches. If not, then
@@ -510,6 +510,8 @@ def run(
         checkpoint = torch.load(savedir / 'torch.save')
         model.load_state_dict(checkpoint['model_state_dict'])
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
+        if scheduler:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         print(f"Successfully resuming training from Epoch {config.epochs_last_run}")
 
     # WandB stuff
