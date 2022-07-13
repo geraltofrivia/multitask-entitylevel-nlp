@@ -85,6 +85,8 @@ def training_loop(
         per_epoch_loss = {task_obj.dataset: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
         per_epoch_skipped = {task_obj.dataset: 0 for task_obj in tasks}
 
+        model.train()
+
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
 
@@ -123,6 +125,7 @@ def training_loop(
             for task_nm in instance['tasks']:
                 per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
 
+        model.eval()
         # Evaluation (on the validation set)
         dev_eval.run()
 
