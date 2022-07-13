@@ -18,6 +18,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device
+from utils.data import Tasks
 from utils.exceptions import UnknownDomainException
 from eval_mangoes import CorefEvaluator
 
@@ -250,8 +251,8 @@ class Evaluator:
             self,
             predict_fn: Callable,
             dataset_partial: Callable,
-            metrics_primary: List[Type[CustomMetric]],
-            metrics_secondary: Optional[List[Type[CustomMetric]]],
+            # TODO: turn it into a list, and make it similar when initing metrics
+            metrics: Dict[str, List[Type[CustomMetric]]],
             device: Union[str, torch.device],
             debug: bool = True
     ):
@@ -271,23 +272,19 @@ class Evaluator:
         self.debug = debug
         self.device = device
 
-        # Initialise all metrics
-        self.metrics_primary = {}
-        for metric_cls in metrics_primary:
-            metric = metric_cls(debug=self.debug)
-            self.metrics_primary[metric.task] = self.metrics_primary.get(metric.task, []) + [metric]
+        self.tasks: List[Tasks] = [self.ds.tasks] if type(self.ds.tasks) is Tasks else self.ds.tasks
 
-        # Initialise all metrics
-        self.metrics_secondary = {}
-        for metric_cls in metrics_secondary:
-            metric = metric_cls(debug=self.debug)
-            self.metrics_secondary[metric.task] = self.metrics_secondary.get(metric.task, []) + [metric]
+        self.results = {task.dataset for task in self.tasks}
+        self.metrics = {task.dataset: {} for task in self.tasks}
+        for metric_dataset, metric_cls_list in metrics.items():
+            for metric_cls in metric_cls_list:
+                metric = metric_cls(debug=self.debug)
+                self.metrics[metric_dataset][metric.task] = self.metrics[metric_dataset].get(metric.task, []) + [metric]
 
         # If there are task agnostic metrics/traces, check the flag true
-        self.has_general_traces_primary: bool = 'general' in self.metrics_primary.keys()
-        self.has_general_traces_secondary: bool = 'general' in self.metrics_secondary.keys()
-
-        self.results = {'primary': {}, 'secondary': {}}
+        self.has_general_traces: Dict[str, bool] = {k: 'general' in v.keys() for k, v in self.metrics.items()}
+        self._computed_results: bool = False  # flag to indicate whether to re-compute or just report metrics
+        self.results = {task.dataset: {} for task in self.tasks}
 
     def update(self, instance: dict, outputs: dict):
         """
@@ -306,13 +303,10 @@ class Evaluator:
         """
 
         # Check the source of the prediction
-        if instance['domain'] == 'primary':
-            has_general_traces = self.has_general_traces_primary
-            metrics = self.metrics_primary
-        elif instance['domain'] == 'secondary':
-            has_general_traces = self.has_general_traces_secondary
-            metrics = self.metrics_secondary
-        else:
+        try:
+            metrics = self.metrics[instance['domain']]
+            has_general_traces = self.has_general_traces[instance['domain']]
+        except KeyError:
             raise UnknownDomainException(f"Domain: {instance['domain']} is unrecognized.")
 
         # Now log the metrics
@@ -362,61 +356,55 @@ class Evaluator:
 
     def report(self):
 
-        if self.results['primary'] or self.results['secondary']:
+        # If any of the results exist already, return them
+
+        if self._computed_results:
             return self.results
 
-        # Make the results different for primary and secondary domain.
+        # Compute the results
+        for dataset_nm, metrics in self.metrics.items():
+            for task_nm, task_metrics in metrics.items():
 
-        for task_nm, task_metrics in self.metrics_primary.items():
-            if task_nm not in self.results['primary']:
-                self.results['primary'][task_nm] = {}
+                # Init metrics name in results dict
+                if task_nm not in self.results[dataset_nm]:
+                    self.results[dataset_nm][task_nm] = {}
 
-            for metric in task_metrics:
-                summary = metric.compute()
-                for nm, vl in summary.items():
-                    self.results['primary'][task_nm][nm] = vl
+                for metric in task_metrics:
+                    summary = metric.compute()
+                    for nm, vl in summary.items():
+                        self.results[dataset_nm][task_nm][nm] = vl
 
-        for task_nm, task_metrics in self.metrics_secondary.items():
-            if task_nm not in self.results['secondary']:
-                self.results['secondary'][task_nm] = {}
-
-            for metric in task_metrics:
-                summary = metric.compute()
-                for nm, vl in summary.items():
-                    self.results['secondary'][task_nm][nm] = vl
-
+        self._computed_results = True
         return self.results
 
     # def __repr__(self):
     #     raise NotImplementedError
 
     def reset(self):
-        for metrics in self.metrics_primary.values():
-            for metric in metrics:
-                metric.reset()
+        for metrics_task_dict in self.metrics.values():
+            for metrics in metrics_task_dict.values():
+                for metric in metrics:
+                    metric.reset()
 
-        for metrics in self.metrics_secondary.values():
-            for metric in metrics:
-                metric.reset()
-
-        self.results = {'primary': {}, 'secondary': {}}
+        self._computed_results: bool = False
+        self.results = {task.dataset: {} for task in self.tasks}
 
     @staticmethod
     def aggregate_reports(aggregate, current):
         """ expect every value in 'current' to also be there in the aggregate """
 
-        for position in current.keys():
-            if position not in aggregate:
-                aggregate[position] = {}
+        for dataset in current.keys():
+            if dataset not in aggregate:
+                aggregate[dataset] = {}
 
-            for task_nm, task_metrics in current[position].items():
-                if task_nm not in aggregate[position]:
-                    aggregate[position][task_nm] = {}
+            for task_nm, task_metrics in current[dataset].items():
+                if task_nm not in aggregate[dataset]:
+                    aggregate[dataset][task_nm] = {}
 
                 for metric_nm, metric_vl in task_metrics.items():
-                    if metric_nm not in aggregate[position][task_nm]:
-                        aggregate[position][task_nm][metric_nm] = []
-                    aggregate[position][task_nm][metric_nm].append(metric_vl)
+                    if metric_nm not in aggregate[dataset][task_nm]:
+                        aggregate[dataset][task_nm][metric_nm] = []
+                    aggregate[dataset][task_nm][metric_nm].append(metric_vl)
 
         return aggregate
 

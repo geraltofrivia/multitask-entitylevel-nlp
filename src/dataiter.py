@@ -63,7 +63,7 @@ class MultiTaskDataIter(Dataset):
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
-        self.tasks = tasks
+        self.tasks: Tasks = tasks
         self.tokenizer = tokenizer
         self.config = config
         self.uncased = config.uncased
@@ -635,7 +635,7 @@ class MultiTaskDataIter(Dataset):
 
         return_dict = {
             "tasks": tasks,
-            "domain": self.tasks.position,
+            "domain": self.tasks.dataset,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
@@ -835,6 +835,7 @@ class MultiDomainDataCombiner(Dataset):
 
         # Init all data iterators.
         self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
+        self.tasks: List[Tasks] = [dataiter.tasks for dataiter in self.dataiters]
 
         """
             Set dataset sampling indices.
@@ -913,7 +914,7 @@ class MultiDomainDataCombiner(Dataset):
 
 if __name__ == '__main__':
 
-    task = Tasks.parse(datasrc='codicrac-persuasion', position='primary', tuples=[('coref', True, 1.0)])
+    task = Tasks.parse(datasrc='codicrac-persuasion', tuples=[('coref', 1.0, True)])
     di = DocumentReader('codicrac-persuasion', 'train', tasks=task)
 
     for x in di:

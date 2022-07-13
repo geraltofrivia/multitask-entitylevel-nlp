@@ -56,6 +56,6 @@ if __name__ == '__main__':
     # Get a dataset (temp)
     # TODO: wire up click here
 
-    task = Tasks.parse(datasrc='codicrac-persuasion', position='primary', tuples=[('coref', True, 1.0)])
+    task = Tasks.parse(datasrc='codicrac-persuasion', tuples=[('coref', True, 1.0)])
     dr = DocumentReader('codicrac-persuasion', 'train')
     Analyser("CODICRAC 22 - Persuasion", dr)

@@ -70,10 +70,10 @@ def training_loop(
     if flag_save and save_config is None:
         save_config = {}
 
-    train_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj} for task_obj in tasks}
+    train_loss = {task_obj.dataset: {task_nm: [] for task_nm in task_obj} for task_obj in tasks}
     train_metrics = {}
     dev_metrics = {}
-    skipped = {task_obj.position: [] for task_obj in tasks}
+    skipped = {task_obj.dataset: [] for task_obj in tasks}
 
     trn_dataset = trn_dl()
 
@@ -82,8 +82,8 @@ def training_loop(
 
         # Make data
         # trn_dataset = trn_dl()
-        per_epoch_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
-        per_epoch_skipped = {task_obj.position: 0 for task_obj in tasks}
+        per_epoch_loss = {task_obj.dataset: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
+        per_epoch_skipped = {task_obj.dataset: 0 for task_obj in tasks}
 
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
@@ -143,23 +143,23 @@ def training_loop(
 
         for task in tasks:
             for task_nm in task:
-                train_loss[task.position][task_nm].append(np.mean(per_epoch_loss[task.position][task_nm]))
+                train_loss[task.dataset][task_nm].append(np.mean(per_epoch_loss[task.dataset][task_nm]))
 
             if flag_wandb:
-                _loss_logs = {task_nm: {"loss": train_loss[task.position][task_nm][-1]} for task_nm in task}
-                wandb.log({task.position: _loss_logs}, step=e)
+                _loss_logs = {task_nm: {"loss": train_loss[task.dataset][task_nm][-1]} for task_nm in task}
+                wandb.log({task.dataset: _loss_logs}, step=e)
 
         # print(train_metrics)
 
         # Printing
         print(f"\nEpoch: {e:5d}" +
-              '\n\t'.join([f" | {task.position + task_nm} Loss: "
-                           f"{float(np.mean(per_epoch_loss[task.position][task_nm])):.5f}\n" +
-                           ''.join([f" | {task.position + task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+              '\n\t'.join([f" | {task.dataset + task_nm} Loss: "
+                           f"{float(np.mean(per_epoch_loss[task.dataset][task_nm])):.5f}\n" +
+                           ''.join([f" | {task.dataset + task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
                                     for metric_nm, metric_vls in
-                                    train_metrics[task.position][task_nm].items()]) + '\n' +
-                           ''.join([f" | {task.position + task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in dev_metrics[task.position][task_nm].items()])
+                                    train_metrics[task.dataset][task_nm].items()]) + '\n' +
+                           ''.join([f" | {task.dataset + task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                    for metric_nm, metric_vls in dev_metrics[task.dataset][task_nm].items()])
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
                            for task in tasks for task_nm in task]))

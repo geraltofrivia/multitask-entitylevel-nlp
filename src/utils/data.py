@@ -504,14 +504,13 @@ class Tasks:
     names: List[str]
     loss_scales: List[float]
     use_class_weights: List[bool]
-    position: str
     dataset: str
 
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
 
     @classmethod
-    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, bool, float]], position: str = None):
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]]):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(
@@ -545,10 +544,9 @@ class Tasks:
 
         n_classes_ner = -1
         n_classes_pruner = -1
-        position = position
 
         return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights,
-                   position=position, dataset=dataset, n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner)
+                   dataset=dataset, n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner)
 
     def __post_init__(self, *args, **kwargs):
         self.sort()
@@ -566,7 +564,7 @@ class Tasks:
 
     def _task_unweighted_(self, task_nm: str) -> bool:
         if task_nm not in self:
-            raise ValueError(f"Asked for {task_nm} but task does not exist.")
+            raise UnknownTaskException(f"Asked for {task_nm} but task does not exist.")
 
         task_index = self.names.index(task_nm)
         return not self.use_class_weights[task_index]
@@ -622,7 +620,7 @@ class Tasks:
 
     @classmethod
     def create(cls):
-        return Tasks.parse(datasrc=None, position=None, tuples=[])
+        return Tasks.parse(datasrc=None, tuples=[])
 
     def isempty(self):
         return self.dataset is None and len(self) == 0

@@ -20,7 +20,7 @@ except ImportError:
     from . import _pathfix
 from config import _SEED_ as SEED
 from utils.data import Tasks
-from utils.exceptions import AnticipateOutOfMemException, UnknownTaskException
+from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException
 from utils.misc import SerializedBertConfig
 
 random.seed(SEED)
@@ -124,7 +124,7 @@ class MangoesMTL(BertPreTrainedModel):
             # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
         )
         self.unary_ner_specific = nn.ModuleDict({
-            task.position: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
+            task.dataset: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
             for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
         })
 
@@ -139,8 +139,7 @@ class MangoesMTL(BertPreTrainedModel):
         self.coref_depth = coref_higher_order
         self.coref_loss_mean = coref_loss_mean
         self._skip_instance_after_nspan = skip_instance_after_nspan
-        self._task_1 = task_1
-        self._task_2 = task_2
+        self._tasks_: List[Tasks] = [task_1, task_2]
 
         self.init_weights()
 
@@ -150,12 +149,15 @@ class MangoesMTL(BertPreTrainedModel):
 
     # noinspection PyProtectedMember
     def is_unweighted(self, task, domain):
-        if domain == 'primary':
-            return self._task_1._task_unweighted_(task)
-        elif domain == 'secondary':
-            return self._task_2._task_unweighted_(task)
-        else:
-            raise UnknownTaskException(f"Task name {task} is not understood.")
+        task_obj = None
+        for stored_task_obj in self._tasks_:
+            if stored_task_obj.dataset == domain:
+                task_obj = stored_task_obj
+
+        if task_obj is None:
+            raise UnknownDomainException(f"Domain {domain} was probably not passed to this model.")
+
+        return task_obj._task_unweighted_(task)
 
     def separate_max_norm_base_task(self, max_norm):
         base_params = [p for n, p in self.named_parameters() if "bert" in n]
