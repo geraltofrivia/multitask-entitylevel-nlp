@@ -909,3 +909,13 @@ class MultiDomainDataCombiner(Dataset):
             self.dataiters[dataiter_index][pointer_index % len(di)] = item
         except KeyError:
             raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
+
+
+if __name__ == '__main__':
+
+    task = Tasks.parse(datasrc='codicrac-persuasion', position='primary', tuples=[('coref', True, 1.0)])
+    di = DocumentReader('codicrac-persuasion', 'train', tasks=task)
+
+    for x in di:
+        print('potato')
+        break

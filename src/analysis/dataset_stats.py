@@ -15,7 +15,7 @@ from mytorch.utils.goodies import FancyDict
 
 # Local imports
 from dataiter import DocumentReader
-from utils.data import Document
+from utils.data import Document, Tasks
 
 
 class Analyser:
@@ -41,13 +41,21 @@ class Analyser:
 
         stats.n_documents = len(self.data)
         stats.avg_len_documents = np.mean([self.get_document_length(doc) for doc in self.data])
+        stats.avg_len_span_coref = self.get_span_length('coref', self.data)
 
         self.report(stats)
+
+    def get_span_length(self, task: str, data: Union[Iterable[Document], DocumentReader]):
+        length = []
+        for datum in data:
+            length += [span[1] - span[0] for span in datum.coref.get_all_spans()]
+        return np.mean(length)
 
 
 if __name__ == '__main__':
     # Get a dataset (temp)
     # TODO: wire up click here
 
-    dr = DocumentReader('codicrac-ami', 'train')
-    Analyser("CODICRAC 22 - AMI", dr)
+    task = Tasks.parse(datasrc='codicrac-persuasion', position='primary', tuples=[('coref', True, 1.0)])
+    dr = DocumentReader('codicrac-persuasion', 'train')
+    Analyser("CODICRAC 22 - Persuasion", dr)

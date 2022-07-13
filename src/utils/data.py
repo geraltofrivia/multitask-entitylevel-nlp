@@ -511,7 +511,7 @@ class Tasks:
     n_classes_pruner: Optional[int] = field(default_factory=int)
 
     @classmethod
-    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], position: str = None):
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, bool, float]], position: str = None):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(
