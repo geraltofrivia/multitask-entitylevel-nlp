@@ -474,6 +474,44 @@ class MangoesMTL(BertPreTrainedModel):
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]
 
+    def todel_get_predicted_antecedents(self, antecedent_idx, antecedent_scores):
+        """ CPU list input """
+        predicted_antecedents = []
+        for i, idx in enumerate(np.argmax(antecedent_scores, axis=1) - 1):
+            if idx < 0:
+                predicted_antecedents.append(-1)
+            else:
+                predicted_antecedents.append(antecedent_idx[i][idx])
+        return predicted_antecedents
+
+    def todel_get_predicted_clusters(self, pruned_span_starts, pruned_span_ends, coref_top_antecedents,
+                                     coref_top_antecedent_scores):
+        """ CPU list input """
+        # Get predicted antecedents
+        predicted_antecedents = self.todel_get_predicted_antecedents(coref_top_antecedents, coref_top_antecedent_scores)
+
+        # Get predicted clusters
+        mention_to_cluster_id = {}
+        predicted_clusters = []
+        for i, predicted_idx in enumerate(predicted_antecedents):
+            if predicted_idx < 0:
+                continue
+            assert i > predicted_idx, f'span idx: {i}; antecedent idx: {predicted_idx}'
+            # Check antecedent's cluster
+            antecedent = (int(pruned_span_starts[predicted_idx]), int(pruned_span_ends[predicted_idx]))
+            antecedent_cluster_id = mention_to_cluster_id.get(antecedent, -1)
+            if antecedent_cluster_id == -1:
+                antecedent_cluster_id = len(predicted_clusters)
+                predicted_clusters.append([antecedent])
+                mention_to_cluster_id[antecedent] = antecedent_cluster_id
+            # Add mention to cluster
+            mention = (int(pruned_span_starts[i]), int(pruned_span_ends[i]))
+            predicted_clusters[antecedent_cluster_id].append(mention)
+            mention_to_cluster_id[mention] = antecedent_cluster_id
+
+        predicted_clusters = [tuple(c) for c in predicted_clusters]
+        return predicted_clusters, mention_to_cluster_id, predicted_antecedents
+
     def forward(
             self,
             input_ids: torch.tensor,

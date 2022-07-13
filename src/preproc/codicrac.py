@@ -54,7 +54,7 @@ class CODICRACParser(GenericParser):
             'codicrac-ami': ['2022_AMI_train_v0.CONLLUA', '2022_AMI_dev_v0.CONLLUA'],
             'codicrac-persuasion': ['Persuasion_dev.2022.CONLLUA', 'Persuasion_train.2022.CONLLUA'],
             'codicrac-light': ['light_dev.2022.CONLLUA', 'light_train.2022.CONLLUA'],
-            'codicrac-switchboard': ['Switchboard_3_dev.CONLL'],
+            'codicrac-switchboard': ['Switchboard_train.2022.CONLLUA', 'Switchboard_dev.2022.CONLLUA'],
             'codicrac-arrau-t91': ['Trains_91.CONLL'],
             'codicrac-arrau-t93': ['Trains_93.CONLL'],
             'codicrac-arrau-rst': [
