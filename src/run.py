@@ -149,8 +149,7 @@ def get_n_classes(task: str, dataset: str) -> int:
         raise LabelDictNotFound(f"No label dict found for ner task for {dataset}: {task}")
 
 
-def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
-                        dataset_2: Optional[str], tasks_2: Optional[Tasks],
+def get_save_parent_dir(parentdir: Path, tasks: Tasks, tasks_2: Optional[Tasks],
                         config: Union[SerializedBertConfig, dict]) -> Path:
     """
         Normally returns parentdir/dataset+dataset2/'_'.join(sorted(tasks))+'-'+'_'.join(sorted(tasks_2)).
@@ -162,6 +161,10 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
             then the output is
                 parentdir/trial/dataset+dataset2/'_'.join(sorted(tasks+tasks_2)).
     """
+
+    dataset = tasks.dataset
+    dataset_2 = None if tasks_2.isempty() else tasks_2.dataset
+
     # if dataset_2 is alphabetically before dataset, start with it
     if dataset_2 and dataset_2[0] < dataset[0]:
         dataset_2, dataset = dataset, dataset_2
@@ -460,9 +463,8 @@ def run(
 
     # Saving stuff
     if save:
-        raise NotImplementedError
-        savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config, dataset=dataset,
-                                      tasks_2=tasks_2, dataset_2=dataset_2)
+        # raise NotImplementedError
+        savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config, tasks_2=tasks_2)
         savedir.mkdir(parents=True, exist_ok=True)
 
         if resume_dir >= 0:

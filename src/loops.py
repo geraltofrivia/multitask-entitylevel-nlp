@@ -5,16 +5,12 @@ from typing import List, Callable, Union, Optional, Type
 
 import numpy as np
 import torch
-import wandb
-from tqdm.auto import tqdm
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.misc import change_device, weighted_addition_losses
-from utils.exceptions import AnticipateOutOfMemException
 from eval import Evaluator
 from utils.data import Tasks
 
@@ -85,84 +81,84 @@ def training_loop(
         per_epoch_loss = {task_obj.position: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
         per_epoch_skipped = {task_obj.position: 0 for task_obj in tasks}
 
-        # Training (on the train set)
-        for i, instance in enumerate(tqdm(trn_dataset)):
-
-            # Reset the gradients.
-            opt.zero_grad()
-
-            instance["prep_coref_eval"] = True
-
-            # Move all input tensors to the right devices
-            instance = change_device(instance, device)
-
-            # Forward Pass
-            try:
-                outputs = forward_fn(**instance)
-            except AnticipateOutOfMemException:
-                per_epoch_skipped[instance["domain"]] += 1
-                continue
-
-            # Calc loss
-            loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
-
-            # Calc gradients
-            loss.backward()
-
-            # Clip Gradients
-            if clip_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_([param for group in opt.param_groups for param in group['params']],
-                                               clip_grad_norm)
-
-            # Backward Pass
-            opt.step()
-
-            # Throw the outputs to the eval benchmark also
-            train_eval.update(instance=instance, outputs=outputs)
-
-            for task_nm in instance['tasks']:
-                per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
-
-        # Evaluation (on the validation set)
-        dev_eval.run()
-
-        # If LR scheduler is provided, run it
-        if scheduler is not None:
-            scheduler.step()
-
-        # Bookkeeping (summarise the train and valid evaluations, and the loss)
-        train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
-        dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
-        for k in skipped.keys():
-            skipped[k].append(per_epoch_skipped[k])
-        lrs = [param_group['lr'] for param_group in opt.param_groups]
-        if flag_wandb:
-            wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
-            wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
-            wandb.log({"skipped": {k: v[-1] for k, v in skipped.items()}})
-
-        for task in tasks:
-            for task_nm in task:
-                train_loss[task.position][task_nm].append(np.mean(per_epoch_loss[task.position][task_nm]))
-
-            if flag_wandb:
-                _loss_logs = {task_nm: {"loss": train_loss[task.position][task_nm][-1]} for task_nm in task}
-                wandb.log({task.position: _loss_logs}, step=e)
-
-        # print(train_metrics)
-
-        # Printing
-        print(f"\nEpoch: {e:5d}" +
-              '\n\t'.join([f" | {task.position + task_nm} Loss: "
-                           f"{float(np.mean(per_epoch_loss[task.position][task_nm])):.5f}\n" +
-                           ''.join([f" | {task.position + task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in
-                                    train_metrics[task.position][task_nm].items()]) + '\n' +
-                           ''.join([f" | {task.position + task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in dev_metrics[task.position][task_nm].items()])
-                           # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
-                           # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
-                           for task in tasks for task_nm in task]))
+        # # Training (on the train set)
+        # for i, instance in enumerate(tqdm(trn_dataset)):
+        #
+        #     # Reset the gradients.
+        #     opt.zero_grad()
+        #
+        #     instance["prep_coref_eval"] = True
+        #
+        #     # Move all input tensors to the right devices
+        #     instance = change_device(instance, device)
+        #
+        #     # Forward Pass
+        #     try:
+        #         outputs = forward_fn(**instance)
+        #     except AnticipateOutOfMemException:
+        #         per_epoch_skipped[instance["domain"]] += 1
+        #         continue
+        #
+        #     # Calc loss
+        #     loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
+        #
+        #     # Calc gradients
+        #     loss.backward()
+        #
+        #     # Clip Gradients
+        #     if clip_grad_norm > 0:
+        #         torch.nn.utils.clip_grad_norm_([param for group in opt.param_groups for param in group['params']],
+        #                                        clip_grad_norm)
+        #
+        #     # Backward Pass
+        #     opt.step()
+        #
+        #     # Throw the outputs to the eval benchmark also
+        #     train_eval.update(instance=instance, outputs=outputs)
+        #
+        #     for task_nm in instance['tasks']:
+        #         per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
+        #
+        # # Evaluation (on the validation set)
+        # dev_eval.run()
+        #
+        # # If LR scheduler is provided, run it
+        # if scheduler is not None:
+        #     scheduler.step()
+        #
+        # # Bookkeeping (summarise the train and valid evaluations, and the loss)
+        # train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
+        # dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        # for k in skipped.keys():
+        #     skipped[k].append(per_epoch_skipped[k])
+        # lrs = [param_group['lr'] for param_group in opt.param_groups]
+        # if flag_wandb:
+        #     wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
+        #     wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
+        #     wandb.log({"skipped": {k: v[-1] for k, v in skipped.items()}})
+        #
+        # for task in tasks:
+        #     for task_nm in task:
+        #         train_loss[task.position][task_nm].append(np.mean(per_epoch_loss[task.position][task_nm]))
+        #
+        #     if flag_wandb:
+        #         _loss_logs = {task_nm: {"loss": train_loss[task.position][task_nm][-1]} for task_nm in task}
+        #         wandb.log({task.position: _loss_logs}, step=e)
+        #
+        # # print(train_metrics)
+        #
+        # # Printing
+        # print(f"\nEpoch: {e:5d}" +
+        #       '\n\t'.join([f" | {task.position + task_nm} Loss: "
+        #                    f"{float(np.mean(per_epoch_loss[task.position][task_nm])):.5f}\n" +
+        #                    ''.join([f" | {task.position + task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+        #                             for metric_nm, metric_vls in
+        #                             train_metrics[task.position][task_nm].items()]) + '\n' +
+        #                    ''.join([f" | {task.position + task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
+        #                             for metric_nm, metric_vls in dev_metrics[task.position][task_nm].items()])
+        #                    # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
+        #                    # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
+        #                    for task in tasks for task_nm in task]))
 
         # Saving code
         if flag_save:
