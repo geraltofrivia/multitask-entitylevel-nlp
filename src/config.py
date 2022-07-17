@@ -100,7 +100,7 @@ DEFAULTS: dict = FancyDict({
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
-    'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
+    'max_top_antecedents': 30,  # How many top antecedents to consider for a given anaphor (COREF specific)
     'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
     # truncate the train set (never the dev set tho)
 
