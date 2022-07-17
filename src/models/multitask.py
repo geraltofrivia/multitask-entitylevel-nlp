@@ -612,11 +612,17 @@ class MangoesMTL(BertPreTrainedModel):
             # calculate final slow scores
             for i in range(self.coref_depth):
                 top_ante_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
-                top_ante_scores = top_ante_fast_scores + self.get_slow_antecedent_scores(top_span_emb,
-                                                                                         top_antecedents,
-                                                                                         top_ante_emb,
-                                                                                         top_antecedent_offsets,
-                                                                                         segment_distance)
+                try:
+                    top_ante_scores = top_ante_fast_scores + self.get_slow_antecedent_scores(top_span_emb,
+                                                                                             top_antecedents,
+                                                                                             top_ante_emb,
+                                                                                             top_antecedent_offsets,
+                                                                                             segment_distance)
+                except RuntimeError as e:
+                    # This usually happens due to out of mem errors
+                    print(f"Input IDS: {input_ids.shape}")
+                    print(f"Spans Emb: {span_emb.shape}")
+                    raise e
                 # [top_cand, top_ant]
                 top_ante_weights = F.softmax(
                     torch.cat([dummy_scores, top_ante_scores], 1), dim=-1
