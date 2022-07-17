@@ -2,6 +2,7 @@
     Collection of evaluation functions for different tasks.
     We use torch metrics whenever possible.
 """
+import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from typing import Dict, Callable, List, Union, Optional, Type
@@ -254,6 +255,7 @@ class Evaluator:
             # TODO: turn it into a list, and make it similar when initing metrics
             metrics: Dict[str, List[Type[CustomMetric]]],
             device: Union[str, torch.device],
+            model: torch.nn.Module,
             debug: bool = True
     ):
         """
@@ -264,6 +266,7 @@ class Evaluator:
         :param device: torch device (just pass 'cpu' or 'cuda')
         :param debug: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
             Also, when true, we report some general metrics like avg num of candidates per document, etc.
+        :param model: the model instance so we can move us to cpu to do the compute for some instances.
         """
 
         self.predict_fn = predict_fn
@@ -271,6 +274,7 @@ class Evaluator:
         self.ds = self.ds_partial()
         self.debug = debug
         self.device = device
+        self._model_ = model
 
         self.tasks: List[Tasks] = [self.ds.tasks] if type(self.ds.tasks) is Tasks else self.ds.tasks
 
@@ -341,7 +345,15 @@ class Evaluator:
                 instance["prep_coref_eval"] = True
 
                 # Forward Pass
-                outputs = self.predict_fn(**instance)
+                try:
+                    outputs = self.predict_fn(**instance)
+                except RuntimeError:
+                    warnings.warn("Couldn't fit the instance in GPU mem. Let's move to CPU and try again.")
+                    # Move the model to cpu, move the instances to CPU
+                    instance = change_device(instance, 'cpu')
+                    self._model_.to('cpu')
+                    outputs = self.predict_fn(**instance)
+                    self._model_.to(self.device)
 
                 # Now we can pass these outputs out and collect the metrics
                 self.update(instance, outputs)

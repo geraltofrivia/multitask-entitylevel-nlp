@@ -455,7 +455,8 @@ def run(
         predict_fn=model.pred_with_labels,
         dataset_partial=dev_ds,
         metrics=metrics,
-        device=device
+        device=device,
+        model=model
     )
 
     # Saving stuff
