@@ -72,6 +72,11 @@ KNOWN_SPLITS = FancyDict({
 })
 
 
+def is_split_train(dataset: str, split: str):
+    """ Look at known splits and determine if KNOWN_SPLITS[dataset]['train'] == split """
+    return KNOWN_SPLITS[dataset]['train'] == split
+
+
 def unalias_split(split: str) -> str:
     for ds, ds_splits in KNOWN_SPLITS.items():
         for split_alias, split_vl in ds_splits.items():
@@ -91,9 +96,13 @@ DEFAULTS: dict = FancyDict({
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
+    'coref_dropout': 0.3,
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
+    'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
+    'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
+    # truncate the train set (never the dev set tho)
 
     # TODO: implement code to turn these two below to TRUE
     'ner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp

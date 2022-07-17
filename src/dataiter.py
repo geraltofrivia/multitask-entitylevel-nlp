@@ -21,7 +21,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split
+from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split, is_split_train
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
@@ -351,7 +351,6 @@ class MultiTaskDataIter(Dataset):
         # candidate_ends = generic_processed_stuff["candidate_ends"]
         gold_starts = coref_processed_stuff["gold_starts"]
         gold_ends = coref_processed_stuff["gold_ends"]
-        gold_cluster_ids = coref_processed_stuff["gold_label_values"]
 
         # replace gold labels with all ones.
         new_cluster_ids = torch.ones_like(gold_starts)
@@ -384,43 +383,34 @@ class MultiTaskDataIter(Dataset):
         :return: a dict which gets should be added to generic_processed_stuff
         """
 
+        if instance.coref.isempty:
+            raise NoValidAnnotations("Coref")
+
         """
-           # Label management:
+            # Label management:
                - change the label from being a word level index to a subword (bert friendly) level index
+            NOTE: the document may be truncated. 
+                So, if you don't find a particular span there, check if the document can be truncated (is train split)
+                If not, raise KeyError. If yes, ignore span.
         """
-        try:
-            gold_starts = torch.tensor([
-                word2subword_starts[span[0]]
-                for cluster in instance.coref.spans
-                for span in cluster
-            ], dtype=torch.long, device="cpu")  # n_gold
-            gold_ends = torch.tensor([
-                word2subword_ends[span[1] - 1]
-                for cluster in instance.coref.spans
-                for span in cluster
-            ], dtype=torch.long, device="cpu")  # n_gold
-        except KeyError as e:
-            raise KeyError(
-                f"No sw found for token #{e.args[0]}: {to_toks(instance.document)[e.args[0]]}"
-                f"in {instance.docname}."
-            )
+        gold_starts, gold_ends, gold_cluster_ids = [], [], []
+        for cluster_id, cluster in enumerate(instance.coref.spans):
+            for span in cluster:
 
-        # 1 is added at cluster ID ends because zero represents "no link/no cluster". I think...
-        gold_cluster_ids = (
-                torch.tensor([
-                    cluster_id
-                    for cluster_id, cluster in enumerate(instance.coref.spans)
-                    for _ in range(len(cluster))
-                ],
-                    dtype=torch.long, device="cpu") + 1
-        )  # n_gold
+                if span[0] < len(word2subword_starts) and span[1] < len(word2subword_ends):
+                    gold_starts.append(word2subword_starts[span[0]])
+                    gold_ends.append(word2subword_ends[span[1]])
+                    gold_cluster_ids.append(cluster_id)
+                else:
+                    if not is_split_train(dataset=self._src_, split=self._split_):
+                        raise KeyError(
+                            f"No sw found for span {span}: {to_toks(instance.document)[span[0]: span[1]]}"
+                            f"in {instance.docname}."
+                        )
 
-        # candidate_starts = generic_processed_stuff["candidate_starts"]
-        # candidate_ends = generic_processed_stuff["candidate_ends"]
-
-        # cluster_labels = self.get_candidate_labels_mangoes(
-        #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_cluster_ids
-        # )  # [n_cand, n_cand]
+        gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
+        gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
+        gold_cluster_ids = torch.tensor(gold_cluster_ids, dtype=torch.long, device='cpu')
 
         coref_specific = {  # Pred stuff
             # "gold_cluster_ids_on_candidates": cluster_labels,
@@ -438,36 +428,32 @@ class MultiTaskDataIter(Dataset):
             word2subword_starts: dict,
             word2subword_ends: dict,
     ) -> dict:
+
+        if instance.ner.isempty:
+            raise NoValidAnnotations("NER")
+
         """
             Work with generic processed stuff to also work with NER things
-            TODO: what do we need ?
-        :return:
-        """
-        gold_starts = torch.tensor(
-            [word2subword_starts[span[0]] for span in instance.ner.spans],
-            dtype=torch.long,
-            device="cpu",
-        )  # n_gold
-        gold_ends = torch.tensor(
-            [word2subword_ends[span[1] - 1] for span in instance.ner.spans],
-            dtype=torch.long,
-            device="cpu",
-        )
-        gold_labels = []
-        for tag in instance.ner.tags:
-            if tag not in self.ner_tag_dict:
-                raise AssertionError(f"Tag {tag} not found in Tag dict!")
-            gold_labels.append(self.ner_tag_dict[tag])
-        gold_labels = torch.tensor(
-            gold_labels, dtype=torch.long, device="cpu"
-        )
+z        """
+        gold_starts, gold_ends, gold_labels = [], [], []
+        for span, tag in zip(instance.ner.spans, instance.ner.tags):
 
-        # Now to superimpose this tensor on the candidate space.
-        # candidate_starts = generic_processed_stuff["candidate_starts"]
-        # candidate_ends = generic_processed_stuff["candidate_ends"]
-        # gold_labels = self.get_candidate_labels_mangoes(
-        #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_labels
-        # )  # [n_cand, n_cand]
+            if span[0] < len(word2subword_starts) and span[1] < len(word2subword_ends):
+                gold_starts.append(word2subword_starts[span[0]])
+                gold_ends.append(word2subword_ends[span[1]])
+                if tag not in self.ner_tag_dict:
+                    raise AssertionError(f"Tag {tag} not found in Tag dict!")
+                gold_labels.append(self.ner_tag_dict[tag])
+            else:
+                if not is_split_train(dataset=self._src_, split=self._split_):
+                    raise KeyError(
+                        f"No sw found for span {span}: {to_toks(instance.document)[span[0]: span[1]]}"
+                        f"in {instance.docname}."
+                    )
+
+        gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
+        gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
+        gold_labels = torch.tensor(gold_labels, dtype=torch.long, device='cpu')
 
         ner_specific = {
             "gold_starts": gold_starts,
@@ -506,15 +492,20 @@ class MultiTaskDataIter(Dataset):
         """
         tokens = to_toks(instance.document)
         tokens = self.handle_replacements(tokens)
+
+        """ 
+            Truncation logic: if we are working with the train set, truncate the documents. Not otherwise.
+        """
         tokenized = self.tokenizer(
             tokens,
             add_special_tokens=False,
             padding=True,
-            truncation=False,
+            truncation=is_split_train(dataset=self._src_, split=self._split_),
             pad_to_multiple_of=n_mlen,
             is_split_into_words=True,
             return_tensors="pt",
             return_length=True,
+            max_length=n_mlen * self.config.max_document_segments
         )
 
         n_subwords = tokenized.attention_mask.sum().item()

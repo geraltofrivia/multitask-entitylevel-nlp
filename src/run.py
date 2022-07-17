@@ -249,6 +249,8 @@ def get_dataiter_partials(
 @click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
               help="If true, dataiter ignores those candidates which have verbs in them "
                    "IF the doc has more than 10k candidates.")
+@click.option('--max-document-segments', '-mds', type=int, default=DEFAULTS['max_document_segments'],
+              help="Specify the num of segments (n*512 word pieces) to keep. Only holds for train split.")
 @click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
 @click.option('--resume-dir', default=-1, type=int,
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
@@ -291,6 +293,7 @@ def run(
         sampling_ratio: (float, float) = (1.0, 1.0),
         learning_rate: float = DEFAULTS.trainer.learning_rate,
         max_span_width: int = DEFAULTS.max_span_width,
+        max_document_segments: int = DEFAULTS.max_document_segments,
         coref_loss_mean: bool = DEFAULTS.coref_loss_mean,
         coref_higher_order: int = DEFAULTS.coref_higher_order,
 ):
@@ -333,12 +336,11 @@ def run(
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
     config = SerializedBertConfig(dir_config)
     config.max_span_width = max_span_width
-    config.coref_dropout = 0.3
+    config.max_document_segments = max_document_segments
     config.metadata_feature_size = 20
     config.unary_hdim = 3000
     config.binary_hdim = 2000
     config.top_span_ratio = 0.4
-    config.max_top_antecedents = 50
     config.device = device
     config.trim = trim
     config.debug = debug
