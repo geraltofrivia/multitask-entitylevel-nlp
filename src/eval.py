@@ -255,7 +255,7 @@ class Evaluator:
             # TODO: turn it into a list, and make it similar when initing metrics
             metrics: Dict[str, List[Type[CustomMetric]]],
             device: Union[str, torch.device],
-            model: torch.nn.Module,
+            model: torch.nn.Module = None,
             debug: bool = True
     ):
         """
@@ -347,11 +347,13 @@ class Evaluator:
                 # Forward Pass
                 try:
                     outputs = self.predict_fn(**instance)
-                except RuntimeError:
+                except RuntimeError as e:
+                    if self._model_ is None:
+                        raise e
+                    self._model_.to('cpu')
                     warnings.warn("Couldn't fit the instance in GPU mem. Let's move to CPU and try again.")
                     # Move the model to cpu, move the instances to CPU
                     instance = change_device(instance, 'cpu')
-                    self._model_.to('cpu')
                     outputs = self.predict_fn(**instance)
                     self._model_.to(self.device)
 
