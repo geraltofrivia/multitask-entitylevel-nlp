@@ -25,7 +25,7 @@ from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split,
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
-from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig, load_speaker_tag_dict
+from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -44,6 +44,7 @@ class MultiTaskDataIter(Dataset):
             tasks: Tasks,
             config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
+            allow_speaker_ids: bool = True,
             shuffle: bool = False,
             rebuild_cache: bool = False
     ):
@@ -58,6 +59,8 @@ class MultiTaskDataIter(Dataset):
         :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
         :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
         :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
+        :param allow_speaker_ids: a bool which if turned to False will hide the speaker ID from __getitem__.
+            in an ideal world, this should prevent the model from doing anything with speakers.
         """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
@@ -67,14 +70,13 @@ class MultiTaskDataIter(Dataset):
         self.tokenizer = tokenizer
         self.config = config
         self.uncased = config.uncased
+        self._flag_allow_speaker_ids = allow_speaker_ids
 
         self.loss_scales = torch.tensor(tasks.loss_scales, dtype=torch.float)
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
-
-        self.speaker_tag_dict: Dict[str, str] = load_speaker_tag_dict(LOC.manual, self._src_)
 
         if 'ner' in self.tasks:
             # We need a tag dictionary
@@ -226,8 +228,11 @@ class MultiTaskDataIter(Dataset):
         obj = self.data[item]
 
         # Append relevant things to it
-        obj['tasks']
-        return self.data[item]
+        if not self._flag_allow_speaker_ids:
+            # And this automatically makes it so the model doesn't have to worry about it
+            obj['speaker_ids'] = None
+
+        return obj
 
     def __setitem__(self, i, item):
         self.data[i] = item

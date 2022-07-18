@@ -509,9 +509,10 @@ class Tasks:
     use_class_weights: List[bool]
     dataset: str
 
-    n_speakers: Optional[int] = field(default_factory=int)
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
+    # If > 0, that indicates that we should use speakers. So, if you manually set it to -1, we ignore speaker values
+    n_speakers: Optional[int] = field(default_factory=int)
 
     @classmethod
     def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], ignore_speakers: bool = False):

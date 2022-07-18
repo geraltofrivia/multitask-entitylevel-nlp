@@ -70,9 +70,7 @@ def load_speaker_tag_dict(parentdir: Path, src: str) -> Optional[Dict[str, str]]
     if not loc.exists():
         return None
     with loc.open('r') as f:
-        tagdict = json.load(f)
-
-    return tagdict
+        return json.load(f)
 
 
 @dataclass
@@ -312,7 +310,8 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'n_classes_ner',
         'trainer',
         'task',
-        'task_2'
+        'task_2',
+        'ignore_speakers'
     ]
 
     # If old is a dict, we don't need to pull

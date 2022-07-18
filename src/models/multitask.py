@@ -101,7 +101,11 @@ class MangoesMTL(BertPreTrainedModel):
         self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.distance_projection = nn.Linear(coref_metadata_feature_size, 1)
-        self.same_speaker_embeddings = nn.Embedding(num_embeddings=2, embedding_dim=coref_metadata_feature_size)
+        self.same_speaker_embeddings = nn.ModuleDict({
+            task.dataset: nn.Embedding(num_embeddings=task.n_speakers, embedding_dim=coref_metadata_feature_size)
+            for task in [task_1, task_2] if task.n_speakers > 0
+        })
+
         self.span_width_embeddings = nn.Embedding(num_embeddings=max_span_width,
                                                   embedding_dim=coref_metadata_feature_size)
         self.span_width_prior_embeddings = nn.Embedding(num_embeddings=max_span_width,

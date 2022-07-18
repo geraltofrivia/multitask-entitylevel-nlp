@@ -185,6 +185,7 @@ def get_dataiter_partials(
         tasks=tasks,
         split=KNOWN_SPLITS[tasks.dataset].train,
         tokenizer=tokenizer,
+        allow_speaker_ids=not config.ignore_speakers
     )
     dev_ds = partial(
         MultiTaskDataIter,
@@ -193,6 +194,7 @@ def get_dataiter_partials(
         tasks=tasks,
         split=KNOWN_SPLITS[tasks.dataset].dev,
         tokenizer=tokenizer,
+        allow_speaker_ids=not config.ignore_speakers
     )
 
     return train_ds, dev_ds
@@ -251,6 +253,7 @@ def get_dataiter_partials(
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
               help='Number of times we run the higher order loop. ')
+@click.option('--ignore-speakers', is_flag=True, help="If True, we ignore speaker ID info even if we have access to it")
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
@@ -276,6 +279,7 @@ def run(
         wandb_comment: str = '',
         wandb_name: str = None,
         filter_candidates_pos: bool = False,
+        ignore_speakers: bool = False,
         save: bool = False,
         resume_dir: int = -1,
         use_pretrained_model: str = None,
@@ -321,6 +325,10 @@ def run(
     tasks = Tasks.parse(dataset, tuples=tasks)
     tasks_2 = Tasks.parse(dataset_2, tuples=tasks_2)
 
+    if ignore_speakers:
+        tasks.n_speakers = -1
+        tasks_2.n_speakers = -1
+
     dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
@@ -343,6 +351,7 @@ def run(
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
     config.coref_higher_order = coref_higher_order
+    config.ignore_speakers = ignore_speakers
     config.vocab_size = tokenizer.get_vocab().__len__()
 
     # Make a trainer dict and also
