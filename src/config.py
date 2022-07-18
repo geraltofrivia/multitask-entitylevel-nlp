@@ -70,6 +70,7 @@ KNOWN_SPLITS = FancyDict({
         'dev': 'dev',
     })
 })
+KNOWN_HAS_SPEAKERS = [key for key in KNOWN_SPLITS.keys() if key.startswith('codicrac')]
 
 
 def is_split_train(dataset: str, split: str):

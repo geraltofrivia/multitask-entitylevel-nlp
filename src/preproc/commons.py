@@ -1,9 +1,10 @@
 import json
 import pickle
-from spacy import tokens
-from pathlib import Path
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Union, List, Dict, Tuple, Iterable, Optional
+
+from spacy import tokens
 
 # Local imports
 try:
@@ -33,6 +34,8 @@ class GenericParser(ABC):
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
+
+        self._speaker_vocab_ = {}
 
     @abstractmethod
     def parse(self, split_nm: Union[Path, str]):

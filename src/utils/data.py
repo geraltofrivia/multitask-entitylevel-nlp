@@ -1,15 +1,15 @@
 """
     Contain multiple dataclasses and types to control the chaos that is a large python codebase.
 """
-
 import copy
+import json
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import List, Optional, Tuple
 
-from config import KNOWN_TASKS, LOSS_SCALES
-from utils.exceptions import UnknownTaskException, BadParameters
-from utils.misc import argsort
+from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
+from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
+from utils.misc import argsort, load_speaker_tag_dict
 from utils.nlp import to_toks
 
 
@@ -509,11 +509,12 @@ class Tasks:
     use_class_weights: List[bool]
     dataset: str
 
+    n_speakers: Optional[int] = field(default_factory=int)
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
 
     @classmethod
-    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]]):
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], ignore_speakers: bool = False):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(
@@ -547,12 +548,27 @@ class Tasks:
 
         n_classes_ner = -1
         n_classes_pruner = -1
+        n_speakers = -1
 
-        return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights,
-                   dataset=dataset, n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner)
+        return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights, dataset=dataset,
+                   n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_speakers=n_speakers)
 
     def __post_init__(self, *args, **kwargs):
         self.sort()
+
+        """ 
+            Now for ease of use things
+            1. If NER is in tasks, we try and pull the NER n_classes
+            2. If this dataset is known to have speakers, we also pull those
+        """
+        if 'ner' in self.names:
+            self.n_classes_ner = self._get_n_classes_(task='ner', dataset=self.dataset)
+
+        if 'pruner' in self.names:
+            self.n_classes_pruner = 2
+
+        if self.dataset in KNOWN_HAS_SPEAKERS:
+            self.n_speakers = self._get_n_speakers_(dataset=self.dataset)
 
     def sort(self):
         """ Rearranges all artefacts to sort them in the right order """
@@ -580,6 +596,23 @@ class Tasks:
 
     def pruner_unweighted(self) -> bool:
         return self._task_unweighted_('pruner')
+
+    @staticmethod
+    def _get_n_classes_(task: str, dataset: str) -> int:
+        try:
+            with (LOC.manual / f"{task}_{dataset}_tag_dict.json").open("r") as f:
+                ner_tag_dict = json.load(f)
+                return len(ner_tag_dict)
+        except FileNotFoundError:
+            # The tag dictionary does not exist. Report and quit.
+            raise LabelDictNotFound(f"No label dict found for ner task for {dataset}: {task}")
+
+    @staticmethod
+    def _get_n_speakers_(dataset: str) -> int:
+        speaker_tag_dict = load_speaker_tag_dict(LOC.manual, dataset)
+        if speaker_tag_dict is None:
+            raise LabelDictNotFound(f"No label dict of speakers found for {dataset}")
+        return len(speaker_tag_dict)
 
     @staticmethod
     def _parse_loss_scales_(names: List[str], scales: List[float]) -> List[float]:

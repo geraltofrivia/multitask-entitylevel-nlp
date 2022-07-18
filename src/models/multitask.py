@@ -53,6 +53,7 @@ class MangoesMTL(BertPreTrainedModel):
             task_2: dict,
             bias_in_last_layers: bool = False,
             skip_instance_after_nspan: int = -1,
+            coref_num_speakers: int = 2,
             *args, **kwargs
     ):
 
@@ -100,7 +101,7 @@ class MangoesMTL(BertPreTrainedModel):
         self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.distance_projection = nn.Linear(coref_metadata_feature_size, 1)
-        # self.same_speaker_embeddings = nn.Embedding(num_embeddings=2, embedding_dim=coref_metadata_feature_size)
+        self.same_speaker_embeddings = nn.Embedding(num_embeddings=2, embedding_dim=coref_metadata_feature_size)
         self.span_width_embeddings = nn.Embedding(num_embeddings=max_span_width,
                                                   embedding_dim=coref_metadata_feature_size)
         self.span_width_prior_embeddings = nn.Embedding(num_embeddings=max_span_width,
@@ -224,7 +225,7 @@ class MangoesMTL(BertPreTrainedModel):
         return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
 
     def get_slow_antecedent_scores(self, top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets,
-                                   segment_distance):
+                                   top_span_speaker_ids, segment_distance):
         """
         Compute slow antecedent scores
 
@@ -249,15 +250,15 @@ class MangoesMTL(BertPreTrainedModel):
         num_cand, num_ant = top_antecedents.shape
         feature_emb_list = []
 
-        # if self.use_metadata:
-        #     top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
-        #     # [top_cand, top_ant]
-        #     same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
-        #     speaker_pair_emb = self.same_speaker_embeddings(
-        #         torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
-        #     feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
-        #     genre_embs = genre_emb.view(1, 1, -1).repeat(num_cand, num_ant, 1)  # [top_cand, top_ant, feature_size]
-        #     feature_emb_list.append(genre_embs)
+        if top_span_speaker_ids is not None:
+            top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
+            # [top_cand, top_ant]
+            same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
+            speaker_pair_emb = self.same_speaker_embeddings(
+                torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
+            feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
+            # genre_embs = genre_emb.view(1, 1, -1).repeat(num_cand, num_ant, 1)  # [top_cand, top_ant, feature_size]
+            # feature_emb_list.append(genre_embs)
 
         # span distance
         antecedent_distance_buckets = self.bucket_distance(top_antecedent_offsets).to(
@@ -519,9 +520,12 @@ class MangoesMTL(BertPreTrainedModel):
             sentence_map: List[int],
             tasks: Iterable[str],
             domain: str,
+            speaker_ids: Optional[torch.Tensor] = None,
             *args,
             **kwargs
     ):
+        # TODO: make docstrings for this function
+
         device = input_ids.device
         bert_outputs = self.bert(input_ids, attention_mask)
 
@@ -586,8 +590,16 @@ class MangoesMTL(BertPreTrainedModel):
                                                      num_top_mentions)
             pruned_span_starts = candidate_starts[pruned_span_indices]  # [top_cand]
             pruned_span_ends = candidate_ends[pruned_span_indices]  # [top_cand]
-            top_span_emb = span_emb[pruned_span_indices]  # [top_cand, span_emb]
-            top_span_mention_scores = pruned_candidate_mention_scores[pruned_span_indices]  # [top_cand]
+            pruned_span_emb = span_emb[pruned_span_indices]  # [top_cand, span_emb]
+            pruned_span_mention_scores = pruned_candidate_mention_scores[pruned_span_indices]  # [top_cand]
+
+            """Using Speaker IDs (if available)"""
+            if speaker_ids is not None:
+                speaker_ids = torch.masked_select(speaker_ids.view(num_seg * max_seg_len),
+                                                  attention_mask.bool().view(-1))
+                pruned_span_speaker_ids = speaker_ids[pruned_span_starts]
+            else:
+                pruned_span_speaker_ids = None
 
             # # COREF Specific things
             # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
@@ -597,7 +609,7 @@ class MangoesMTL(BertPreTrainedModel):
             # course to fine pruning
             dummy_scores = torch.zeros([num_top_mentions, 1], device=pruned_span_indices.device)  # [top_cand, 1]
             top_antecedents, top_antecedents_mask, top_ante_fast_scores, top_antecedent_offsets = \
-                self.coarse_to_fine_pruning(top_span_emb, top_span_mention_scores, num_top_antecedents)
+                self.coarse_to_fine_pruning(pruned_span_emb, pruned_span_mention_scores, num_top_antecedents)
 
             num_segments = input_ids.shape[0]
             segment_length = input_ids.shape[1]
@@ -611,12 +623,13 @@ class MangoesMTL(BertPreTrainedModel):
 
             # calculate final slow scores
             for i in range(self.coref_depth):
-                top_ante_emb = top_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
+                top_ante_emb = pruned_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
                 try:
-                    top_ante_scores = top_ante_fast_scores + self.get_slow_antecedent_scores(top_span_emb,
+                    top_ante_scores = top_ante_fast_scores + self.get_slow_antecedent_scores(pruned_span_emb,
                                                                                              top_antecedents,
                                                                                              top_ante_emb,
                                                                                              top_antecedent_offsets,
+                                                                                             pruned_span_speaker_ids,
                                                                                              segment_distance)
                 except RuntimeError as e:
                     # This usually happens due to out of mem errors
@@ -627,11 +640,14 @@ class MangoesMTL(BertPreTrainedModel):
                 top_ante_weights = F.softmax(
                     torch.cat([dummy_scores, top_ante_scores], 1), dim=-1
                 )  # [top_cand, top_ant + 1]
-                top_ante_emb = torch.cat([top_span_emb.unsqueeze(1), top_ante_emb], 1)  # [top_cand, top_ant + 1, emb]
+                top_ante_emb = torch.cat([pruned_span_emb.unsqueeze(1), top_ante_emb],
+                                         1)  # [top_cand, top_ant + 1, emb]
                 attended_span_emb = torch.sum(top_ante_weights.unsqueeze(2) * top_ante_emb, 1)  # [top_cand, emb]
                 gate_vectors = torch.sigmoid(
-                    self.slow_antecedent_projection(torch.cat([top_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
-                top_span_emb = gate_vectors * attended_span_emb + (1 - gate_vectors) * top_span_emb  # [top_cand, emb]
+                    self.slow_antecedent_projection(
+                        torch.cat([pruned_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
+                pruned_span_emb = gate_vectors * attended_span_emb + (
+                            1 - gate_vectors) * pruned_span_emb  # [top_cand, emb]
 
             # noinspection PyUnboundLocalVariable
             top_ante_scores = torch.cat([dummy_scores, top_ante_scores], 1)
@@ -682,6 +698,7 @@ class MangoesMTL(BertPreTrainedModel):
             n_subwords: int,
             tasks: Iterable[str],
             domain: str,
+            speaker_ids: Optional[torch.Tensor] = None,
             coref: dict = None,
             ner: dict = None,
             pruner: dict = None,
@@ -699,6 +716,7 @@ class MangoesMTL(BertPreTrainedModel):
             n_words=n_words,
             domain=domain,
             tasks=tasks,
+            speaker_ids=speaker_ids,
             n_subwords=n_subwords,
             coref_gold_starts=coref.get('gold_starts', None),
             coref_gold_ends=coref.get('gold_ends', None),

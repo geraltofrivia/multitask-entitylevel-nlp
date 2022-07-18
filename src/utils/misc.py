@@ -1,7 +1,7 @@
 import json
 from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import List, Union, Optional, Dict
 
 import numpy as np
 import torch
@@ -59,6 +59,20 @@ def weighted_addition_losses(losses, tasks, scales):
     stacked = torch.hstack([losses[task_nm] for task_nm in tasks])
     weighted = stacked * scales
     return torch.sum(weighted)
+
+
+def load_speaker_tag_dict(parentdir: Path, src: str) -> Optional[Dict[str, str]]:
+    """
+        If a dict containing self._src_ is in parentdir for speakers, pull it else return None
+        PS: Parentdir should be config.LOCATIONS.manual
+    """
+    loc = parentdir / f'speaker_{src}_tag_dict.json'
+    if not loc.exists():
+        return None
+    with loc.open('r') as f:
+        tagdict = json.load(f)
+
+    return tagdict
 
 
 @dataclass

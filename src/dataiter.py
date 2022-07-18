@@ -25,7 +25,7 @@ from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split,
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
-from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig
+from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig, load_speaker_tag_dict
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -73,6 +73,8 @@ class MultiTaskDataIter(Dataset):
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
+
+        self.speaker_tag_dict: Dict[str, str] = load_speaker_tag_dict(LOC.manual, self._src_)
 
         if 'ner' in self.tasks:
             # We need a tag dictionary
@@ -141,6 +143,7 @@ class MultiTaskDataIter(Dataset):
             return int(n * k - (k * k * 0.5) + (k * 0.5))
 
         # Create a flat (long, long) list of all labels
+        # print(self.data[0][task]['gold_labels'])
         # print(self.data[0][task]['gold_labels'])
         y = torch.cat([datum[task]['gold_label_values'] for datum in self.data]).to('cpu')
         zero_spans = sum(approx_n_spans(datum['n_subwords'], self.config.max_span_width) for datum in self.data) - len(

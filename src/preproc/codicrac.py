@@ -3,6 +3,7 @@
     This is to say that we start with the raw files and turn them into Document (utils/data) instances.
     One object corresponds to one document.
 """
+import json
 import re
 from pathlib import Path
 from typing import Union, List, Dict, Optional
@@ -48,19 +49,20 @@ class CODICRACParser(GenericParser):
             ignore_empty_documents: bool = False):
 
         # Sanity add suffixes as per raw_dir
+        # NOTE: in possible suffixes, order matters. So **test set should be the last one**.
         self.dataset = raw_dir.name
         self.crac_src = self.dataset.split('-')[1]
         possible_suffixes = {
             'codicrac-ami': ['2022_AMI_train_v0.CONLLUA', '2022_AMI_dev_v0.CONLLUA'],
-            'codicrac-persuasion': ['Persuasion_dev.2022.CONLLUA', 'Persuasion_train.2022.CONLLUA'],
-            'codicrac-light': ['light_dev.2022.CONLLUA', 'light_train.2022.CONLLUA'],
+            'codicrac-persuasion': ['Persuasion_train.2022.CONLLUA', 'Persuasion_dev.2022.CONLLUA'],
+            'codicrac-light': ['light_train.2022.CONLLUA', 'light_dev.2022.CONLLUA'],
             'codicrac-switchboard': ['Switchboard_train.2022.CONLLUA', 'Switchboard_dev.2022.CONLLUA'],
             'codicrac-arrau-t91': ['Trains_91.CONLL'],
             'codicrac-arrau-t93': ['Trains_93.CONLL'],
             'codicrac-arrau-rst': [
+                'RST_DTreeBank_train.CONLL',
                 'RST_DTreeBank_dev.CONLL',
                 'RST_DTreeBank_test.CONLL',
-                'RST_DTreeBank_train.CONLL'
             ],
             'codicrac-arrau-pear': ['Pear_Stories.CONLL'],
             'codicrac-arrau-gnome': ['Gnome_Subset2.CONLL'],
@@ -104,6 +106,9 @@ class CODICRACParser(GenericParser):
                 self.write_to_disk(suffix='train', instances=outputs)
             else:
                 raise ValueError(f"RST filename: {split} is unknown.")
+
+        # Dump speaker IDs to disk as well.
+        self.create_label_dict()
 
     @staticmethod
     def _parse_annotation_(annotation: str) -> Dict[str, str]:
@@ -299,7 +304,7 @@ class CODICRACParser(GenericParser):
 
         return outputs
 
-    def finalise(self, document: Document, spacy_doc: tokens.Doc) -> Document:
+    def _finalise_instance_(self, document: Document, spacy_doc: tokens.Doc) -> Document:
         """ Find span heads... populate words in different annotations etc etc. """
         spans = document.get_all_spans()
         span_heads = self.get_span_heads(spacy_doc, spans=spans)
@@ -321,6 +326,8 @@ class CODICRACParser(GenericParser):
 
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
         """ where actual preproc happens"""
+
+        _is_test_split = '_test' in split_nm
 
         outputs: List[Document] = []
         filedir: Path = self.dir / split_nm
@@ -344,8 +351,26 @@ class CODICRACParser(GenericParser):
         documents: Dict[str, List[List[str]]] = {}
         documents_: Dict[str, List[List[Dict[str, str]]]] = {}
         documents_speakers: Dict[str, List[int]] = {}
-        known_speakers: Dict[str, int] = {}
-        current_speaker = 100 if self.crac_src == 'light' else -1  # light begins with 'setting' which is new speaker
+
+        # Init the first speaker in the case of light with an actual value
+        if self.crac_src == 'light':
+            # light begins with 'setting' which is is a different speaker than the rest
+            try:
+                current_speaker = self._speaker_vocab_['init_speaker']
+            except KeyError:
+                if _is_test_split:
+                    raise KeyError(f"Speaker vocab does not have an instance of init speaker. Is it empty?\n"
+                                   f"\n{self._speaker_vocab_}\n"
+                                   f"If so, you might have passed the test split before other splits."
+                                   f"\nRectify that in possible_suffixes var in __init__ of CODICRACParser class."
+                                   f"Test splits should always be at the end."
+                                   f"If instead, your dataset does not have any other split but the test one..."
+                                   f"\n\t well, contact the repo maintainer I guess.")
+                else:
+                    self._speaker_vocab_['init_speaker'] = len(self._speaker_vocab_)
+                    current_speaker = self._speaker_vocab_['init_speaker']
+        else:
+            current_speaker = -1
 
         raw_document: List[List[str]] = []
         document_speakers: List[int] = []
@@ -387,10 +412,10 @@ class CODICRACParser(GenericParser):
                 # Meta data line.
                 # Example: '# sent_id = D93_9_1-1\n'
 
-                if self.crac_src in ['light', 'persuasion', 'ami'] and 'speaker' in tokens:
+                if self.crac_src in ['light', 'persuasion', 'ami', 'switchboard'] and 'speaker' in tokens:
                     # A special metadata line: speaker information
                     # E.g. "# speaker = orc"
-                    current_speaker = known_speakers.setdefault(tokens[-1], len(known_speakers))
+                    current_speaker = self._speaker_vocab_.setdefault(tokens[-1], len(self._speaker_vocab_))
 
                 if 'newdoc' in tokens:
                     # We have started a document. Dump the old one and store the key for the new one
@@ -402,7 +427,27 @@ class CODICRACParser(GenericParser):
 
                     raw_document, document_, document_speakers = [], [], []
                     docname = tokens[-1]
-                    current_speaker = 10
+
+                    # Init the first speaker in the case of light with an actual value
+                    if self.crac_src == 'light':
+                        # light begins with 'setting' which is is a different speaker than the rest
+                        try:
+                            current_speaker = self._speaker_vocab_['init_speaker']
+                        except KeyError:
+                            if _is_test_split:
+                                raise KeyError(
+                                    f"Speaker vocab does not have an instance of init speaker. Is it empty?\n"
+                                    f"\n{self._speaker_vocab_}\n"
+                                    f"If so, you might have passed the test split before other splits."
+                                    f"\nRectify that in possible_suffixes var in __init__ of CODICRACParser class."
+                                    f"Test splits should always be at the end."
+                                    f"If instead, your dataset does not have any other split but the test one..."
+                                    f"\n\t well, contact the repo maintainer I guess.")
+                            else:
+                                self._speaker_vocab_['init_speaker'] = len(self._speaker_vocab_)
+                                current_speaker = self._speaker_vocab_['init_speaker']
+                    else:
+                        current_speaker = -1
 
                 last_state = 1
 
@@ -519,11 +564,21 @@ class CODICRACParser(GenericParser):
             )
 
             # Now to finalise the instance
-            document = self.finalise(document, spacy_doc=spacy_doc)
+            document = self._finalise_instance_(document, spacy_doc=spacy_doc)
 
             outputs.append(document)
 
         return outputs
+
+    def create_label_dict(self):
+        """ We assume that every split is processed at the same time.
+            So now we go out and create a label dict for speakers as well."""
+
+        write_dir = LOC.manual / f'speaker_{self.dataset}_tag_dict.json'
+
+        with write_dir.open('w+', encoding='utf8') as f:
+            json.dump(self._speaker_vocab_, f)
+            print(f"Wrote a dict of {len(self._speaker_vocab_)} to {str(write_dir)}")
 
 
 @click.command()

@@ -22,7 +22,7 @@ from models.multitask import MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG
-from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
+from utils.exceptions import ImproperDumpDir, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
     PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
 
@@ -137,16 +137,6 @@ def get_saved_wandb_id(loc: Path):
         config = json.load(f)
 
     return config['wandbid']
-
-
-def get_n_classes(task: str, dataset: str) -> int:
-    try:
-        with (LOC.manual / f"{task}_{dataset}_tag_dict.json").open("r") as f:
-            ner_tag_dict = json.load(f)
-            return len(ner_tag_dict)
-    except FileNotFoundError:
-        # The tag dictionary does not exist. Report and quit.
-        raise LabelDictNotFound(f"No label dict found for ner task for {dataset}: {task}")
 
 
 def get_save_parent_dir(parentdir: Path, tasks: Tasks, tasks_2: Optional[Tasks],
@@ -366,17 +356,20 @@ def run(
 
     config = merge_configs(old=DEFAULTS, new=config)
 
-    # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
-    if 'ner' in tasks:
-        n_classes_ner = get_n_classes(task='ner', dataset=dataset)
-        tasks.n_classes_ner = n_classes_ner
-    if 'ner' in tasks_2:
-        n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
-        tasks_2.n_classes_ner = n_classes_ner
-
-    n_classes_pruner = 2
-    tasks.n_classes_pruner = n_classes_pruner
-    tasks_2.n_classes_pruner = n_classes_pruner
+    # """ Pulling some manual information from disk """
+    # # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
+    # if 'ner' in tasks:
+    #     n_classes_ner = get_n_classes(task='ner', dataset=dataset)
+    #     tasks.n_classes_ner = n_classes_ner
+    # if 'ner' in tasks_2:
+    #     n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
+    #     tasks_2.n_classes_ner = n_classes_ner
+    # if dataset in KNOWN_HAS_SPEAKERS:
+    #
+    #
+    # n_classes_pruner = 2
+    # tasks.n_classes_pruner = n_classes_pruner
+    # tasks_2.n_classes_pruner = n_classes_pruner
 
     # Log the tasks var into config as well
     config.task_1 = tasks
@@ -461,6 +454,8 @@ def run(
 
     # Saving stuff
     if save:
+
+        # TODO: check if we want to resume. If so, put the resume dir here instead after checking for consistency etc
         # raise NotImplementedError
         savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config, tasks_2=tasks_2)
         savedir.mkdir(parents=True, exist_ok=True)
