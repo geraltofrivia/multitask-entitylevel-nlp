@@ -245,6 +245,22 @@ class MultiTaskDataIter(Dataset):
         return [self.replacements.get(tok, tok) for tok in tokens]
 
     @staticmethod
+    def _get_speaker_ids_(attention_mask, sentid_for_subword, speakers_list: List[int]):
+        """ Extrapolate the speakers across tokens. use attnmask for padding. Use sentid for sentences per swtoken """
+        if len(speakers_list) == 0:
+            return None
+
+        # n_subwords,
+        speakerid_for_subword = torch.tensor(speakers_list, dtype=torch.long, device='cpu')[sentid_for_subword]
+
+        # Pad it out to attention mask
+        # 1, len
+        padded = torch.zeros_like(attention_mask) - 1
+        padded[0, :speakerid_for_subword.shape[0]] = speakerid_for_subword
+
+        return padded
+
+    @staticmethod
     def get_candidate_labels(
             candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels
     ):
@@ -534,6 +550,8 @@ z        """
             dtype=torch.long,
             device="cpu",
         )
+        speaker_ids = self._get_speaker_ids_(tokenized.attention_mask, sentid_for_subword, instance.speakers)
+
         # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
         #                                          for word_id in range(len(word2subword_starts))],
         #                                         dtype=torch.long, device="cpu")
@@ -550,6 +568,7 @@ z        """
         input_ids = tokenized.input_ids.reshape((-1, n_mlen))  # n_seq, m_len
         token_type_ids = tokenized.token_type_ids.reshape((-1, n_mlen))  # n_seq, m_len
         attention_mask = tokenized.attention_mask.reshape((-1, n_mlen))
+        speaker_ids = speaker_ids.reshape((-1, n_mlen)) if speaker_ids is not None else speaker_ids
 
         """
             Span Iteration: find all valid contiguous sequences of inputs. 
@@ -631,6 +650,7 @@ z        """
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
             "word_map": wordid_for_subword,
+            "speaker_ids": speaker_ids,
             "sentence_map": sentid_for_subword,
             "n_words": n_words,
             "n_subwords": n_subwords,
