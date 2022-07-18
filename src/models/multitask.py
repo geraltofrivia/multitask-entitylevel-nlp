@@ -745,8 +745,8 @@ class MangoesMTL(BertPreTrainedModel):
                     f"Found nan in loss. Here are some details - \n\tLogits shape: {logits_after_pruning.shape}, " \
                     f"\n\tLabels shape: {labels_after_pruning.shape}, " \
                     f"\n\tNonZero lbls: {labels_after_pruning[labels_after_pruning != 0].shape}"
-            except AssertionError:
-                print('potato')
+            except AssertionError as e:
+                raise e
 
             outputs["loss"]["pruner"] = pruner_loss
             outputs["pruner"] = {"logits": logits_after_pruning, "labels": labels_after_pruning}

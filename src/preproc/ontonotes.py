@@ -10,16 +10,16 @@ Specifically, we want
 The dataclass is going to be document based. That is, one instance is one document.
 """
 import re
-import json
+import warnings
+from copy import deepcopy
+from pathlib import Path
+from typing import Iterable, Union, List
+
 import click
 import spacy
-import warnings
 import unidecode
-from pathlib import Path
-from copy import deepcopy
-from tqdm.auto import tqdm
 from spacy.tokens import Token
-from typing import Iterable, Union, List
+from tqdm.auto import tqdm
 
 # Local imports
 try:
@@ -151,9 +151,9 @@ class CoNLLOntoNotesParser(GenericParser):
                     for span in cluster:
                         clusters_[cluster_id].append(flat_doc[span[0]: span[1]])
 
-                # debug
-                if clusters[i]:
-                    print('potato')
+                # # debug
+                # if clusters[i]:
+                #     print('potato')
 
                 # Make a coref clusters object
                 coref = Clusters(spans=list(clusters[i]))

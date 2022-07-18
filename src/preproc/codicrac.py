@@ -293,7 +293,7 @@ class CODICRACParser(GenericParser):
                     antecedent_markable = doc_markables[antecedent_markable_id]
                 except KeyError:
                     # No markable antecedent was found. Investigate why
-                    print('potato')
+                    print('No markable antecedent was found for bridging. Figure out why. ')
                     raise KeyError
                 outputs[docname].append(antecedent_markable)
 
