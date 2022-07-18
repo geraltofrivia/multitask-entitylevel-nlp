@@ -438,11 +438,11 @@ def run(
         if 'ner' in task:
             metrics[task.dataset] += [NERAcc,
                                       partial(NERSpanRecognitionMicro, device=config.device),
-                                      partial(NERSpanRecognitionMacro, n_classes=tasks.n_classes_ner,
+                                      partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner,
                                               device=config.device)]
         if 'pruner' in task:
             metrics[task.dataset] += [partial(PrunerPRMicro, device=config.device),
-                                      partial(PrunerPRMacro, n_classes=tasks.n_classes_pruner, device=config.device)]
+                                      partial(PrunerPRMacro, n_classes=task.n_classes_pruner, device=config.device)]
         if 'coref' in task:
             metrics[task.dataset] += [CorefBCubed, CorefMUC, CorefCeafe]
 
