@@ -229,7 +229,7 @@ class MangoesMTL(BertPreTrainedModel):
         return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
 
     def get_slow_antecedent_scores(self, top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets,
-                                   top_span_speaker_ids, segment_distance):
+                                   top_span_speaker_ids, segment_distance, domain: str):
         """
         Compute slow antecedent scores
 
@@ -258,7 +258,7 @@ class MangoesMTL(BertPreTrainedModel):
             top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
             # [top_cand, top_ant]
             same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
-            speaker_pair_emb = self.same_speaker_embeddings(
+            speaker_pair_emb = self.same_speaker_embeddings[domain](
                 torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
             feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
             # genre_embs = genre_emb.view(1, 1, -1).repeat(num_cand, num_ant, 1)  # [top_cand, top_ant, feature_size]
@@ -634,7 +634,8 @@ class MangoesMTL(BertPreTrainedModel):
                                                                                              top_ante_emb,
                                                                                              top_antecedent_offsets,
                                                                                              pruned_span_speaker_ids,
-                                                                                             segment_distance)
+                                                                                             segment_distance,
+                                                                                             domain=domain)
                 except RuntimeError as e:
                     # This usually happens due to out of mem errors
                     print(f"Input IDS: {input_ids.shape}")
