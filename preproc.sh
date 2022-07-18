@@ -1,3 +1,5 @@
+rm data/parsed/*/*/*
+
 python src/preproc/ontonotes.py -s train
 python src/preproc/ontonotes.py -s test
 python src/preproc/ontonotes.py -s development

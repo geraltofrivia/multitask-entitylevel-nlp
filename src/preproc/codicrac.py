@@ -325,7 +325,8 @@ class CODICRACParser(GenericParser):
         outputs: List[Document] = []
         filedir: Path = self.dir / split_nm
 
-        assert filedir.exists(), f"File {filedir} not found!"
+        if not filedir.exists():
+            raise FileNotFoundError(f"File {filedir} not found!")
 
         # Lets read the file
         with filedir.open('r') as f:
@@ -344,7 +345,7 @@ class CODICRACParser(GenericParser):
         documents_: Dict[str, List[List[Dict[str, str]]]] = {}
         documents_speakers: Dict[str, List[int]] = {}
         known_speakers: Dict[str, int] = {}
-        current_speaker = 10 if self.crac_src == 'light' else -1  # light begins with 'setting' which is new speaker
+        current_speaker = 100 if self.crac_src == 'light' else -1  # light begins with 'setting' which is new speaker
 
         raw_document: List[List[str]] = []
         document_speakers: List[int] = []
@@ -483,6 +484,7 @@ class CODICRACParser(GenericParser):
             # noinspection PyTypeChecker
             spacy_doc = self.nlp(to_toks(doc_text))
             doc_pos = self.get_pos_tags(spacy_doc)
+            doc_speakers = documents_speakers[docname]
 
             # Get the named entities prepped
             doc_named_entities = named_entities[docname]
@@ -512,7 +514,8 @@ class CODICRACParser(GenericParser):
                 coref=coref,
                 ner=ner,
                 rel=TypedRelations.new(),
-                bridging=bridging
+                bridging=bridging,
+                speakers=doc_speakers
             )
 
             # Now to finalise the instance
@@ -530,25 +533,23 @@ class CODICRACParser(GenericParser):
 @click.option("--run_all", "-a", is_flag=True, help="If flag is given, we process every CODICRAC split.")
 def run(dataset: str, suffix: str, run_all: bool):
     if run_all:
-        parser = CODICRACParser(LOC.cc_persuasion)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_ami)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_light)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_switchboard)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_arrau_t91)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_arrau_t93)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_arrau_pear)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_arrau_rst)
-        parser.run()
-        parser = CODICRACParser(LOC.cc_arrau_gnome)
-        parser.run()
 
+        filenotfound: List[Path] = []
+        all_sources = [LOC.cc_persuasion, LOC.cc_ami, LOC.cc_light, LOC.cc_switchboard, LOC.cc_arrau_t91,
+                       LOC.cc_arrau_t93, LOC.cc_arrau_pear, LOC.cc_arrau_rst, LOC.cc_arrau_gnome]
+
+        for source in all_sources:
+            try:
+                parser = CODICRACParser(source)
+                parser.run()
+            except FileNotFoundError:
+                filenotfound.append(source)
+
+        print("-----------------------------------------------------------------------")
+        print("--             Did not find raw files for these datasets             --")
+        for source in filenotfound:
+            print(f"--   - {str(source):61s} --")
+        print("-----------------------------------------------------------------------")
     else:
         if suffix:
             parser = CODICRACParser(LOC[f"cc_{dataset}_{suffix}"])

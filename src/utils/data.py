@@ -442,6 +442,9 @@ class Document:
     genre: str = field(default_factory=str)  # The ontonotes doc will belong to certain genre. Good to keep track.
     docpart: int = field(default_factory=int)  # In some cases, ontonotes documents are divided into parts.
 
+    # Speaker IDs, is optional and not always present.
+    speakers: List[int] = field(default_factory=list)
+
     # TODO: also add entity linking stuff
 
     @classmethod
