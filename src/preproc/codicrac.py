@@ -19,9 +19,11 @@ except ImportError:
     from . import _pathfix
 from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
-from utils.nlp import to_toks, NullTokenizer
+from utils.nlp import to_toks
 from utils.data import Document, NamedEntities, BridgingAnaphors, Clusters, TypedRelations
 from utils.misc import NestedAnnotationBlock, NestedAnnotationBlockStack
+
+CODICRAC_SBD_TOKEN = '@$$!!~~!!$$@'  # Just a token that you will NOT see in actual data.
 
 
 class CODICRACParser(GenericParser):
@@ -80,10 +82,27 @@ class CODICRACParser(GenericParser):
 
         # Null tokenizer is needed when text is pre-tokenized
         self.nlp = spacy.load("en_core_web_sm")
-        self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
+        # self.nlp.tokenizer = self.nlp.tokenizer.tokens_from_list
+        # self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
+        # self.nlp.add_pipe("codicrac-sbd", first=True)
 
         # noinspection RegExpRedundantEscape
         self.re_nested_annotation_blocks = re.compile(r'\([^\)\(\n]*\)?|\)')
+
+    # @staticmethod
+    # @Language.component("codicrac-sbd")
+    # def codicrac_sbd(doc: tokens.Doc) -> tokens.Doc:
+    #     indexes = []
+    #     for token in doc[:-1]:
+    #         if token.text == CODICRAC_SBD_TOKEN:
+    #             doc[token.i + 1].is_sent_start = True
+    #             indexes.append(token.i)
+    #
+    #     np_array = doc.to_array([LOWER, POS, ENT_TYPE, IS_ALPHA])
+    #     np_array = np.delete(np_array, indexes, axis=0)
+    #     doc2 = tokens.Doc(doc.vocab, words=[t.text for i, t in enumerate(doc) if i not in indexes])
+    #     doc2.from_array([LOWER, POS, ENT_TYPE, IS_ALPHA], np_array)
+    #     return doc2
 
     def run(self):
         """ overwriting it since we don't need suffixes UNLESS we're dealing with RST"""
@@ -324,6 +343,13 @@ class CODICRACParser(GenericParser):
 
         return document
 
+    def _get_spacy_doc_(self, raw: List[List[str]]) -> tokens.Doc:
+        words = to_toks(raw)
+        spaces = [True] * len(words)
+        sent_starts = to_toks([[1] + [0] * (len(sent) - 1) for sent in raw])
+        doc = tokens.Doc(vocab=self.nlp.vocab, words=words, spaces=spaces, sent_starts=sent_starts)
+        return doc
+
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
         """ where actual preproc happens"""
 
@@ -526,8 +552,13 @@ class CODICRACParser(GenericParser):
         # Finally use this collected information to create Document (utils/data) object
         for docname, raw_document, document_ in zip(documents.keys(), documents.values(), documents_.values()):
             doc_text = raw_document
+
+            # Sentence Boundaries don't work like this. So we need to break boundaries based on a custom string
+            #   that we attach at the end of every sentence.
+
             # noinspection PyTypeChecker
-            spacy_doc = self.nlp(to_toks(doc_text))
+            spacy_doc = self._get_spacy_doc_(doc_text)
+            # spacy_doc = self.nlp(doc_text)
             doc_pos = self.get_pos_tags(spacy_doc)
             doc_speakers = documents_speakers[docname]
 

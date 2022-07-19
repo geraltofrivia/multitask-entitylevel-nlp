@@ -254,9 +254,11 @@ class MultiTaskDataIter(Dataset):
 
     @staticmethod
     def _get_speaker_ids_(attention_mask, sentid_for_subword, speakers_list: List[int]):
-        """ Extrapolate the speakers across tokens. use attnmask for padding. Use sentid for sentences per swtoken """
-        if len(speakers_list) == 0:
-            return None
+        """ Extrapolate the speakers across tokens. use attn mask for padding. Use sentid for sentences per swtoken """
+
+        # This is commented out because speakers will never be None
+        # if len(speakers_list) == 0:
+        #     return None
 
         # n_subwords,
         speakerid_for_subword = torch.tensor(speakers_list, dtype=torch.long, device='cpu')[sentid_for_subword]
@@ -913,6 +915,13 @@ class MultiDomainDataCombiner(Dataset):
 
             # Pull the index
             instance = di[pointer_index % len(di)]
+
+            """
+                Now, for some custom logic
+            """
+            # Apply speaker offset if speaker IDs are not none
+            if instance['speaker_ids'] is not None:
+                instance['speaker_ids'] += self._speaker_offsets[dataiter_index]
 
             # Update pointer registry
             self.source_pointers[dataiter_index] = pointer_index

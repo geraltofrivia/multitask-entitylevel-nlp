@@ -212,7 +212,7 @@ def get_dataiter_partials(
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
 @click.option("--dataset-2", "-d2", type=str,
               help="The name of dataset e.g. ontonotes etc for a secondary task. Optional. ")
-@click.option("--tasks_2", "-t2", type=(str, float, bool), default=None, multiple=True,
+@click.option("--tasks-2", "-t2", type=(str, float, bool), default=None, multiple=True,
               help="We are expected to have a tuple of three elements where each signifies: "
                    "1. a string denoting task name (in coref, ner, pruner) "
                    "2. a float denoting loss weight. if its negative, we ignore the value "
@@ -335,6 +335,7 @@ def run(
     config = SerializedBertConfig(dir_config)
     config.max_span_width = max_span_width
     config.max_document_segments = max_document_segments
+    config.ignore_speakers = ignore_speakers
     config.metadata_feature_size = 20
     config.unary_hdim = 3000
     config.binary_hdim = 2000
@@ -351,7 +352,7 @@ def run(
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
     config.coref_higher_order = coref_higher_order
-    config.ignore_speakers = ignore_speakers
+    config.coref_num_speakers = 0 if config.ignore_speakers else tasks.n_speakers + tasks_2.n_speakers
     config.vocab_size = tokenizer.get_vocab().__len__()
 
     # Make a trainer dict and also
@@ -365,24 +366,20 @@ def run(
 
     config = merge_configs(old=DEFAULTS, new=config)
 
-    # """ Pulling some manual information from disk """
-    # # if NER is a task, we need to find number of NER classes. We can't have NER in both dataset_a and dataset_b
-    # if 'ner' in tasks:
-    #     n_classes_ner = get_n_classes(task='ner', dataset=dataset)
-    #     tasks.n_classes_ner = n_classes_ner
-    # if 'ner' in tasks_2:
-    #     n_classes_ner = get_n_classes(task='ner', dataset=dataset_2)
-    #     tasks_2.n_classes_ner = n_classes_ner
-    # if dataset in KNOWN_HAS_SPEAKERS:
-    #
-    #
-    # n_classes_pruner = 2
-    # tasks.n_classes_pruner = n_classes_pruner
-    # tasks_2.n_classes_pruner = n_classes_pruner
-
     # Log the tasks var into config as well
     config.task_1 = tasks
     config.task_2 = tasks_2
+
+    """
+        Speaker ID logic
+        If ANY of the domains has speaker IDs, and we're using them, we should enable speakers for all datasets.
+        This is because there is going to be a shape problem with the slow antecedent scorer.
+        So for example, you gave ` -d codicrac-light -d2 ontonotes` (72 speakers and no speaker respectively)
+        we will have 73 speakers where first 72 are for Light, and the last one is for Ontonotes (always constant).
+    """
+    # This is to be given to a MultiDomainDataCombiner IF we are working in a multidomain setting.
+    # This is for task 1 and 2 respectively. If you add more datasets, change!
+    speaker_offset = [0, tasks.n_speakers]
 
     # Make the model
     model = MangoesMTL.from_pretrained(dir_encoder, config=config, **config.to_dict()).to(device)
@@ -423,8 +420,10 @@ def run(
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, tokenizer=tokenizer)
 
         # Combine the two single domain dataset to make a multidomain dataiter
-        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio)
-        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio)
+        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio,
+                           speaker_offset=speaker_offset)
+        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio,
+                         speaker_offset=speaker_offset)
 
     # Collect all metrics
     metrics = {task.dataset: [] for task in [tasks, tasks_2]}

@@ -3,11 +3,12 @@
 
 """
 import json
-import click
-import spacy
-import jsonlines
 from pathlib import Path
 from typing import Iterable, Union, List
+
+import click
+import jsonlines
+import spacy
 
 # Local imports
 try:
@@ -103,6 +104,7 @@ class SciERCParser(GenericParser):
                 document=doc_text,
                 pos=doc_pos,
                 docname=doc_name,
+                speakers=[0] * len(doc_text),
                 coref=coref,
                 ner=ner,
                 rel=rel,

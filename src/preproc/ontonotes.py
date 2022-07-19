@@ -192,6 +192,7 @@ class CoNLLOntoNotesParser(GenericParser):
                 doc = Document(
                     document=documents[i],
                     pos=doc_pos[i],
+                    speakers=[0] * len(documents[i]),
                     docname=doc_names[i],
                     split=split_nm,
                     genre=genre,

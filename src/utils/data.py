@@ -420,6 +420,9 @@ class Document:
     # Pos tags, noun phrases in the document computed using the spacy doc
     pos: List[List[str]]
 
+    # Speaker IDs, an int corresponding to every sentence
+    speakers: List[int]
+
     # Docname corresponds to the ontonotes doc
     docname: str
 
@@ -442,27 +445,29 @@ class Document:
     genre: str = field(default_factory=str)  # The ontonotes doc will belong to certain genre. Good to keep track.
     docpart: int = field(default_factory=int)  # In some cases, ontonotes documents are divided into parts.
 
-    # Speaker IDs, is optional and not always present.
-    speakers: List[int] = field(default_factory=list)
-
     # TODO: also add entity linking stuff
 
     @classmethod
     def generate_pos_tags(cls, doc_text):
         return [['FAKE' for _ in sent] for sent in doc_text]
 
-    def finalise(self):
+    def __post_init__(self):
         """
         Sanity checks:
             -> every span in clusters, named_entities_gold has their corresponding span head found out
             -> length of doc pos and doc words (flattened) is the same
         """
 
-        if not (
-                len(self.document) == len(self.pos)
-                and len(to_toks(self.document)) == len(to_toks(self.pos))
-        ):
-            raise AssertionError("Length mismatch between doc words and doc pos tags")
+        if not len(self.document) == len(self.pos) == len(self.speakers):
+            raise AssertionError(f"Number of sentences don't match between doc, pos, and speakers\n"
+                                 f"Doc     : {len(self.document)}\n"
+                                 f"Pos     : {len(self.pos)}\n"
+                                 f"Speakers: {len(self.speakers)}\n")
+
+        if not len(to_toks(self.document)) == len(to_toks(self.pos)):
+            raise AssertionError(f"Number of tokens don't match between doc, and pos.\n"
+                                 f"Doc     : {len(to_toks(self.document))}\n"
+                                 f"Pos     : {len(to_toks(self.pos))}\n")
 
     @cached_property
     def sentence_map(self) -> List[int]:
@@ -511,7 +516,6 @@ class Tasks:
 
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
-    # If > 0, that indicates that we should use speakers. So, if you manually set it to -1, we ignore speaker values
     n_speakers: Optional[int] = field(default_factory=int)
 
     @classmethod
@@ -547,9 +551,9 @@ class Tasks:
         loss_scales = cls._parse_loss_scales_(names=names, scales=[arg[1] for arg in tuples])
         use_class_weights = [arg[2] for arg in tuples]
 
-        n_classes_ner = -1
-        n_classes_pruner = -1
-        n_speakers = -1
+        n_classes_ner = 0
+        n_classes_pruner = 0
+        n_speakers = 0
 
         return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights, dataset=dataset,
                    n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_speakers=n_speakers)

@@ -1,8 +1,8 @@
-import torch
-import unidecode
-import transformers
 from copy import deepcopy
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional
+
+import torch
+import transformers
 from spacy.tokens import Doc
 
 try:
@@ -41,9 +41,10 @@ SPAN_POS_BLACKLIST_SUFFIX = (".", "POS")
 NCHUNK_POS_WHITELIST = ("NN", "NNS", "NNP", "NNPS")
 
 
-def to_toks(doc: List[List[Any]]) -> List[Any]:
+def to_toks(doc: List[List[Any]], suffix: Optional[str] = None) -> List[Any]:
     """[ ['a', 'sent'], ['another' 'sent'] ] -> ['a', 'sent', 'another', 'sent']"""
-    return [word for sent in doc for word in sent]
+    return [word for sent_nr, sent in enumerate(doc) for word in
+            (sent + [suffix] if suffix and not sent_nr + 1 == len(doc) else sent)]
 
 
 def to_str(raw: List[List[str]]) -> str:

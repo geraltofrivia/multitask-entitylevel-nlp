@@ -54,6 +54,8 @@ class MangoesMTL(BertPreTrainedModel):
             bias_in_last_layers: bool = False,
             skip_instance_after_nspan: int = -1,
             coref_num_speakers: int = 2,
+            ignore_speakers: bool = False,
+
             *args, **kwargs
     ):
 
@@ -86,8 +88,9 @@ class MangoesMTL(BertPreTrainedModel):
             nn.Linear(ffnn_hidden_size, 1),
         )
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim)
+        _final_metadata_size = coref_metadata_feature_size * (3 if ignore_speakers else 2)
         self.slow_antecedent_scorer = nn.Sequential(
-            nn.Linear((span_embedding_dim * 3) + (coref_metadata_feature_size * 2), ffnn_hidden_size),
+            nn.Linear((span_embedding_dim * 3) + _final_metadata_size, ffnn_hidden_size),
             nn.ReLU(),
             nn.Dropout(coref_dropout),
             nn.Linear(ffnn_hidden_size, 1),
@@ -101,17 +104,17 @@ class MangoesMTL(BertPreTrainedModel):
         self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.distance_projection = nn.Linear(coref_metadata_feature_size, 1)
-        self.same_speaker_embeddings = nn.ModuleDict({
-            task.dataset: nn.Embedding(num_embeddings=task.n_speakers, embedding_dim=coref_metadata_feature_size)
-            for task in [task_1, task_2] if task.n_speakers > 0
-        })
-
         self.span_width_embeddings = nn.Embedding(num_embeddings=max_span_width,
                                                   embedding_dim=coref_metadata_feature_size)
         self.span_width_prior_embeddings = nn.Embedding(num_embeddings=max_span_width,
                                                         embedding_dim=coref_metadata_feature_size)
         self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
                                                     embedding_dim=coref_metadata_feature_size)
+        if ignore_speakers:
+            self.same_speaker_embeddings = None
+        else:
+            self.same_speaker_embeddings = nn.Embedding(num_embeddings=coref_num_speakers,
+                                                        embedding_dim=coref_metadata_feature_size)
 
         """
             NER Stuff is domain specific.
@@ -144,6 +147,7 @@ class MangoesMTL(BertPreTrainedModel):
         self.coref_depth = coref_higher_order
         self.coref_loss_mean = coref_loss_mean
         self._skip_instance_after_nspan = skip_instance_after_nspan
+        self._ignore_speaker = ignore_speakers
         self._tasks_: List[Tasks] = [task_1, task_2]
 
         self.init_weights()
@@ -254,11 +258,11 @@ class MangoesMTL(BertPreTrainedModel):
         num_cand, num_ant = top_antecedents.shape
         feature_emb_list = []
 
-        if top_span_speaker_ids is not None:
+        if not self._ignore_speaker:
             top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
             # [top_cand, top_ant]
             same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
-            speaker_pair_emb = self.same_speaker_embeddings[domain](
+            speaker_pair_emb = self.same_speaker_embeddings(
                 torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
             feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
             # genre_embs = genre_emb.view(1, 1, -1).repeat(num_cand, num_ant, 1)  # [top_cand, top_ant, feature_size]
