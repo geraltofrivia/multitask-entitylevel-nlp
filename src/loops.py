@@ -191,7 +191,5 @@ def training_loop(
         # Reset eval benches
         train_eval.reset()
         dev_eval.reset()
-        if flag_wandb:
-            wandb.commit()
 
     return train_metrics, dev_metrics, train_loss
