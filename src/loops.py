@@ -136,6 +136,14 @@ def training_loop(
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
         dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
+        for task in tasks:
+            for task_nm in task:
+                train_loss[task.dataset][task_nm].append(np.mean(per_epoch_loss[task.dataset][task_nm]))
+
+            if flag_wandb:
+                _loss_logs = {task_nm: {"loss": train_loss[task.dataset][task_nm][-1]} for task_nm in task}
+                wandb.log({task.dataset: _loss_logs}, step=e)
+
         for k in skipped.keys():
             skipped[k].append(per_epoch_skipped[k])
         lrs = [param_group['lr'] for param_group in opt.param_groups]
@@ -143,14 +151,6 @@ def training_loop(
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
             wandb.log({"skipped": {k: v[-1] for k, v in skipped.items()}})
-
-        for task in tasks:
-            for task_nm in task:
-                train_loss[task.dataset][task_nm].append(np.mean(per_epoch_loss[task.dataset][task_nm]))
-
-            if flag_wandb:
-                _loss_logs = {task_nm: {"loss": train_loss[task.dataset][task_nm][-1]} for task_nm in task}
-                wandb.log({f"loss_{task.dataset}": _loss_logs}, step=e)
 
         # print(train_metrics)
 
@@ -191,5 +191,7 @@ def training_loop(
         # Reset eval benches
         train_eval.reset()
         dev_eval.reset()
+        if flag_wandb:
+            wandb.commit()
 
     return train_metrics, dev_metrics, train_loss
