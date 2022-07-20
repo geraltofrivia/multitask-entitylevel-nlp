@@ -150,7 +150,7 @@ def training_loop(
 
             if flag_wandb:
                 _loss_logs = {task_nm: {"loss": train_loss[task.dataset][task_nm][-1]} for task_nm in task}
-                wandb.log({task.dataset: _loss_logs}, step=e)
+                wandb.log({f"loss_{task.dataset}": _loss_logs}, step=e)
 
         # print(train_metrics)
 
