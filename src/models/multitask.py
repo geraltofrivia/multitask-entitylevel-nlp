@@ -88,7 +88,7 @@ class MangoesMTL(BertPreTrainedModel):
             nn.Linear(ffnn_hidden_size, 1),
         )
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim)
-        _final_metadata_size = coref_metadata_feature_size * (3 if ignore_speakers else 2)
+        _final_metadata_size = coref_metadata_feature_size * (2 if ignore_speakers else 3)
         self.slow_antecedent_scorer = nn.Sequential(
             nn.Linear((span_embedding_dim * 3) + _final_metadata_size, ffnn_hidden_size),
             nn.ReLU(),
