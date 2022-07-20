@@ -379,7 +379,7 @@ def run(
     """
     # This is to be given to a MultiDomainDataCombiner IF we are working in a multidomain setting.
     # This is for task 1 and 2 respectively. If you add more datasets, change!
-    speaker_offset = [0, tasks.n_speakers]
+    speaker_offsets = [0, tasks.n_speakers]
 
     # Make the model
     model = MangoesMTL.from_pretrained(dir_encoder, config=config, **config.to_dict()).to(device)
@@ -421,9 +421,9 @@ def run(
 
         # Combine the two single domain dataset to make a multidomain dataiter
         train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio,
-                           speaker_offset=speaker_offset)
+                           speaker_offsets=speaker_offsets)
         dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio,
-                         speaker_offset=speaker_offset)
+                         speaker_offsets=speaker_offsets)
 
     # Collect all metrics
     metrics = {task.dataset: [] for task in [tasks, tasks_2]}

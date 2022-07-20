@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Union, List, Dict, Optional
 
 import click
-import spacy
 from spacy import tokens
 
 # Local imports
@@ -81,9 +80,9 @@ class CODICRACParser(GenericParser):
         self.write_dir.mkdir(parents=True, exist_ok=True)
 
         # Null tokenizer is needed when text is pre-tokenized
-        self.nlp = spacy.load("en_core_web_sm")
+        # self.nlp = spacy.load("en_core_web_sm")
         # self.nlp.tokenizer = self.nlp.tokenizer.tokens_from_list
-        # self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
+        # self.nlp.tokenizer = PreTokenizedTokenizer(self.nlp.vocab)
         # self.nlp.add_pipe("codicrac-sbd", first=True)
 
         # noinspection RegExpRedundantEscape
@@ -343,13 +342,6 @@ class CODICRACParser(GenericParser):
 
         return document
 
-    def _get_spacy_doc_(self, raw: List[List[str]]) -> tokens.Doc:
-        words = to_toks(raw)
-        spaces = [True] * len(words)
-        sent_starts = to_toks([[1] + [0] * (len(sent) - 1) for sent in raw])
-        doc = tokens.Doc(vocab=self.nlp.vocab, words=words, spaces=spaces, sent_starts=sent_starts)
-        return doc
-
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
         """ where actual preproc happens"""
 
@@ -557,8 +549,8 @@ class CODICRACParser(GenericParser):
             #   that we attach at the end of every sentence.
 
             # noinspection PyTypeChecker
-            spacy_doc = self._get_spacy_doc_(doc_text)
-            # spacy_doc = self.nlp(doc_text)
+            # spacy_doc = self._get_spacy_doc_(doc_text)
+            spacy_doc = self.nlp(doc_text)
             doc_pos = self.get_pos_tags(spacy_doc)
             doc_speakers = documents_speakers[docname]
 

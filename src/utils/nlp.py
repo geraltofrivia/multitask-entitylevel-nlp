@@ -1,6 +1,7 @@
 from copy import deepcopy
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Dict, Optional, Union
 
+import spacy
 import torch
 import transformers
 from spacy.tokens import Doc
@@ -100,17 +101,22 @@ def remove_pos(
     return span
 
 
-class NullTokenizer(DummyTokenizer):
-    """
-    Use it when the text is already tokenized but the doc's gotta go through spacy.
-    Usage: `nlp.tokenizer = CustomTokenizer(nlp.vocab)`
-    """
+class PreTokenizedPreSentencizedTokenizer(DummyTokenizer):
+    """Custom tokenizer to be used in spaCy when the text is already pretokenized and broken into sentences."""
 
-    def __init__(self, vocab):
+    def __init__(self, vocab: spacy.vocab.Vocab):
+        """Initialize tokenizer with a given vocab
+        :param vocab: an existing vocabulary (see https://spacy.io/api/vocab)
+        """
         self.vocab = vocab
 
-    def __call__(self, words):
-        return Doc(self.vocab, words=words)
+    def __call__(self, inp: Union[List[str], str, List[List[str]]]) -> Doc:
+        """Call the tokenizer on input `inp`.
+        :param inp: either a string to be split on whitespace, or a list of tokens
+        :return: the created Doc object
+        """
+        sent_starts = to_toks([[1] + [0] * (len(sent) - 1) for sent in inp])
+        return Doc(self.vocab, words=to_toks(inp), sent_starts=sent_starts)
 
 
 def match_subwords_to_words(

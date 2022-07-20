@@ -8,7 +8,6 @@ from typing import Iterable, Union, List
 
 import click
 import jsonlines
-import spacy
 
 # Local imports
 try:
@@ -18,7 +17,7 @@ except ImportError:
 from config import LOCATIONS as LOC, KNOWN_SPLITS
 from preproc.commons import GenericParser
 from dataiter import DocumentReader
-from utils.nlp import to_toks, NullTokenizer
+from utils.nlp import to_toks
 from utils.data import Document, NamedEntities, TypedRelations, Clusters, BridgingAnaphors
 
 
@@ -35,9 +34,6 @@ class SciERCParser(GenericParser):
         self.parsed: dict = {split_nm: [] for split_nm in suffixes}
         self.write_dir = LOC.parsed / "scierc"
         self.write_dir.mkdir(parents=True, exist_ok=True)
-
-        self.nlp = spacy.load("en_core_web_sm")
-        self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
 
     @staticmethod
     def get_named_entity_objs(inst: dict) -> NamedEntities:
@@ -85,8 +81,18 @@ class SciERCParser(GenericParser):
         for line in lines:
             doc_text = line['sentences']
             # noinspection PyTypeChecker
-            doc = self.nlp(to_toks(doc_text))
-            doc_pos = self.get_pos_tags(doc)
+            try:
+                doc = self.nlp(doc_text)
+                # doc = self._get_spacy_doc_(doc_text)
+                doc_pos = self.get_pos_tags(doc)
+            except ValueError as e:
+                if len(doc_text) == 1:
+                    # This happens due to there being only sentence in spacy doc. This is kinda weird ngl.
+                    # We make a doc with the sentence repeated twice and only give the first one to get_pos_tag
+                    doc = self.nlp(doc_text + doc_text)
+                    doc_pos = [self.get_pos_tags(doc)[0]]
+                else:
+                    raise e
             doc_name = line['doc_key']
 
             # Parse out NER stuff

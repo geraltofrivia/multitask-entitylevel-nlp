@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Union, List, Dict, Tuple, Iterable, Optional
 
+import spacy
 from spacy import tokens
 
 # Local imports
@@ -12,6 +13,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.data import Document
+from utils.nlp import PreTokenizedPreSentencizedTokenizer
 from config import LOCATIONS as LOC
 
 
@@ -34,6 +36,10 @@ class GenericParser(ABC):
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
+
+        exclude = ["senter", "parser"]
+        self.nlp = spacy.load("en_core_web_sm", exclude=exclude)
+        self.nlp.tokenizer = PreTokenizedPreSentencizedTokenizer(self.nlp.vocab)
 
         self._speaker_vocab_ = {}
 

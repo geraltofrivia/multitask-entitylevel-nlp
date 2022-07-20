@@ -18,9 +18,7 @@ from pathlib import Path
 from typing import Iterable, Union, List, Dict
 
 import click
-import spacy
 import unidecode
-from spacy.tokens import Token
 from tqdm.auto import tqdm
 
 # Local imports
@@ -30,7 +28,7 @@ except ImportError:
     from . import _pathfix
 from utils.data import Document, Clusters, NamedEntities, TypedRelations, BridgingAnaphors
 from utils.misc import NERAnnotationBlockStack
-from utils.nlp import to_toks, NullTokenizer
+from utils.nlp import to_toks
 from preproc.commons import GenericParser
 from config import LOCATIONS as LOC, KNOWN_SPLITS
 from dataiter import DocumentReader
@@ -62,11 +60,6 @@ class CoNLLOntoNotesParser(GenericParser):
         self.write_dir = self.write_dir / "ontonotes"
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
-
-        self.nlp = spacy.load("en_core_web_sm")
-        # This tokenizer DOES not tokenize documents.
-        # Use this is the document is already tokenized.
-        self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
 
     def parse(self, split_nm: Union[Path, str]):
         """Where the actual parsing happens. One split at a time."""
@@ -136,7 +129,8 @@ class CoNLLOntoNotesParser(GenericParser):
                 # Convert cluster spans to text
                 flat_doc = to_toks(documents[i])
                 # noinspection PyTypeChecker
-                spacy_doc = self.nlp(flat_doc)
+                # spacy_doc = self._get_spacy_doc_(documents[i])
+                spacy_doc = self.nlp(documents[i])
                 clusters_ = []
                 for cluster_id, cluster in enumerate(clusters[i]):
                     clusters_.append([])
@@ -206,15 +200,6 @@ class CoNLLOntoNotesParser(GenericParser):
                 outputs.append(doc)
 
         return outputs
-
-    @staticmethod
-    def _spacy_process_ner_tags_(
-            doc: spacy.tokens.Doc,
-    ) -> (List[str], List[Union[int]], List[str]):
-        ents = [[ent.start, ent.end] for ent in doc.ents]
-        ents_ = [[tok.text for tok in ent] for ent in doc.ents]
-        ents_tags = [ent.label_ for ent in doc.ents]
-        return ents, ents_, ents_tags
 
     def _normalize_word_(self, word, language):
         # We normalise unicode etc here. It will make working with HF tokenizers down the road much easier.

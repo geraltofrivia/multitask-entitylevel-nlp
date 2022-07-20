@@ -750,7 +750,8 @@ class DocumentReader(Dataset):
             np.random.shuffle(filenames)
 
         if len(filenames) == 0:
-            raise FileNotFoundError(f"No preprocessed documents found in the desired location.")
+            raise FileNotFoundError(f"No preprocessed documents found in the desired location."
+                                    f" - {self._src_}, {self._split_}")
 
         for fname in filenames:
 
@@ -831,8 +832,8 @@ class MultiDomainDataCombiner(Dataset):
     def __init__(
             self,
             srcs: List[Callable],
-            sampling_ratio: Optional[Iterable[float]] = None
-
+            sampling_ratio: Optional[Iterable[float]] = None,
+            speaker_offsets: Optional[List[int]] = None,
     ):
         """
             A data iter that should be given multiple data iter callables.
@@ -857,7 +858,7 @@ class MultiDomainDataCombiner(Dataset):
         # Init all data iterators.
         self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
         self.tasks: List[Tasks] = [dataiter.tasks for dataiter in self.dataiters]
-
+        self._speaker_offsets = speaker_offsets if speaker_offsets is not None else [0] * len(self.tasks)
         """
             Set dataset sampling indices.
             The list should be roughly the same size as combined length of all dataiters.
