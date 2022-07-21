@@ -94,14 +94,14 @@ LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0, 1.0]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = FancyDict({
     'skip_instance_after_nspan': 15000,
-    'max_span_width': 10,  # we need to push this to 30 somehow :shrug:
+    'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
     'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_dropout': 0.3,
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
-    'max_top_antecedents': 30,  # How many top antecedents to consider for a given anaphor (COREF specific)
+    'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
     'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
     # truncate the train set (never the dev set tho)
 

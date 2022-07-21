@@ -44,7 +44,7 @@ src/preproc/conll-2012/v3/scripts/skeleton2conll.sh -D data/raw/ontonotes/ontono
 pip install -r requirements.txt
 
 # Downloading the spacy model
-python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_sm-3.1.0 --direct
 
 # Downloading glove
 wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
