@@ -33,3 +33,15 @@ So that seems to be done. Now there are two bugs that we need to fix. Urgently.
 2. Ontonotes full does not even fit in memory. Not even the train set.
    We really do need to move to the HOI way of doing things.
    Shall we just do that hereon?
+
+# 22-07-2022
+
+So after three days, the bug is fixed. And what a bug fix wow fuck me sideways. Anyway.
+We'll be running a few more experiments. All on persuasion (or light) and trying to maximize the numbers we're getting
+Specifically
+
+1. cr-pr-ccper-cr-pr-on-lrc-lspru
+2. full onto alongwith persuasion (on the 32G GPU I just spotted)
+3. switchboard baselines
+4. throw in an NER dataset.
+5. NER onto vs Coref onto 
