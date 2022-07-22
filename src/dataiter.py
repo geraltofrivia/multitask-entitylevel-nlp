@@ -436,7 +436,8 @@ class MultiTaskDataIter(Dataset):
 
         gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
         gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
-        gold_cluster_ids = torch.tensor(gold_cluster_ids, dtype=torch.long, device='cpu')
+        gold_cluster_ids = torch.tensor(gold_cluster_ids, dtype=torch.long, device='cpu') + 1
+        """ This +1 may be important, in distingushing actual clusters from singletones/non mentions"""
 
         coref_specific = {  # Pred stuff
             # "gold_cluster_ids_on_candidates": cluster_labels,
