@@ -44,4 +44,12 @@ Specifically
 2. full onto alongwith persuasion (on the 32G GPU I just spotted)
 3. switchboard baselines
 4. throw in an NER dataset.
-5. NER onto vs Coref onto 
+5. NER onto vs Coref onto
+
+Other TODOs
+[ ] Do loss scales (defined in the task triple) change anything?
+[ ] coref num speakers variable... is it needed? it shouldn't be.
+
+# 01-08-2022
+
+[ ] Implement domain adversarial learning thing
