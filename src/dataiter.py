@@ -589,14 +589,25 @@ z        """
             2. Exclude the ones which exist at the end of sentences (i.e. start in one, end in another)
         """
 
-        # candidate_starts = (
-        #     torch.arange(start=0, end=n_subwords, device="cpu").unsqueeze(1).repeat(1, self.config.max_span_width)
-        # )  # n_subwords, max_span_width
-        # candidate_ends = candidate_starts + torch.arange(
-        #     start=0, end=self.config.max_span_width, device="cpu"
-        # ).unsqueeze(
-        #     0
-        # )  # n_subwords, max_span_width
+        # calculate all possible spans
+        candidate_starts = torch.arange(start=0,
+                                        end=n_subwords,
+                                        device="cpu").view(-1, 1) \
+            .repeat(1, self.config.max_span_width)  # n_words, max_span_width
+        candidate_ends = candidate_starts + torch.arange(start=0, end=self.config.max_span_width,
+                                                         device="cpu").unsqueeze(
+            0)  # [num_words, max_span_width]
+        candidate_start_sentence_indices = sentid_for_subword[candidate_starts]  # n_seq, max_span_width
+        candidate_end_sentence_indices = sentid_for_subword[
+            torch.clamp(candidate_ends, max=n_subwords - 1)]  # n_seq, max_span_width
+        # find spans that are in the same segment and don't run past the end of the text
+        # noinspection PyTypeChecker
+        candidate_mask = torch.logical_and(candidate_ends < n_subwords,
+                                           torch.eq(candidate_start_sentence_indices,
+                                                    candidate_end_sentence_indices)).view(
+            -1).bool()  # n_seq * max_span_width -> n_can
+        candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # n_can
+        candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # n_can
 
         """
             # Ignoring invalid spans
@@ -665,8 +676,8 @@ z        """
             "sentence_map": sentid_for_subword,
             "n_words": n_words,
             "n_subwords": n_subwords,
-            # "candidate_starts": candidate_starts,
-            # "candidate_ends": candidate_ends,
+            "candidate_starts": candidate_starts,
+            "candidate_ends": candidate_ends,
             "loss_scales": self.loss_scales,
             "coref": {},
             "ner": {},

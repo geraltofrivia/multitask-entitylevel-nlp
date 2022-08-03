@@ -525,6 +525,8 @@ class MangoesMTL(BertPreTrainedModel):
             self,
             input_ids: torch.tensor,
             attention_mask: torch.tensor,
+            candidate_starts: torch.tensor,
+            candidate_ends: torch.tensor,
             sentence_map: List[int],
             tasks: Iterable[str],
             domain: str,
@@ -544,25 +546,25 @@ class MangoesMTL(BertPreTrainedModel):
         flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
         num_words = mention_doc.shape[0]
 
-        # calculate all possible spans
-        candidate_starts = torch.arange(start=0,
-                                        end=num_words,
-                                        device=mention_doc.device).view(-1, 1) \
-            .repeat(1, self.max_span_width)  # [num_words, max_span_width]
-        candidate_ends = candidate_starts + torch.arange(start=0, end=self.max_span_width,
-                                                         device=mention_doc.device).unsqueeze(
-            0)  # [num_words, max_span_width]
-        candidate_start_sentence_indices = sentence_map[candidate_starts]  # [num_words, max_span_width]
-        candidate_end_sentence_indices = sentence_map[
-            torch.clamp(candidate_ends, max=num_words - 1)]  # [num_words, max_span_width]
-        # find spans that are in the same segment and don't run past the end of the text
-        # noinspection PyTypeChecker
-        candidate_mask = torch.logical_and(candidate_ends < num_words,
-                                           torch.eq(candidate_start_sentence_indices,
-                                                    candidate_end_sentence_indices)).view(
-            -1).bool()  # [num_words *max_span_width]
-        candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # [candidates]
-        candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # [candidates]
+        # # calculate all possible spans
+        # candidate_starts = torch.arange(start=0,
+        #                                 end=num_words,
+        #                                 device=mention_doc.device).view(-1, 1) \
+        #     .repeat(1, self.max_span_width)  # [num_words, max_span_width]
+        # candidate_ends = candidate_starts + torch.arange(start=0, end=self.max_span_width,
+        #                                                  device=mention_doc.device).unsqueeze(
+        #     0)  # [num_words, max_span_width]
+        # candidate_start_sentence_indices = sentence_map[candidate_starts]  # [num_words, max_span_width]
+        # candidate_end_sentence_indices = sentence_map[
+        #     torch.clamp(candidate_ends, max=num_words - 1)]  # [num_words, max_span_width]
+        # # find spans that are in the same segment and don't run past the end of the text
+        # # noinspection PyTypeChecker
+        # candidate_mask = torch.logical_and(candidate_ends < num_words,
+        #                                    torch.eq(candidate_start_sentence_indices,
+        #                                             candidate_end_sentence_indices)).view(
+        #     -1).bool()  # [num_words *max_span_width]
+        # candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # [candidates]
+        # candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # [candidates]
 
         """ At this point, if there are more candidates than expected, SKIP this op."""
         if 0 < self._skip_instance_after_nspan < candidate_starts.shape[0]:
@@ -701,6 +703,8 @@ class MangoesMTL(BertPreTrainedModel):
             input_ids: torch.tensor,
             attention_mask: torch.tensor,
             token_type_ids: torch.tensor,
+            candidate_starts: torch.tensor,
+            candidate_ends: torch.tensor,
             sentence_map: List[int],
             word_map: List[int],
             n_words: int,
@@ -720,6 +724,8 @@ class MangoesMTL(BertPreTrainedModel):
             input_ids=input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
+            candidate_starts=candidate_starts,
+            candidate_ends=candidate_ends,
             sentence_map=sentence_map,
             word_map=word_map,
             n_words=n_words,

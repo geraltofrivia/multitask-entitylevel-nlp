@@ -53,3 +53,8 @@ Other TODOs
 # 01-08-2022
 
 [ ] Implement domain adversarial learning thing
+[ ] Change encoder to something autoregressive
+[ ] Analyse predictions of model - look at what samples are predicted. Can we curtail spans by POS tags?
+[!] Feed spans from the data iter part instead of within the model
+[ ] Integrate Univ. Anaphora Scorer
+[ ] 
