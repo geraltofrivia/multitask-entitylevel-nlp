@@ -22,6 +22,7 @@ from config import _SEED_ as SEED
 from utils.data import Tasks
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException
 from utils.misc import SerializedBertConfig
+from models.modules import SpanPruner
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -41,16 +42,22 @@ class MangoesMTL(BertPreTrainedModel):
             vocab_size: int,
             hidden_size: int,
             max_span_width: int,
-            top_span_ratio: int,
             max_top_antecedents: int,
             coref_dropout: float,
             unary_hdim: int,
+            max_training_segments: int,
             coref_higher_order: int,
             coref_metadata_feature_size: int,
-            coref_max_training_segments: int,
             coref_loss_mean: bool,
             task_1: dict,
             task_2: dict,
+
+            # Pruner args TODO: remove and replace with config?
+            pruner_dropout: float,
+            pruner_use_width: bool,
+            pruner_max_num_spans: int,
+            pruner_top_span_ratio: float,
+
             bias_in_last_layers: bool = False,
             skip_instance_after_nspan: int = -1,
             coref_num_speakers: int = 2,
@@ -67,26 +74,24 @@ class MangoesMTL(BertPreTrainedModel):
         task_2 = Tasks(**task_2)
 
         self.bert = BertModel(base_config, add_pooling_layer=False)
+        self.pruner = SpanPruner(
+            hidden_size=hidden_size,
+            unary_hdim=unary_hdim,
+            max_span_width=max_span_width,
+            coref_metadata_feature_size=coref_metadata_feature_size,
+            pruner_dropout=pruner_dropout,
+            pruner_use_width=pruner_use_width,
+            pruner_max_num_spans=pruner_max_num_spans,
+            pruner_top_span_ratio=pruner_top_span_ratio
+        )
         # self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False)
 
         ffnn_hidden_size = unary_hdim
         bert_hidden_size = hidden_size
 
-        self.span_attend_projection = torch.nn.Linear(bert_hidden_size, 1)
         span_embedding_dim = (bert_hidden_size * 3) + coref_metadata_feature_size
         self.coref_dropout = coref_dropout
-        self.mention_scorer = nn.Sequential(
-            nn.Linear(span_embedding_dim, ffnn_hidden_size),
-            nn.ReLU(),
-            nn.Dropout(coref_dropout),
-            nn.Linear(ffnn_hidden_size, 1),
-        )
-        self.width_scores = nn.Sequential(
-            nn.Linear(coref_metadata_feature_size, ffnn_hidden_size),
-            nn.ReLU(),
-            nn.Dropout(coref_dropout),
-            nn.Linear(ffnn_hidden_size, 1),
-        )
+
         self.fast_antecedent_projection = torch.nn.Linear(span_embedding_dim, span_embedding_dim)
         _final_metadata_size = coref_metadata_feature_size * (2 if ignore_speakers else 3)
         self.slow_antecedent_scorer = nn.Sequential(
@@ -99,16 +104,14 @@ class MangoesMTL(BertPreTrainedModel):
         # metadata embeddings
         # self.use_metadata = use_metadata
         # self.genres = {g: i for i, g in enumerate(genres)}
-        # self.genre_embeddings = nn.Embedding(num_embeddings=len(self.genres), embedding_dim=metadata_feature_size)
+        # self.genre_embeddings = nn.Embedding(num_embeddings=len(self.genres),
+        #                                       embedding_dim=coref_metadata_feature_size)
 
         self.distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.slow_distance_embeddings = nn.Embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         self.distance_projection = nn.Linear(coref_metadata_feature_size, 1)
-        self.span_width_embeddings = nn.Embedding(num_embeddings=max_span_width,
-                                                  embedding_dim=coref_metadata_feature_size)
-        self.span_width_prior_embeddings = nn.Embedding(num_embeddings=max_span_width,
-                                                        embedding_dim=coref_metadata_feature_size)
-        self.segment_dist_embeddings = nn.Embedding(num_embeddings=coref_max_training_segments,
+
+        self.segment_dist_embeddings = nn.Embedding(num_embeddings=max_training_segments,
                                                     embedding_dim=coref_metadata_feature_size)
         if ignore_speakers:
             self.same_speaker_embeddings = None
@@ -141,9 +144,8 @@ class MangoesMTL(BertPreTrainedModel):
         self.ner_loss = nn.functional.cross_entropy
 
         self.max_span_width = max_span_width
-        self.top_span_ratio = top_span_ratio
         self.max_top_antecedents = max_top_antecedents
-        self.coref_max_training_segments = coref_max_training_segments
+        self.max_training_segments = max_training_segments
         self.coref_depth = coref_higher_order
         self.coref_loss_mean = coref_loss_mean
         self._skip_instance_after_nspan = skip_instance_after_nspan
@@ -175,7 +177,7 @@ class MangoesMTL(BertPreTrainedModel):
         torch.nn.utils.clip_grad_norm_(task_params, max_norm)
 
     @staticmethod
-    def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.Tensor] = None):
+    def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.tensor] = None):
         # if weights are provided, scale them based on labels
         if weight is not None:
             _weight = torch.zeros_like(labels, dtype=torch.float) + weight[0]
@@ -183,54 +185,6 @@ class MangoesMTL(BertPreTrainedModel):
             return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
         else:
             return nn.functional.binary_cross_entropy_with_logits(logits, labels)
-
-    @staticmethod
-    def extract_spans(candidate_starts, candidate_ends, candidate_mention_scores, num_top_mentions):
-        """
-        Extracts the candidate spans with the highest mention scores, who's spans don't cross over other spans.
-
-        Parameters:
-        ----------
-            candidate_starts: tensor of size (candidates)
-                Indices of the starts of spans for each candidate.
-            candidate_ends: tensor of size (candidates)
-                Indices of the ends of spans for each candidate.
-            candidate_mention_scores: tensor of size (candidates)
-                Mention score for each candidate.
-            num_top_mentions: int
-                Number of candidates to extract
-        Returns:
-        --------
-            top_span_indices: tensor of size (num_top_mentions)
-                Span indices of the non-crossing spans with the highest mention scores
-        """
-        # sort based on mention scores
-        top_span_indices = torch.argsort(candidate_mention_scores, descending=True)
-        # add highest scores that don't cross
-        end_to_earliest_start = {}
-        start_to_latest_end = {}
-        selected_spans = []
-        current_span_index = 0
-        while len(selected_spans) < num_top_mentions and current_span_index < candidate_starts.size(0):
-            ind = top_span_indices[current_span_index]
-            any_crossing = False
-            cand_start = candidate_starts[ind].item()
-            cand_end = candidate_ends[ind].item()
-            for j in range(cand_start, cand_end + 1):
-                if j > cand_start and j in start_to_latest_end and start_to_latest_end[j] > cand_end:
-                    any_crossing = True
-                    break
-                if j < cand_end and j in end_to_earliest_start and end_to_earliest_start[j] < cand_start:
-                    any_crossing = True
-                    break
-            if not any_crossing:
-                selected_spans.append(ind)
-                if cand_start not in start_to_latest_end or start_to_latest_end[cand_start] < cand_end:
-                    start_to_latest_end[cand_start] = cand_end
-                if cand_end not in end_to_earliest_start or end_to_earliest_start[cand_end] > cand_start:
-                    end_to_earliest_start[cand_end] = cand_start
-            current_span_index += 1
-        return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
 
     def get_slow_antecedent_scores(self, top_span_emb, top_antecedents, top_antecedent_emb, top_antecedent_offsets,
                                    top_span_speaker_ids, segment_distance, domain: str):
@@ -247,8 +201,10 @@ class MangoesMTL(BertPreTrainedModel):
             embeddings of top antecedents for each candidate
         top_antecedent_offsets: tensor of size (candidates, antecedents)
             offsets for each mention/antecedent pair
+        top_span_speaker_ids: tensor of size TODO: complete this one
         segment_distance: tensor of size (candidates, antecedents)
             segment distances for each candidate antecedent pair
+        domain: a string representing the domain from which this instance hails.
 
         Returns
         -------
@@ -277,7 +233,7 @@ class MangoesMTL(BertPreTrainedModel):
 
         # segment distance
         segment_distance_emb = self.segment_dist_embeddings(
-            torch.arange(start=0, end=self.coref_max_training_segments, device=top_span_emb.device))
+            torch.arange(start=0, end=self.max_training_segments, device=top_span_emb.device))
         feature_emb_list.append(segment_distance_emb[segment_distance])  # [cand, ant, feature_size]
 
         feature_emb = torch.cat(feature_emb_list, 2)  # [cand, ant, emb]
@@ -409,80 +365,6 @@ class MangoesMTL(BertPreTrainedModel):
         target_emb = F.dropout(span_emb, p=self.coref_dropout, training=self.training)  # [cand, emb]
         return torch.mm(source_emb, target_emb.t())  # [cand, cand]
 
-    def get_span_embeddings(self, hidden_states, span_starts, span_ends):
-        """
-        Obtains representations of the spans
-
-        Parameters
-        ----------
-        hidden_states: tensor of size (num_tokens, emb_size)
-            outputs of BERT model, reshaped
-        span_starts, span_ends: tensor of size (num_candidates)
-            indices of starts and ends of spans
-
-        Returns
-        -------
-        tensor of size (num_candidates, span_embedding_size)
-        """
-        emb = [hidden_states[span_starts], hidden_states[span_ends]]
-
-        span_width = 1 + span_ends - span_starts  # [num_cand]
-        span_width_index = span_width - 1  # [num_cand]
-        span_width_emb = self.span_width_embeddings(span_width_index)  # [num_cand, emb]
-        span_width_emb = F.dropout(span_width_emb, p=self.coref_dropout, training=self.training)
-        emb.append(span_width_emb)
-
-        token_attention_scores = self.get_span_word_attention_scores(hidden_states, span_starts,
-                                                                     span_ends)  # [num_cand, num_words]
-        attended_word_representations = torch.mm(token_attention_scores, hidden_states)  # [num_cand, emb_size]
-        emb.append(attended_word_representations)
-        return torch.cat(emb, dim=1)
-
-    def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
-        """
-
-        Parameters
-        ----------
-        hidden_states: tensor of size (num_tokens, emb_size)
-            outputs of BERT model, reshaped
-        span_starts, span_ends: tensor of size (num_candidates)
-            indices of starts and ends of spans
-
-        Returns
-        -------
-        tensor of size (num_candidates, span_embedding_size)
-        """
-        document_range = torch.arange(start=0, end=hidden_states.shape[0], device=hidden_states.device).unsqueeze(
-            0).repeat(span_starts.shape[0], 1)  # [num_cand, num_words]
-        # noinspection PyTypeChecker
-        token_mask = torch.logical_and(document_range >= span_starts.unsqueeze(1),
-                                       document_range <= span_ends.unsqueeze(1))  # [num_cand, num_words]
-        token_atten = self.span_attend_projection(hidden_states).squeeze(1).unsqueeze(0)  # [1, num_words]
-        token_attn = F.softmax(torch.log(token_mask.float()) + token_atten, 1)  # [num_cand, num_words]span
-        return token_attn
-
-    @staticmethod
-    def coref_loss(top_antecedent_scores, top_antecedent_labels):
-        """
-        Calculate softmax loss
-
-        Parameters
-        ----------
-        top_antecedent_scores: tensor of size [top_cand, top_ant + 1]
-            scores of each antecedent for each mention candidate
-        top_antecedent_labels: tensor of size [top_cand, top_ant + 1]
-            labels for each antecedent
-
-        Returns
-        -------
-        tensor of size (num_candidates)
-            loss for each mention
-        """
-        gold_scores = top_antecedent_scores + torch.log(top_antecedent_labels.float())  # [top_cand, top_ant+1]
-        marginalized_gold_scores = torch.logsumexp(gold_scores, 1)  # [top_cand]
-        log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
-        return log_norm - marginalized_gold_scores  # [top_cand]
-
     def todel_get_predicted_antecedents(self, antecedent_idx, antecedent_scores):
         """ CPU list input """
         predicted_antecedents = []
@@ -521,6 +403,28 @@ class MangoesMTL(BertPreTrainedModel):
         predicted_clusters = [tuple(c) for c in predicted_clusters]
         return predicted_clusters, mention_to_cluster_id, predicted_antecedents
 
+    @staticmethod
+    def coref_loss(top_antecedent_scores, top_antecedent_labels):
+        """
+        Calculate softmax loss
+
+        Parameters
+        ----------
+        top_antecedent_scores: tensor of size [top_cand, top_ant + 1]
+            scores of each antecedent for each mention candidate
+        top_antecedent_labels: tensor of size [top_cand, top_ant + 1]
+            labels for each antecedent
+
+        Returns
+        -------
+        tensor of size (num_candidates)
+            loss for each mention
+        """
+        gold_scores = top_antecedent_scores + torch.log(top_antecedent_labels.float())  # [top_cand, top_ant+1]
+        marginalized_gold_scores = torch.logsumexp(gold_scores, 1)  # [top_cand]
+        log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
+        return log_norm - marginalized_gold_scores  # [top_cand]
+
     def forward(
             self,
             input_ids: torch.tensor,
@@ -530,147 +434,114 @@ class MangoesMTL(BertPreTrainedModel):
             sentence_map: List[int],
             tasks: Iterable[str],
             domain: str,
-            speaker_ids: Optional[torch.Tensor] = None,
+            speaker_ids: Optional[torch.tensor] = None,
             *args,
             **kwargs
     ):
         # TODO: make docstrings for this function
 
         device = input_ids.device
-        bert_outputs = self.bert(input_ids, attention_mask)
-
-        mention_doc = bert_outputs[0]  # [num_seg, max_seg_len, emb_len]
-        num_seg, max_seg_len, emb_len = mention_doc.shape
-        mention_doc = torch.masked_select(mention_doc.view(num_seg * max_seg_len, emb_len),
-                                          attention_mask.bool().view(-1, 1)).view(-1, emb_len)  # [num_words, emb_len]
-        flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
-        num_words = mention_doc.shape[0]
-
-        # # calculate all possible spans
-        # candidate_starts = torch.arange(start=0,
-        #                                 end=num_words,
-        #                                 device=mention_doc.device).view(-1, 1) \
-        #     .repeat(1, self.max_span_width)  # [num_words, max_span_width]
-        # candidate_ends = candidate_starts + torch.arange(start=0, end=self.max_span_width,
-        #                                                  device=mention_doc.device).unsqueeze(
-        #     0)  # [num_words, max_span_width]
-        # candidate_start_sentence_indices = sentence_map[candidate_starts]  # [num_words, max_span_width]
-        # candidate_end_sentence_indices = sentence_map[
-        #     torch.clamp(candidate_ends, max=num_words - 1)]  # [num_words, max_span_width]
-        # # find spans that are in the same segment and don't run past the end of the text
-        # # noinspection PyTypeChecker
-        # candidate_mask = torch.logical_and(candidate_ends < num_words,
-        #                                    torch.eq(candidate_start_sentence_indices,
-        #                                             candidate_end_sentence_indices)).view(
-        #     -1).bool()  # [num_words *max_span_width]
-        # candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # [candidates]
-        # candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # [candidates]
 
         """ At this point, if there are more candidates than expected, SKIP this op."""
         if 0 < self._skip_instance_after_nspan < candidate_starts.shape[0]:
             raise AnticipateOutOfMemException(f"There are {candidate_starts.shape[0]} candidates", device)
 
-        # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
-        #     candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
-        #                                                       coref_gold_starts, coref_gold_ends,
-        #                                                       coref_gold_cluster_ids)  # [candidates]
+        # Pass through Text Encoder
+        bert_outputs = self.bert(input_ids, attention_mask)
+
+        hidden_states = bert_outputs[0]  # [num_seg, max_seg_len, emb_len]
+        num_seg, max_seg_len, emb_len = hidden_states.shape
+
+        # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
+        hidden_states = torch.masked_select(hidden_states.view(num_seg * max_seg_len, emb_len),
+                                            attention_mask.bool().view(-1, 1)).view(-1, emb_len)  # [num_words, emb_len]
+        flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
+        if speaker_ids is not None:
+            speaker_ids = torch.masked_select(speaker_ids.view(num_seg * max_seg_len),
+                                              attention_mask.bool().view(-1))
+
+        # Note the number of words
+        num_words = hidden_states.shape[0]
 
         """
             That's the Span Pruner.
             Next we need to break out into Coref and NER parts
         """
 
-        # get span embeddings and mention scores
-        span_emb = self.get_span_embeddings(mention_doc, candidate_starts, candidate_ends)  # [candidates, span_emb]
+        pruner_outputs = self.pruner(
+            hidden_states=hidden_states,
+            candidate_starts=candidate_starts,
+            candidate_ends=candidate_ends,
+            speaker_ids=speaker_ids
+        )
 
         if 'coref' in tasks or 'pruner' in tasks:
 
-            pruned_candidate_mention_scores = self.mention_scorer(span_emb).squeeze(1)  # [candidates]
-            # get span width scores and add to candidate mention scores
-            span_width_index = candidate_ends - candidate_starts  # [candidates]
-            span_width_emb = self.span_width_prior_embeddings(span_width_index)  # [candidates, emb]
-            pruned_candidate_mention_scores += self.width_scores(span_width_emb).squeeze(1)  # [candidates]
+            num_top_antecedents = min(self.max_top_antecedents, pruner_outputs['num_top_mentions'])
 
-            # get beam size
-            num_top_mentions = int(float(num_words * self.top_span_ratio))
-            num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
-
-            # get top mention scores and sort by sort by span order
-            pruned_span_indices = self.extract_spans(candidate_starts, candidate_ends, pruned_candidate_mention_scores,
-                                                     num_top_mentions)
-            pruned_span_starts = candidate_starts[pruned_span_indices]  # [top_cand]
-            pruned_span_ends = candidate_ends[pruned_span_indices]  # [top_cand]
-            pruned_span_emb = span_emb[pruned_span_indices]  # [top_cand, span_emb]
-            pruned_span_mention_scores = pruned_candidate_mention_scores[pruned_span_indices]  # [top_cand]
-
-            """Using Speaker IDs (if available)"""
-            if speaker_ids is not None:
-                speaker_ids = torch.masked_select(speaker_ids.view(num_seg * max_seg_len),
-                                                  attention_mask.bool().view(-1))
-                pruned_span_speaker_ids = speaker_ids[pruned_span_starts]
-            else:
-                pruned_span_speaker_ids = None
-
-            # # COREF Specific things
-            # if coref_gold_ends is not None and coref_gold_starts is not None and coref_gold_cluster_ids is not None:
-            #     # noinspection PyUnboundLocalVariable
-            #     top_span_cluster_ids = candidate_cluster_ids[pruned_span_indices]  # [top_cand]
+            # Coref things
 
             # course to fine pruning
-            dummy_scores = torch.zeros([num_top_mentions, 1], device=pruned_span_indices.device)  # [top_cand, 1]
-            top_antecedents, top_antecedents_mask, top_ante_fast_scores, top_antecedent_offsets = \
-                self.coarse_to_fine_pruning(pruned_span_emb, pruned_span_mention_scores, num_top_antecedents)
+            dummy_scores = torch.zeros([pruner_outputs['num_top_mentions'], 1], device=device)  # [top_cand, 1]
+            top_ante, top_ante_mask, top_ante_fast_scores, top_ante_offsets = self.coarse_to_fine_pruning(
+                pruner_outputs['pruned_span_emb'],
+                pruner_outputs['pruned_span_scores'],
+                num_top_antecedents
+            )
 
             num_segments = input_ids.shape[0]
             segment_length = input_ids.shape[1]
             word_segments = torch.arange(start=0, end=num_segments, device=input_ids.device).view(-1, 1).repeat(
                 [1, segment_length])  # [segments, segment_len]
             flat_word_segments = torch.masked_select(word_segments.view(-1), attention_mask.bool().view(-1))
-            mention_segments = flat_word_segments[pruned_span_starts].view(-1, 1)  # [top_cand, 1]
-            antecedent_segments = flat_word_segments[pruned_span_starts[top_antecedents]]  # [top_cand, top_ant]
+            mention_segments = flat_word_segments[pruner_outputs['pruned_span_starts']].view(-1, 1)  # [top_cand, 1]
+            antecedent_segments = flat_word_segments[
+                pruner_outputs['pruned_span_starts'][top_ante]]  # [top_cand, top_ant]
             segment_distance = torch.clamp(mention_segments - antecedent_segments, 0,
-                                           self.coref_max_training_segments - 1)  # [top_cand, top_ant]
+                                           self.max_training_segments - 1)  # [top_cand, top_ant]
 
             # calculate final slow scores
             for i in range(self.coref_depth):
-                top_ante_emb = pruned_span_emb[top_antecedents]  # [top_cand, top_ant, emb]
+                top_ante_emb = pruner_outputs['pruned_span_emb'][top_ante]  # [top_cand, top_ant, emb]
                 try:
-                    top_ante_scores = top_ante_fast_scores + self.get_slow_antecedent_scores(pruned_span_emb,
-                                                                                             top_antecedents,
-                                                                                             top_ante_emb,
-                                                                                             top_antecedent_offsets,
-                                                                                             pruned_span_speaker_ids,
-                                                                                             segment_distance,
-                                                                                             domain=domain)
+                    top_ante_scores = top_ante_fast_scores + self.get_slow_antecedent_scores(
+                        pruner_outputs['pruned_span_emb'],
+                        top_ante,
+                        top_ante_emb,
+                        top_ante_offsets,
+                        pruner_outputs['pruned_span_speaker_ids'],
+                        segment_distance,
+                        domain=domain)
                 except RuntimeError as e:
                     # This usually happens due to out of mem errors
                     print(f"Input IDS: {input_ids.shape}")
-                    print(f"Spans Emb: {span_emb.shape}")
+                    print(f"Spans Emb: ({candidate_starts.shape[0]}, something)")
                     raise e
+
                 # [top_cand, top_ant]
                 top_ante_weights = F.softmax(
                     torch.cat([dummy_scores, top_ante_scores], 1), dim=-1
                 )  # [top_cand, top_ant + 1]
-                top_ante_emb = torch.cat([pruned_span_emb.unsqueeze(1), top_ante_emb],
+                top_ante_emb = torch.cat([pruner_outputs['pruned_span_emb'].unsqueeze(1), top_ante_emb],
                                          1)  # [top_cand, top_ant + 1, emb]
                 attended_span_emb = torch.sum(top_ante_weights.unsqueeze(2) * top_ante_emb, 1)  # [top_cand, emb]
                 gate_vectors = torch.sigmoid(
                     self.slow_antecedent_projection(
-                        torch.cat([pruned_span_emb, attended_span_emb], 1)))  # [top_cand, emb]
+                        torch.cat([pruner_outputs['pruned_span_emb'], attended_span_emb], 1)))  # [top_cand, emb]
                 pruned_span_emb = gate_vectors * attended_span_emb + (
-                            1 - gate_vectors) * pruned_span_emb  # [top_cand, emb]
+                        1 - gate_vectors) * pruner_outputs['pruned_span_emb']  # [top_cand, emb]
 
             # noinspection PyUnboundLocalVariable
             top_ante_scores = torch.cat([dummy_scores, top_ante_scores], 1)
 
             coref_specific = {
-                "coref_top_antecedents": top_antecedents,
+                "coref_top_antecedents": top_ante,
                 "coref_top_antecedent_scores": top_ante_scores,
-                "coref_top_antecedents_mask": top_antecedents_mask,
-                "pruned_candidate_mention_scores": pruned_candidate_mention_scores,
-                "pruned_span_starts": pruned_span_starts,
-                "pruned_span_ends": pruned_span_ends,
-                "pruned_span_indices": pruned_span_indices,
+                "coref_top_antecedents_mask": top_ante_mask,
+                "pruned_candidate_mention_scores": pruner_outputs['pruned_span_scores'],
+                "pruned_span_starts": pruner_outputs['pruned_span_starts'],
+                "pruned_span_ends": pruner_outputs['pruned_span_ends'],
+                "pruned_span_indices": pruner_outputs['pruned_span_indices'],
                 # "coref_top_span_cluster_ids": top_span_cluster_ids,
             }
         else:
@@ -679,7 +550,7 @@ class MangoesMTL(BertPreTrainedModel):
         if 'ner' in tasks:
             # We just need span embeddings here
 
-            fc1 = self.unary_ner_common(span_emb)
+            fc1 = self.unary_ner_common(pruner_outputs['span_emb'])
 
             # Depending on the domain, select the right decoder
             logits = self.unary_ner_specific[domain](fc1)
@@ -711,7 +582,7 @@ class MangoesMTL(BertPreTrainedModel):
             n_subwords: int,
             tasks: Iterable[str],
             domain: str,
-            speaker_ids: Optional[torch.Tensor] = None,
+            speaker_ids: Optional[torch.tensor] = None,
             coref: dict = None,
             ner: dict = None,
             pruner: dict = None,

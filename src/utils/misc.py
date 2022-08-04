@@ -312,6 +312,11 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'task',
         'task_2',
         'ignore_speakers'
+        'encoder_dropout',
+        'pruner_dropout',
+        'ner_dropout',
+        'pruner_top_span_ratio',
+        'coref_dropout',
     ]
 
     # If old is a dict, we don't need to pull

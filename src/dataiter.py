@@ -532,7 +532,7 @@ z        """
             is_split_into_words=True,
             return_tensors="pt",
             return_length=True,
-            max_length=n_mlen * self.config.max_document_segments
+            max_length=n_mlen * self.config.max_training_segments
         )
 
         n_subwords = tokenized.attention_mask.sum().item()

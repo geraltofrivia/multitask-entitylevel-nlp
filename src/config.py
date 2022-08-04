@@ -96,12 +96,20 @@ DEFAULTS: dict = FancyDict({
     'skip_instance_after_nspan': 15000,
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
-    'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
+    'max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_dropout': 0.3,
+    'pruner_dropout': 0.3,
+    'ner_dropout': 0.3,
+    'encoder_dropout': 0.3,
+    'unary_hdim': 3000,
+
+    'pruner_top_span_ratio': 0.4,
+    'pruner_max_num_spans': 250,  # Can never have more than this number of spans post pruning
+    'pruner_use_width': True,  # if False, we ignore span width as a feature in span width embeddings and pruning spans.
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
-    'max_top_antecedents': 30,  # How many top antecedents to consider for a given anaphor (COREF specific)
+    'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
     'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
     # truncate the train set (never the dev set tho)
 

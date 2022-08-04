@@ -57,4 +57,16 @@ Other TODOs
 [ ] Analyse predictions of model - look at what samples are predicted. Can we curtail spans by POS tags?
 [!] Feed spans from the data iter part instead of within the model
 [ ] Integrate Univ. Anaphora Scorer
-[ ] 
+[ ] Shared Span Pruner
+
+# 03-08-2022
+
+[ ] Make different chunks of the MTL model
+[ ] Encoder chunk (that extends Tranformers sure)
+[ ] NER chunk
+[ ] Coref Chunk
+[ ] Integration Logic remains in MTL but modules do their job well.
+--------    
+[ ] Compute Baseline Results
+[ ] Implement Shared Pruner (integrated in there)
+[ ] Implement Shared Dense Layers (2 layer dense net with same or half dimensionality)
