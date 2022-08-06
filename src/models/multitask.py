@@ -98,6 +98,7 @@ class MangoesMTL(BertPreTrainedModel):
 
         ffnn_hidden_size = unary_hdim
         bert_hidden_size = hidden_size
+        span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
 
         """
             NER Stuff is domain specific.
