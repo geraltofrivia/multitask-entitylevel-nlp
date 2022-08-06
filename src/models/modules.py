@@ -254,6 +254,7 @@ class CorefDecoder(torch.nn.Module):
         # Config Time
         _span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
         _final_metadata_size = coref_metadata_feature_size * (2 if ignore_speakers else 3)
+
         self.max_top_antecedents: int = max_top_antecedents
         self.max_training_segments: int = max_training_segments
         self.coref_depth: int = coref_higher_order
@@ -404,7 +405,7 @@ class CorefDecoder(torch.nn.Module):
         num_cand, num_ant = top_antecedents.shape
         feature_emb_list = []
 
-        if (not self._ignore_speaker) or (top_span_speaker_ids is not None):
+        if (not self._ignore_speakers) or (top_span_speaker_ids is not None):
             top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
             # [top_cand, top_ant]
             same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
