@@ -679,6 +679,7 @@ z        """
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
             "loss_scales": self.loss_scales,
+            "hash": hash(tuple(to_toks(instance.document))),  # dump and retrieve tensors to and from disk
             "coref": {},
             "ner": {},
             "pruner": {}
@@ -879,12 +880,11 @@ class MultiDomainDataCombiner(Dataset):
         self.source_pointers = [-1] * len(self.dataiters)
 
         # TODO: interpret sampling ratios properly.
-        if not sampling_ratio:
-            sampling_ratio = [1] * len(self.dataiters)
+        self.sampling_ratio = [1] * len(self.dataiters) if not sampling_ratio else None
 
         # Normalise sampling_ratios, weighted by aggregate length of all dataiters
         weights = [len(dataiter) for dataiter in self.dataiters]
-        self.weights = [int(weight * ratio) for weight, ratio in zip(weights, sampling_ratio)]
+        self.weights = [int(weight * ratio) for weight, ratio in zip(weights, self.sampling_ratio)]
 
         # Create a list of ints based on these weights which dictate which iter to choose the next sample from
 

@@ -35,14 +35,6 @@ torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
 
-# def make_optimizer(model, optimizer_class: Callable, lr: float, freeze_encoder: bool):
-#     if freeze_encoder:
-#         return optimizer_class(
-#             [param for name, param in model.named_parameters() if not name.startswith("encoder")],
-#             lr=lr
-#         )
-#     else:
-#         return optimizer_class(model.parameters(), lr=lr)
 def make_optimizer(
         model: MangoesMTL,
         base_keyword: str,

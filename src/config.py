@@ -24,6 +24,7 @@ LOCATIONS: Dict[str, Path] = FancyDict(
         "glove": ROOT_LOC / "models" / "glove",
         "manual": ROOT_LOC / "data" / "manual",
         "models": ROOT_LOC / "models" / "trained",
+        "encoded": ROOT_LOC / "data" / "encoded",
 
         # Some datasets
         "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
