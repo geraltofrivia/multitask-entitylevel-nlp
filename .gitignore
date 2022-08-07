@@ -174,6 +174,7 @@ cython_debug/
 /data/raw/codicrac-switchboard/__MACOSX/
 /data/raw/codicrac-switchboard/Switchboard_3_dev.CONLL_LDC2021E05.zip
 /temp/
+/data/encoded
 !/data/raw/codicrac-light/
 !/data/raw/codicrac-light/light_dev.2022.CONLLUA
 !/data/raw/codicrac-light/light_train.2022.CONLLUA
@@ -184,3 +185,4 @@ cython_debug/
 !/data/raw/codicrac-switchboard/Switchboard_dev.2022.CONLLUA
 !/data/raw/codicrac-switchboard/Switchboard_train.2022.CONLLUA
 /data/manual/speaker*tag_dict.json
+/src/wandb/
