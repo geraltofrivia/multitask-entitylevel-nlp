@@ -440,10 +440,7 @@ def train(ctx):
     lr_schedule = ctx.obj['lr_schedule']
     tasks = ctx.obj['tasks']
     tasks_2 = ctx.obj['tasks_2']
-    tokenizer = ctx.obj['tokenizer']
     _is_multidomain = ctx.obj['_is_multidomain']
-    sampling_ratio = ctx.obj['sampling_ratio']
-    speaker_offsets = ctx.obj['speaker_offsets']
     save = ctx.obj['save']
     resume_dir = ctx.obj['resume_dir']
     use_wandb = ctx.obj['use_wandb']
@@ -614,15 +611,16 @@ def encode(ctx):
         Here we aim to encode the datasets based on the BERT model that we're working with.
     """
     # Unpack the context
+    dir_encoder = ctx.obj['dir_encoder']
     train_ds = ctx.obj['train_ds']
     dev_ds = ctx.obj['dev_ds']
     device = ctx.obj['device']
     config = ctx.obj['config']
 
-    encoder = PreEncoder(dataset_partial=train_ds, vocab_size=config.vocab_size, device=device)
+    encoder = PreEncoder(dataset_partial=train_ds, enc_nm=dir_encoder, device=device)
     encoder.run()
     del encoder
-    encoder = PreEncoder(dataset_partial=dev_ds, vocab_size=config.vocab_size, device=device)
+    encoder = PreEncoder(dataset_partial=dev_ds, enc_nm=dir_encoder, device=device)
     encoder.run()
     del encoder
 

@@ -37,14 +37,14 @@ class PreEncoder:
     def __init__(
             self,
             dataset_partial: Callable,
-            vocab_size: str,  # the name like 'bert-base-uncased' etc
+            enc_nm: str,  # the name like 'bert-base-uncased' etc
             device: Union[str, torch.device] = 'cpu'
     ):
-        self._vocab_size = vocab_size
+        self._vocab_size = enc_nm
         self._device = device
 
-        # base_config = SerializedBertConfig(vocab_size=vocab_size)
-        self.bert = BertModel.from_pretrained(vocab_size).to(self._device)
+        # base_config = SerializedBertConfig(enc_nm=enc_nm)
+        self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False).to(self._device)
         self.dataset: Union[MultiTaskDataIter, MultiDomainDataCombiner] = dataset_partial()
 
         # If there are sampling ratios involved, we should warn
@@ -61,7 +61,7 @@ class PreEncoder:
         self._write_instances_()
 
     @staticmethod
-    def _write_to_disk_(self, instance: dict, output: torch.tensor):
+    def _write_to_disk_(instance: dict, output: torch.tensor):
         """
             Get the location based on instance, write the tensor
         """
