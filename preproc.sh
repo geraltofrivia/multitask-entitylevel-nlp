@@ -1,4 +1,5 @@
 rm data/parsed/*/*/*
+rm -r data/encoded/*
 
 python src/preproc/ontonotes.py -a
 python src/preproc/scierc.py -s all
