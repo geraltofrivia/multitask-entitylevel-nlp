@@ -64,7 +64,7 @@ class MangoesMTL(nn.Module):
             ignore_speakers: bool = False,
 
             # This is a crucial flag which changes a lot of things
-            train_encoder: bool = False,
+            freeze_encoder: bool = False,
 
             *args, **kwargs
     ):
@@ -76,12 +76,15 @@ class MangoesMTL(nn.Module):
         task_1 = Tasks(**task_1)
         task_2 = Tasks(**task_2)
 
-        if train_encoder:
+        if not freeze_encoder:
             self.bert = BertModel.from_pretrained(enc_nm)
             self.retriever = None
         else:
             self.bert = None
             self.retriever = Retriever(vocab_size=enc_nm, device=device)
+
+        # This dense thing is the one that takes the brunt of being cross task
+        self.dense = nn.Linear(hidden_size, hidden_size)
 
         self.pruner = SpanPruner(
             hidden_size=hidden_size,
@@ -141,7 +144,7 @@ class MangoesMTL(nn.Module):
         self.coref_loss_mean = coref_loss_mean
         self._skip_instance_after_nspan = skip_instance_after_nspan
         self._ignore_speaker = ignore_speakers
-        self._train_encoder = train_encoder
+        self._freeze_encoder = freeze_encoder
         self._tasks_: List[Tasks] = [task_1, task_2]
 
         # TODO: replace this
@@ -288,11 +291,13 @@ class MangoesMTL(nn.Module):
             raise AnticipateOutOfMemException(f"There are {candidate_starts.shape[0]} candidates", device)
 
         # Pass through Text Encoder
-        if self._train_encoder:
+        if not self._freeze_encoder:
             hidden_states = self.bert(input_ids, attention_mask)[0]  # [num_seg, max_seg_len, emb_len]
         else:
-            hidden_states = self.retriever.load(domain=domain, hash=hash)
+            hidden_states = self.retriever.load(domain=domain, hash=hash)  # [num_seg, max_seg_len, emb_len]
         num_segments, len_segment, len_embedding = hidden_states.shape
+
+        hidden_states = self.dense(hidden_states)
 
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
         hidden_states = torch.masked_select(hidden_states.view(num_segments * len_segment, len_embedding),
