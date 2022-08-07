@@ -291,12 +291,12 @@ class MangoesMTL(nn.Module):
             hidden_states = self.bert(input_ids, attention_mask)[0]  # [num_seg, max_seg_len, emb_len]
         else:
             hidden_states = self.retriever.load(domain=domain, hash=hash)
-        num_segments, len_segment, len_embbedding = hidden_states.shape
+        num_segments, len_segment, len_embedding = hidden_states.shape
 
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
-        hidden_states = torch.masked_select(hidden_states.view(num_segments * len_segment, len_embbedding),
+        hidden_states = torch.masked_select(hidden_states.view(num_segments * len_segment, len_embedding),
                                             attention_mask.bool().view(-1, 1)).view(-1,
-                                                                                    len_embbedding)  # [num_words, emb_len]
+                                                                                    len_embedding)  # [num_words, emb_len]
         flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
         if speaker_ids is not None:
             speaker_ids = torch.masked_select(speaker_ids.view(num_segments * len_segment),
