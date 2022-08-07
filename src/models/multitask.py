@@ -4,24 +4,24 @@
 """
 
 import random
-from typing import List, Iterable, Optional
+from typing import List, Iterable, Optional, Union
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import BertModel, BertPreTrainedModel
+from transformers import BertModel
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import _SEED_ as SEED
 from utils.data import Tasks
-from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException
-from utils.misc import SerializedBertConfig
+from config import _SEED_ as SEED
+from preproc.encode import Retriever
 from models.modules import SpanPruner, CorefDecoder
+from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -33,7 +33,7 @@ torch.backends.cudnn.deterministic = True
 
 
 # noinspection PyUnusedLocal
-class MangoesMTL(BertPreTrainedModel):
+class MangoesMTL(nn.Module):
 
     def __init__(
             self,
@@ -57,22 +57,32 @@ class MangoesMTL(BertPreTrainedModel):
             pruner_max_num_spans: int,
             pruner_top_span_ratio: float,
 
+            device: Union[str, torch.device],
             bias_in_last_layers: bool = False,
             skip_instance_after_nspan: int = -1,
             coref_num_speakers: int = 2,
             ignore_speakers: bool = False,
 
+            # This is a crucial flag which changes a lot of things
+            train_encoder: bool = False,
+
             *args, **kwargs
     ):
 
-        base_config = SerializedBertConfig(vocab_size=vocab_size)
-        super().__init__(base_config)
+        # base_config = SerializedBertConfig(vocab_size=vocab_size)
+        super().__init__()
 
         # Convert task, task2 to Tasks object again (for now)
         task_1 = Tasks(**task_1)
         task_2 = Tasks(**task_2)
 
-        self.bert = BertModel(base_config, add_pooling_layer=False)
+        if train_encoder:
+            self.bert = BertModel.from_pretrained(enc_nm)
+            self.retriever = None
+        else:
+            self.bert = None
+            self.retriever = Retriever(vocab_size=enc_nm, device=device)
+
         self.pruner = SpanPruner(
             hidden_size=hidden_size,
             unary_hdim=unary_hdim,
@@ -131,6 +141,7 @@ class MangoesMTL(BertPreTrainedModel):
         self.coref_loss_mean = coref_loss_mean
         self._skip_instance_after_nspan = skip_instance_after_nspan
         self._ignore_speaker = ignore_speakers
+        self._train_encoder = train_encoder
         self._tasks_: List[Tasks] = [task_1, task_2]
 
         self.init_weights()
@@ -262,6 +273,7 @@ class MangoesMTL(BertPreTrainedModel):
             sentence_map: List[int],
             tasks: Iterable[str],
             domain: str,
+            hash: int,
             speaker_ids: Optional[torch.tensor] = None,
             *args,
             **kwargs
@@ -275,9 +287,10 @@ class MangoesMTL(BertPreTrainedModel):
             raise AnticipateOutOfMemException(f"There are {candidate_starts.shape[0]} candidates", device)
 
         # Pass through Text Encoder
-        bert_outputs = self.bert(input_ids, attention_mask)
-
-        hidden_states = bert_outputs[0]  # [num_seg, max_seg_len, emb_len]
+        if self._train_encoder:
+            hidden_states = self.bert(input_ids, attention_mask)[0]  # [num_seg, max_seg_len, emb_len]
+        else:
+            hidden_states = self.retriever.load(domain=domain, hash=hash)
         num_segments, len_segment, len_embbedding = hidden_states.shape
 
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]

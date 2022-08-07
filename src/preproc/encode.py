@@ -18,8 +18,8 @@ from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.exceptions import DatasetNotEncoded, InstanceNotEncoded, MismatchedConfig
 
 
-def get_write_location(instance: dict, create_mode: bool = True) -> Path:
-    loc: Path = LOC.encoded / instance['domain']
+def get_write_location(domain: str, create_mode: bool = True) -> Path:
+    loc: Path = LOC.encoded / domain
     if create_mode:
         loc.mkdir(parents=True, exist_ok=True)
     return loc
@@ -65,7 +65,7 @@ class PreEncoder:
         """
             Get the location based on instance, write the tensor
         """
-        loc = get_write_location(instance)
+        loc = get_write_location(instance['domain'])
         loc = loc / f"{instance['hash']}.torch"
         with loc.open('wb+') as f:
             torch.save(output, f)
@@ -96,17 +96,17 @@ class Retriever:
         self.vocab_size = vocab_size
         self.device = device
 
-    def load(self, instance: dict) -> torch.tensor:
+    def load(self, domain: str, hash: int) -> torch.tensor:
         # need src, split, hash
-        loc: Path = get_write_location(instance, create_mode=False)
+        loc: Path = get_write_location(domain, create_mode=False)
 
         if not loc.exists():
             raise DatasetNotEncoded(loc)
 
         if not loc.exists():
-            raise InstanceNotEncoded(loc=loc, hash=instance['hash'])
+            raise InstanceNotEncoded(loc=loc, hash=hash)
 
-        loc: Path = loc / f"{instance['hash']}.torch"
+        loc: Path = loc / f"{hash}.torch"
 
         encoded, vocab_size = torch.load(loc.open('rb'))
 
