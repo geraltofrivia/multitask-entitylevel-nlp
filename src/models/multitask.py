@@ -84,7 +84,7 @@ class MangoesMTL(nn.Module):
             self.retriever = Retriever(vocab_size=enc_nm, device=device)
 
         # This dense thing is the one that takes the brunt of being cross task
-        self.dense = nn.Linear(hidden_size, hidden_size)
+        # self.dense = nn.Linear(hidden_size, hidden_size)
 
         self.pruner = SpanPruner(
             hidden_size=hidden_size,
@@ -297,7 +297,7 @@ class MangoesMTL(nn.Module):
             hidden_states = self.retriever.load(domain=domain, hash=hash)  # [num_seg, max_seg_len, emb_len]
         num_segments, len_segment, len_embedding = hidden_states.shape
 
-        hidden_states = self.dense(hidden_states)
+        # hidden_states = self.dense(hidden_states)
 
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
         hidden_states = torch.masked_select(hidden_states.view(num_segments * len_segment, len_embedding),
