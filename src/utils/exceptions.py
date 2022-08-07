@@ -1,9 +1,9 @@
 """
     Its a good idea to keep custom exceptions together.
 """
-from typing import Union, Optional
+from pathlib import Path
+from typing import Union
 
-import torch
 from mytorch.utils.goodies import estimate_memory
 
 
@@ -62,9 +62,38 @@ class NANsFound(ValueError):
 class AnticipateOutOfMemException(Exception):
     """ A model may throw this if it seems to be going out of memory. If not, well, bien. """
 
-    def __init__(self, reason: str, device: Optional[Union[str, torch.device]], *args):
+    def __init__(self, reason: str, *args):
         super().__init__(*args)
         self.reason = reason
 
     def __str__(self):
         return f"{self.reason}\n\t Currently Available Memory: {estimate_memory()} GBs."
+
+
+class DatasetNotEncoded(FileNotFoundError):
+    """ It seems this dataset was never encoded """
+
+    def __init__(self, reason: Path, *args):
+        super().__init__(*args)
+        self.reason = reason
+
+    def __str__(self):
+        return f"The location: {self.reason} does not exist. We need to execute run.py."
+
+
+class InstanceNotEncoded(FileNotFoundError):
+    """ It seems that this particular instance was never encoded"""
+
+    def __init__(self, loc: Path, hash: Union[int, float], *args):
+        super().__init__(*args)
+        self.loc = loc
+        self.hash = hash
+
+    def __str__(self):
+        return f"The file: {self.hash} does not exist in {self.loc}. " \
+               f"You probably ran the cacher with a sampling ratio or with trim."
+
+
+class MismatchedConfig(Exception):
+    """ """
+    ...

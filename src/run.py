@@ -18,6 +18,7 @@ except ImportError:
     from . import _pathfix
 from utils.data import Tasks
 from loops import training_loop
+from preproc.encode import Encoder
 from models.multitask import MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
@@ -193,7 +194,8 @@ def get_dataiter_partials(
 
 
 # noinspection PyDefaultArgument
-@click.command()
+@click.group()
+@click.pass_context
 @click.option("--dataset", "-d", type=str, required=True,
               help="The name of the first (or only) dataset e.g. ontonotes etc")
 @click.option("--tasks", "-t", type=(str, float, bool), multiple=True, required=True,
@@ -256,6 +258,7 @@ def get_dataiter_partials(
 @click.option('--wandb-name', '-wbname', type=str, default=None,
               help="You can specify a short name for the run here as well. ")
 def run(
+        ctx,  # The ctx obj click uses to pass things around in commands
         tokenizer: str,
         encoder: str,
         epochs: int,
@@ -285,6 +288,8 @@ def run(
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: implement soft loading the model parameters somehow.
+
+    ctx.ensure_object(dict)
 
     if not tokenizer:
         tokenizer = encoder
@@ -369,6 +374,87 @@ def run(
     # This is for task 1 and 2 respectively. If you add more datasets, change!
     speaker_offsets = [0, tasks.n_speakers]
 
+    """
+        Prep datasets.
+        For both d1 and d2,
+            - prep loss scales
+            - prep class weights (by instantiating a temp dataiter)
+            - make suitable partials.
+
+        Then, IF d2 is specified, make a data combiner thing, otherwise just use this partial in the loop.
+        Do the same for evaluators.
+
+    """
+    train_ds, dev_ds = get_dataiter_partials(config, tasks, tokenizer=tokenizer)
+    if _is_multidomain:
+        # Make a specific single domain multitask dataiter
+        train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, tokenizer=tokenizer)
+
+        # Combine the two single domain dataset to make a multidomain dataiter
+        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio,
+                           speaker_offsets=speaker_offsets)
+        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio,
+                         speaker_offsets=speaker_offsets)
+
+    """
+        Prepare Context Object
+        So far, we've done some common stuff. At this point, based on what was invoked, we can change a lot of things.
+        You may have ended the command with 'train' in which case the rest of the stuff will happen in the train fn.
+        There will be an 'unpacking of context' there. Likewise in all functions decorated with `click.command`.
+    """
+    # Pack things in context to invoke the right command
+    ctx.obj['dir_encoder'] = dir_encoder
+    ctx.obj['config'] = config
+    ctx.obj['device'] = device
+    ctx.obj['lr_schedule'] = lr_schedule
+    ctx.obj['tasks'] = tasks
+    ctx.obj['tasks_2'] = tasks_2
+    ctx.obj['tokenizer'] = tokenizer
+    ctx.obj['_is_multidomain'] = _is_multidomain
+    ctx.obj['sampling_ratio'] = sampling_ratio
+    ctx.obj['speaker_offsets'] = speaker_offsets
+    ctx.obj['save'] = save
+    ctx.obj['resume_dir'] = resume_dir
+    ctx.obj['use_wandb'] = use_wandb
+    ctx.obj['dataset'] = dataset
+    ctx.obj['dataset_2'] = dataset_2
+    ctx.obj['wandb_comment'] = wandb_comment
+    ctx.obj['wandb_name'] = wandb_name
+    ctx.obj['wandb_trial'] = wandb_trial
+    ctx.obj['trim'] = trim
+    ctx.obj['train_ds'] = train_ds
+    ctx.obj['dev_ds'] = dev_ds
+
+
+@run.command()
+@click.pass_context
+def train(ctx):
+    """
+        This is the default function. We make model, make the scheduler and train the model and everything.
+    """
+    # Unpacking the context (courtesy of click)
+    dir_encoder = ctx.obj['dir_encoder']
+    config = ctx.obj['config']
+    device = ctx.obj['device']
+    lr_schedule = ctx.obj['lr_schedule']
+    tasks = ctx.obj['tasks']
+    tasks_2 = ctx.obj['tasks_2']
+    tokenizer = ctx.obj['tokenizer']
+    _is_multidomain = ctx.obj['_is_multidomain']
+    sampling_ratio = ctx.obj['sampling_ratio']
+    speaker_offsets = ctx.obj['speaker_offsets']
+    save = ctx.obj['save']
+    resume_dir = ctx.obj['resume_dir']
+    use_wandb = ctx.obj['use_wandb']
+    dataset = ctx.obj['dataset']
+    dataset_2 = ctx.obj['dataset_2']
+    wandb_comment = ctx.obj['wandb_comment']
+    wandb_name = ctx.obj['wandb_name']
+    wandb_trial = ctx.obj['wandb_trial']
+    trim = ctx.obj['trim']
+    train_ds = ctx.obj['train_ds']
+    dev_ds = ctx.obj['dev_ds']
+
     # Make the model
     model = MangoesMTL.from_pretrained(dir_encoder, config=config, **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
@@ -389,29 +475,6 @@ def run(
         adam_epsilon=config.trainer.adam_epsilon,
     )
     scheduler = make_scheduler(opt, lr_schedule[0], lr_schedule[1])
-
-    """
-        Prep datasets.
-        For both d1 and d2,
-            - prep loss scales
-            - prep class weights (by instantiating a temp dataiter)
-            - make suitable partials.
-            
-        Then, IF d2 is specified, make a data combiner thing, otherwise just use this partial in the loop.
-        Do the same for evaluators.
-        
-    """
-
-    train_ds, dev_ds = get_dataiter_partials(config, tasks, tokenizer=tokenizer)
-    if _is_multidomain:
-        # Make a specific single domain multitask dataiter
-        train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, tokenizer=tokenizer)
-
-        # Combine the two single domain dataset to make a multidomain dataiter
-        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio,
-                           speaker_offsets=speaker_offsets)
-        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio,
-                         speaker_offsets=speaker_offsets)
 
     # Collect all metrics
     metrics = {task.dataset: [] for task in [tasks, tasks_2]}
@@ -481,7 +544,7 @@ def run(
             First check if the config matches. If not, then
                 - report the mismatches
                 - try to find other saved models which have the same config.
-            
+
             Get the WandB ID (if its there, and if WandB is enabled.)
             Second, pull the model weights and put them on the model.            
          """
@@ -543,29 +606,34 @@ def run(
     print("potato")
 
 
+@run.command()
+@click.pass_context
+def encode(ctx):
+    """
+        Here we aim to encode the datasets based on the BERT model that we're working with.
+    """
+    # Unpack the context
+    train_ds = ctx.obj['train_ds']
+    dev_ds = ctx.obj['dev_ds']
+    device = ctx.obj['device']
+    config = ctx.obj['config']
+
+    encoder = Encoder(dataset_partial=train_ds, vocab_size=config.vocab_size, device=device)
+    encoder.run()
+    del encoder
+    encoder = Encoder(dataset_partial=dev_ds, vocab_size=config.vocab_size, device=device)
+    encoder.run()
+    del encoder
+
+    print("Done encoding.")
+
+
+@run.command()
+@click.pass_context
+def infer(ctx):
+    """ Generate Universal Anaphora compatible predictions and score"""
+    raise NotImplementedError
+
+
 if __name__ == "__main__":
     run()
-
-    # si tu veux executer le code manuellment,
-    # max_span_width = 5
-    # dataset = 'ontonotes'
-    # tasks: List[str] = ['coref', 'pruner']
-    # dataset_2: str = None
-    # tasks_2: List[str] = []
-    # epochs: int = 10
-    # learning_rate: float = 0.005
-    # encoder: str = "bert-base-uncased"
-    # device: str = "cuda"
-    # trim: bool = True
-    # train_encoder: bool = False
-    # ner_unweighted: bool = False
-    # pruner_unweighted: bool = False
-    # t1_ignore_task: str = None
-    # t2_ignore_task: str = None
-    # use_wandb: bool = False
-    # wandb_comment: str = ''
-    # wandb_trial: bool = False
-    # filter_candidates_pos: bool = False
-    # save: bool = False
-    # resume_dir: int = -1
-    # use_pretrained_model: str = None
