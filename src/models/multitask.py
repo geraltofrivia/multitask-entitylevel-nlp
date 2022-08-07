@@ -144,7 +144,8 @@ class MangoesMTL(nn.Module):
         self._train_encoder = train_encoder
         self._tasks_: List[Tasks] = [task_1, task_2]
 
-        self.init_weights()
+        # TODO: replace this
+        # self.init_weights()
 
     def task_separate_gradient_clipping(self):
         # noinspection PyAttributeOutsideInit
@@ -371,6 +372,7 @@ class MangoesMTL(nn.Module):
             n_subwords: int,
             tasks: Iterable[str],
             domain: str,
+            hash: int,
             speaker_ids: Optional[torch.tensor] = None,
             coref: dict = None,
             ner: dict = None,
@@ -391,6 +393,7 @@ class MangoesMTL(nn.Module):
             n_words=n_words,
             domain=domain,
             tasks=tasks,
+            hash=hash,
             speaker_ids=speaker_ids,
             n_subwords=n_subwords,
             coref_gold_starts=coref.get('gold_starts', None),

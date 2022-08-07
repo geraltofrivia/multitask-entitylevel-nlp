@@ -108,7 +108,8 @@ class Retriever:
 
         loc: Path = loc / f"{hash}.torch"
 
-        encoded, vocab_size = torch.load(loc.open('rb'))
+        from_disk = torch.load(loc.open('rb'))
+        encoded, vocab_size = from_disk['encoded'], from_disk['vocab_size']
 
         if vocab_size != self.vocab_size:
             raise MismatchedConfig(f"The current vocab size: {self.vocab_size}. The one on disk: {vocab_size}.")

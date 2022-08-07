@@ -454,7 +454,7 @@ def train(ctx):
     dev_ds = ctx.obj['dev_ds']
 
     # Make the model
-    model = MangoesMTL.from_pretrained(dir_encoder, config=config, **config.to_dict()).to(device)
+    model = MangoesMTL(dir_encoder, config=config, **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     print("Model params: ", sum([param.nelement() for param in model.parameters()]))
 
