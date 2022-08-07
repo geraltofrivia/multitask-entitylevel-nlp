@@ -18,7 +18,7 @@ except ImportError:
     from . import _pathfix
 from utils.data import Tasks
 from loops import training_loop
-from preproc.encode import Encoder
+from preproc.encode import PreEncoder
 from models.multitask import MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
@@ -619,10 +619,10 @@ def encode(ctx):
     device = ctx.obj['device']
     config = ctx.obj['config']
 
-    encoder = Encoder(dataset_partial=train_ds, vocab_size=config.vocab_size, device=device)
+    encoder = PreEncoder(dataset_partial=train_ds, vocab_size=config.vocab_size, device=device)
     encoder.run()
     del encoder
-    encoder = Encoder(dataset_partial=dev_ds, vocab_size=config.vocab_size, device=device)
+    encoder = PreEncoder(dataset_partial=dev_ds, vocab_size=config.vocab_size, device=device)
     encoder.run()
     del encoder
 
