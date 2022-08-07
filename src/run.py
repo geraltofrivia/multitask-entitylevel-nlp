@@ -288,6 +288,7 @@ def run(
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: implement soft loading the model parameters somehow.
+    # TODO: when train encoder is given we have to upend a lot of things and ignore the cached stuff
 
     ctx.ensure_object(dict)
 

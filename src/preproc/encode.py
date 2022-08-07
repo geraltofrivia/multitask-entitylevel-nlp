@@ -13,7 +13,7 @@ try:
 except ImportError:
     from . import _pathfix
 from config import LOCATIONS as LOC
-from utils.misc import SerializedBertConfig, change_device
+from utils.misc import change_device
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.exceptions import DatasetNotEncoded, InstanceNotEncoded, MismatchedConfig
 
@@ -53,8 +53,8 @@ class Encoder:
         self._vocab_size = vocab_size
         self._device = device
 
-        base_config = SerializedBertConfig(vocab_size=vocab_size)
-        self.bert = BertModel(base_config, add_pooling_layer=False).to(self._device)
+        # base_config = SerializedBertConfig(vocab_size=vocab_size)
+        self.bert = BertModel.from_pretrained(vocab_size).to(self._device)
         self.dataset: Union[MultiTaskDataIter, MultiDomainDataCombiner] = dataset_partial()
 
         # If there are sampling ratios involved, we should warn
