@@ -50,10 +50,8 @@ def make_optimizer(
         optimizer_class: Callable = torch.optim.AdamW,
 ):
     """
-    Setup the optimizer and the learning rate scheduler.
-
-    This will use AdamW. If you want to use something else (ie, a different optimizer and multiple learn rates), you
-    can subclass and override this method in a subclass.
+        Setup the optimizer.
+        TODO: fix this (update with frozen encoder thing; check if the submodules get LR propagated to them properly)
     """
 
     if task_learning_rate is None:

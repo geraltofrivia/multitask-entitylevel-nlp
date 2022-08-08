@@ -283,7 +283,7 @@ class CorefDecoder(torch.nn.Module):
         if self._ignore_speakers:
             self.emb_same_speaker = None
         else:
-            self.emb_same_speaker = Utils.make_embeddings(coref_num_speakers, coref_metadata_feature_size)
+            self.emb_same_speaker = Utils.make_embeddings(2, coref_metadata_feature_size)
 
     @staticmethod
     def batch_gather(emb, indices):
@@ -405,13 +405,12 @@ class CorefDecoder(torch.nn.Module):
         num_cand, num_ant = top_antecedents.shape
         feature_emb_list = []
 
-        if (not self._ignore_speakers) or (top_span_speaker_ids is not None):
+        if (not self._ignore_speakers) and (top_span_speaker_ids is not None):
             top_antecedent_speaker_ids = top_span_speaker_ids[top_antecedents]  # [top_cand, top_ant]
             # [top_cand, top_ant]
             same_speaker = torch.eq(top_span_speaker_ids.view(-1, 1), top_antecedent_speaker_ids)
-            speaker_pair_emb = self.emb_same_speaker(
-                torch.arange(start=0, end=2, device=top_span_emb.device))  # [2, feature_size]
-            feature_emb_list.append(speaker_pair_emb[same_speaker.long()])
+            same_speaker_embedded = self.emb_same_speaker(same_speaker.long())
+            feature_emb_list.append(same_speaker_embedded)
             # genre_embs = genre_emb.view(1, 1, -1).repeat(num_cand, num_ant, 1)  # [top_cand, top_ant, feature_size]
             # feature_emb_list.append(genre_embs)
 
