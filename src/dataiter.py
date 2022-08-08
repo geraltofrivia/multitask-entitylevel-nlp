@@ -880,7 +880,7 @@ class MultiDomainDataCombiner(Dataset):
         self.source_pointers = [-1] * len(self.dataiters)
 
         # TODO: interpret sampling ratios properly.
-        self.sampling_ratio = [1] * len(self.dataiters) if sampling_ratio else None
+        self.sampling_ratio = [1] * len(self.dataiters) if not sampling_ratio else sampling_ratio
 
         # Normalise sampling_ratios, weighted by aggregate length of all dataiters
         weights = [len(dataiter) for dataiter in self.dataiters]

@@ -412,7 +412,6 @@ def run(
     ctx.obj['tasks_2'] = tasks_2
     ctx.obj['tokenizer'] = tokenizer
     ctx.obj['_is_multidomain'] = _is_multidomain
-    ctx.obj['sampling_ratio'] = sampling_ratio
     ctx.obj['speaker_offsets'] = speaker_offsets
     ctx.obj['save'] = save
     ctx.obj['resume_dir'] = resume_dir
