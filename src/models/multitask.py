@@ -47,6 +47,7 @@ class MangoesMTL(nn.Module):
             max_training_segments: int,
             coref_higher_order: int,
             coref_metadata_feature_size: int,
+            dense_layers: int,
             coref_loss_mean: bool,
             task_1: dict,
             task_2: dict,
@@ -84,7 +85,8 @@ class MangoesMTL(nn.Module):
             self.retriever = Retriever(vocab_size=enc_nm, device=device)
 
         # This dense thing is the one that takes the brunt of being cross task
-        self.dense = nn.Linear(hidden_size, hidden_size)
+        linear_layers = [nn.Linear(hidden_size, hidden_size) for _ in range(dense_layers)]
+        self.dense = nn.Sequential(*linear_layers)
 
         self.pruner = SpanPruner(
             hidden_size=hidden_size,

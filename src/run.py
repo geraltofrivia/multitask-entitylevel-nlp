@@ -219,7 +219,7 @@ def get_dataiter_partials(
               help="Learning rate. Defaults to 0.005.")
 @click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
               help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule."
-                   "TODO: add more recipes here")
+                   "E.g.: `gamma 0.98`. \nTODO: add more recipes here")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
@@ -235,6 +235,8 @@ def get_dataiter_partials(
                    "IF the doc has more than 10k candidates.")
 @click.option('--max-training-segments', '-mts', type=int, default=DEFAULTS['max_training_segments'],
               help="Specify the num of segments (n*512 word pieces) to keep. Only holds for train split.")
+@click.option('--dense-layers', '-dl', type=int, default=DEFAULTS['dense_layers'],
+              help="Specify the number of n cross n FFNN layers right after encoder. They're task agnostic.")
 @click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
 @click.option('--resume-dir', default=-1, type=int,
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
@@ -260,12 +262,13 @@ def run(
         tokenizer: str,
         encoder: str,
         epochs: int,
+        device: str,
+        trim: bool,
+        dense_layers: int,
         dataset: str,
         tasks: List[Tuple[str, float, bool]],
         dataset_2: str,
         tasks_2: List[Tuple[str, float, bool]] = [],
-        device: str = "cpu",
-        trim: bool = False,
         debug: bool = False,
         train_encoder: bool = False,
         use_wandb: bool = False,
@@ -341,6 +344,7 @@ def run(
     config.wandb_comment = wandb_comment
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
+    config.dense_layers = dense_layers
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
     config.coref_higher_order = coref_higher_order
