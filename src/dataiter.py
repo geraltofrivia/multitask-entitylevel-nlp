@@ -21,11 +21,11 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
+from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig, deterministic_hash
 from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split, is_split_train
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
-from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -395,6 +395,7 @@ class MultiTaskDataIter(Dataset):
 
         return pruner_specific
 
+    # noinspection PyUnusedLocal
     def process_coref(
             self,
             instance: Document,
@@ -437,7 +438,7 @@ class MultiTaskDataIter(Dataset):
         gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
         gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
         gold_cluster_ids = torch.tensor(gold_cluster_ids, dtype=torch.long, device='cpu') + 1
-        """ This +1 may be important, in distingushing actual clusters from singletons/non mentions"""
+        """ This +1 may be important, in distinguishing actual clusters from singletons/non mentions"""
 
         coref_specific = {  # Pred stuff
             # "gold_cluster_ids_on_candidates": cluster_labels,
@@ -679,7 +680,7 @@ z        """
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
             "loss_scales": self.loss_scales,
-            "hash": hash(tuple(to_toks(instance.document))),  # dump and retrieve tensors to and from disk
+            "hash": deterministic_hash(instance.document),  # dump and retrieve tensors to and from disk
             "coref": {},
             "ner": {},
             "pruner": {}

@@ -1,7 +1,8 @@
+import hashlib
 import json
 from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
-from typing import List, Union, Optional, Dict
+from typing import List, Union, Optional, Dict, Any
 
 import numpy as np
 import torch
@@ -311,6 +312,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'trainer',
         'task',
         'task_2',
+        'dense_layers',
         'ignore_speakers',
         'encoder_dropout',
         'pruner_dropout',
@@ -421,3 +423,13 @@ def compute_class_weight_sparse(class_names, class_frequencies: List[int], class
 def argsort(seq):
     # http://stackoverflow.com/questions/3071415/efficient-method-to-calculate-the-rank-vector-of-a-list-in-python
     return sorted(range(len(seq)), key=seq.__getitem__)
+
+
+def deterministic_hash(obj: Any) -> str:
+    """ Any serializable obj is serialized and hashed using md5 to get a key which should be deterministic."""
+
+    # If obj is dict, sort by keys
+    if isinstance(obj, dict):
+        obj = type(obj)(**{k: obj[k] for k in sorted(obj.keys())})
+
+    return hashlib.md5(json.dumps(obj)).hexdigest()
