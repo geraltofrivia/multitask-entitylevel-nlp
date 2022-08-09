@@ -432,4 +432,4 @@ def deterministic_hash(obj: Any) -> str:
     if isinstance(obj, dict):
         obj = type(obj)(**{k: obj[k] for k in sorted(obj.keys())})
 
-    return hashlib.md5(json.dumps(obj)).hexdigest()
+    return hashlib.md5(json.dumps(obj).encode()).hexdigest()
