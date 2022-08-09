@@ -20,7 +20,7 @@ except ImportError:
 from utils.data import Tasks
 from config import _SEED_ as SEED
 from preproc.encode import Retriever
-from models.modules import SpanPruner, CorefDecoder
+from models.modules import SpanPruner, CorefDecoder, SharedDense
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException
 
 random.seed(SEED)
@@ -87,16 +87,22 @@ class MangoesMTL(nn.Module):
             self.bert = None
             self.retriever = Retriever(vocab_size=enc_nm, device=device)
 
-        # This dense thing is the one that takes the brunt of being cross task
-        linear_layers = []
-        for _ in range(dense_layers):
-            linear_layers += [
-                nn.Linear(hidden_size, hidden_size),
-                # nn.BatchNorm1d(hidden_size),
-                nn.ReLU(),
-                nn.Dropout(encoder_dropout)
-            ]
-        self.dense = nn.Sequential(*linear_layers)
+        # # This dense thing is the one that takes the brunt of being cross task
+        # linear_layers = []
+        # for _ in range(dense_layers):
+        #     linear_layers += [
+        #         nn.Linear(hidden_size, hidden_size),
+        #         # nn.BatchNorm1d(hidden_size),
+        #         nn.ReLU(),
+        #         nn.Dropout(encoder_dropout)
+        #     ]
+        self.shared = SharedDense(input_size=hidden_size,
+                                  output_size=hidden_size // 3,
+                                  depth=dense_layers,
+                                  dropout_factor=encoder_dropout)
+
+        # Hidden size is now compressed
+        hidden_size = hidden_size // 3
 
         self.pruner = SpanPruner(
             hidden_size=hidden_size,
@@ -324,7 +330,7 @@ class MangoesMTL(nn.Module):
         """
             Shared Parameter Stuff
         """
-        hidden_states = self.dense(hidden_states)
+        hidden_states = self.shared(hidden_states)
 
         """
             That's the Span Pruner.

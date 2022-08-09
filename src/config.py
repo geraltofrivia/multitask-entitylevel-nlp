@@ -102,8 +102,8 @@ DEFAULTS: dict = FancyDict({
     'pruner_dropout': 0.3,
     'ner_dropout': 0.3,
     'encoder_dropout': 0.3,
-    'unary_hdim': 3000,
-    'dense_layers': 2,  # Dense layers are parameterized transformation right after encoder in mtl model.
+    'unary_hdim': 500,
+    'dense_layers': 1,  # Dense layers are parameterized transformation right after encoder in mtl model.
 
     'pruner_top_span_ratio': 0.4,
     'pruner_max_num_spans': 250,  # Can never have more than this number of spans post pruning

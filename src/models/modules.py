@@ -12,12 +12,19 @@
     But inference and pred with labels need to be outside.
 """
 import math
-from typing import Union
+from typing import Union, List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+
+# Local imports
+try:
+    import _pathfix
+except ImportError:
+    from . import _pathfix
+from utils.exceptions import BadParameters
 
 
 class Utils(object):
@@ -75,6 +82,72 @@ class Utils(object):
                     end_to_earliest_start[cand_end] = cand_start
             current_span_index += 1
         return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
+
+
+class SharedDense(torch.nn.Module):
+    """
+        A linear-esque layer combination, configurable to include batchnorm, dropout, activation.
+    """
+
+    def __init__(
+            self,
+            input_size: int,
+            output_size: int = -1,
+            depth: int = 1,
+            dropout_factor: float = 0.0,
+            batchnorm: bool = False,
+            dropout: bool = True,
+            activation: bool = True,
+    ):
+
+        super().__init__()
+
+        if output_size > input_size:
+            raise BadParameters(f"Shared Module: Unexpected: inputdim: {input_size}. outputdim: {output_size}. "
+                                f"Input dim should be better than output dim.")
+
+        if depth == 0:
+            self.params = nn.Sequential()
+
+        elif depth > 0:
+
+            """
+                If inputdim is 300, output dim is 100, and n = 1 you want linear layers like:
+                    [300, 100]
+                    
+                If n == 2:
+                    [300, 200], [200, 100]
+                    
+                if n == 4:
+                    [300, 250], [250, 200], [200, 150], [150, 100]
+                    
+                Basically, linearly stepping down
+            """
+            _h = input_size  # 768
+            _l = output_size  # 256
+            _n = depth  # 2
+            _d = (_h - _l) // _n  # 256
+            _arr = [_h] + [int(_h - (_d * i)) for i in range(1, _n)] + [_d]  # [768, 512, 256
+
+            layers: List[torch.nn.Module] = []
+
+            for indim, outdim in zip(_arr[:-1], _arr[1:]):
+                layer = [nn.Linear(indim, outdim)]
+                if batchnorm:
+                    layer.append(nn.BatchNorm1d(outdim))
+                if activation:
+                    layer.append(nn.ReLU())
+                if dropout:
+                    layer.append(nn.Dropout(dropout_factor))
+                layers += layer
+
+            self.params = nn.Sequential(*layers)
+
+        else:
+            raise BadParameters(f"Depth of {depth} not understood!")
+
+    def forward(self, input: torch.tensor) -> torch.tensor:
+        return self.params(input)
 
 
 class SpanPruner(torch.nn.Module):
