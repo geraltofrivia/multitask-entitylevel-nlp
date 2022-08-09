@@ -92,7 +92,7 @@ class MangoesMTL(nn.Module):
         for _ in range(dense_layers):
             linear_layers += [
                 nn.Linear(hidden_size, hidden_size),
-                nn.BatchNorm1d(hidden_size),
+                # nn.BatchNorm1d(hidden_size),
                 nn.ReLU(),
                 nn.Dropout(encoder_dropout)
             ]
