@@ -42,23 +42,26 @@ class MangoesMTL(nn.Module):
             hidden_size: int,
             max_span_width: int,
             max_top_antecedents: int,
-            coref_dropout: float,
+            device: Union[str, torch.device],
             unary_hdim: int,
             max_training_segments: int,
-            coref_higher_order: int,
-            coref_metadata_feature_size: int,
+            encoder_dropout: float,
             dense_layers: int,
-            coref_loss_mean: bool,
             task_1: dict,
             task_2: dict,
 
-            # Pruner args TODO: remove and replace with config?
+            # Pruner Specific Params
             pruner_dropout: float,
             pruner_use_width: bool,
             pruner_max_num_spans: int,
             pruner_top_span_ratio: float,
 
-            device: Union[str, torch.device],
+            # Coref Specific Params
+            coref_dropout: float,
+            coref_loss_mean: bool,
+            coref_higher_order: int,
+            coref_metadata_feature_size: int,
+
             bias_in_last_layers: bool = False,
             skip_instance_after_nspan: int = -1,
             coref_num_speakers: int = 2,
@@ -85,7 +88,14 @@ class MangoesMTL(nn.Module):
             self.retriever = Retriever(vocab_size=enc_nm, device=device)
 
         # This dense thing is the one that takes the brunt of being cross task
-        linear_layers = [nn.Linear(hidden_size, hidden_size) for _ in range(dense_layers)]
+        linear_layers = []
+        for _ in range(dense_layers):
+            linear_layers += [
+                nn.Linear(hidden_size, hidden_size),
+                nn.BatchNorm1d(hidden_size),
+                nn.ReLU(),
+                nn.Dropout(encoder_dropout)
+            ]
         self.dense = nn.Sequential(*linear_layers)
 
         self.pruner = SpanPruner(
@@ -299,8 +309,6 @@ class MangoesMTL(nn.Module):
             hidden_states = self.retriever.load(domain=domain, hash=hash)  # [num_seg, max_seg_len, emb_len]
         num_segments, len_segment, len_embedding = hidden_states.shape
 
-        hidden_states = self.dense(hidden_states)
-
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
         hidden_states = torch.masked_select(hidden_states.view(num_segments * len_segment, len_embedding),
                                             attention_mask.bool().view(-1, 1)).view(-1,
@@ -312,6 +320,11 @@ class MangoesMTL(nn.Module):
 
         # Note the number of words
         num_words = hidden_states.shape[0]
+
+        """
+            Shared Parameter Stuff
+        """
+        hidden_states = self.dense(hidden_states)
 
         """
             That's the Span Pruner.
