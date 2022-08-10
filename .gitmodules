@@ -1,0 +1,3 @@
+[submodule "data/raw/dwie"]
+	path = data/raw/dwie
+	url = git@github.com:klimzaporojets/DWIE.git
