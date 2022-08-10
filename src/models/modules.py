@@ -127,7 +127,7 @@ class SharedDense(torch.nn.Module):
             _l = output_size  # 256
             _n = depth  # 2
             _d = (_h - _l) // _n  # 256
-            _arr = [_h] + [int(_h - (_d * i)) for i in range(1, _n)] + [_d]  # [768, 512, 256
+            _arr = [_h] + [int(_h - (_d * i)) for i in range(1, _n)] + [_l]  # [768, 512, 256
 
             layers: List[torch.nn.Module] = []
 

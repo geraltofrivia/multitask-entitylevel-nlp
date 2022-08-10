@@ -314,6 +314,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'task_2',
         'dense_layers',
         'ignore_speakers',
+        'unary_hdim',
         'encoder_dropout',
         'pruner_dropout',
         'ner_dropout',
