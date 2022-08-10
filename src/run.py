@@ -360,14 +360,14 @@ def run(
     config.coref_higher_order = coref_higher_order
     config.coref_num_speakers = 0 if config.ignore_speakers else tasks.n_speakers + tasks_2.n_speakers
     config.vocab_size = tokenizer.get_vocab().__len__()
+    config.freeze_encoder = not train_encoder
     if shared_compressor:
-        config.unary_hdim = config.unary_hdim // 3
+        config.unary_hdim = DEFAULTS.unary_hdim // 3
 
     # Make a trainer dict and also
     config.trainer = FancyDict()
     config.trainer.learning_rate = learning_rate
     config.trainer.epochs = epochs
-    config.trainer.freeze_encoder = not train_encoder
     config.trainer.lr_schedule = lr_schedule[0]
     config.trainer.lr_schedule_param = lr_schedule[1]
     # config.trainer.adam_beta1
@@ -478,7 +478,7 @@ def train(ctx):
     opt = make_optimizer(
         model=model,
         task_learning_rate=config.trainer.learning_rate,
-        freeze_encoder=config.trainer.freeze_encoder,
+        freeze_encoder=config.freeze_encoder,
         base_keyword='bert',
         task_weight_decay=None,
         encoder_learning_rate=config.trainer.encoder_learning_rate,

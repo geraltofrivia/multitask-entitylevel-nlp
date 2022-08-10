@@ -62,14 +62,14 @@ class MangoesMTL(nn.Module):
             coref_higher_order: int,
             coref_metadata_feature_size: int,
 
-            bias_in_last_layers: bool = False,
-            skip_instance_after_nspan: int = -1,
-            coref_num_speakers: int = 2,
-            ignore_speakers: bool = False,
-            shared_compressor: bool = True,  # If True, it will reduce BERT embeddings from 768 to 256
+            bias_in_last_layers: bool,
+            skip_instance_after_nspan: int,
+            coref_num_speakers: int,
+            ignore_speakers: bool,
+            shared_compressor: bool,  # If True, it will reduce BERT embeddings from 768 to 256
 
             # This is a crucial flag which changes a lot of things
-            freeze_encoder: bool = False,
+            freeze_encoder: bool,
 
             *args, **kwargs
     ):
@@ -98,12 +98,12 @@ class MangoesMTL(nn.Module):
         #         nn.Dropout(encoder_dropout)
         #     ]
         self.shared = SharedDense(input_size=hidden_size,
-                                  output_size=hidden_size // 3,
+                                  output_size=hidden_size // 3 if shared_compressor else hidden_size,
                                   depth=dense_layers,
                                   dropout_factor=encoder_dropout)
 
         # Hidden size is now compressed
-        hidden_size = hidden_size // 3
+        hidden_size = hidden_size // 3 if shared_compressor else hidden_size
 
         self.pruner = SpanPruner(
             hidden_size=hidden_size,
