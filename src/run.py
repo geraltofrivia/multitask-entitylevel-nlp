@@ -251,6 +251,10 @@ def get_dataiter_partials(
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
+@click.option('--shared-compressor', '-sc', is_flag=True,
+              help="If true, the hidden layers turn BERT's hidden embeddings down to 1/3 its size and "
+                   "also decreases the unary hdim by a third. "
+                   "If this flag is enabled but dense layers are zero, we raise an error.")
 @click.option('--use-wandb', '-wb', is_flag=True, default=False,
               help="If True, we report this run to WandB")
 @click.option('--wandb-comment', '-wbm', type=str, default=None,
@@ -268,24 +272,25 @@ def run(
         dataset: str,
         tasks: List[Tuple[str, float, bool]],
         dataset_2: str,
-        tasks_2: List[Tuple[str, float, bool]] = [],
-        debug: bool = False,
-        train_encoder: bool = False,
-        use_wandb: bool = False,
-        wandb_comment: str = '',
-        wandb_name: str = None,
-        filter_candidates_pos: bool = False,
-        ignore_speakers: bool = False,
-        save: bool = False,
-        resume_dir: int = -1,
-        use_pretrained_model: str = None,
-        lr_schedule: (str, float) = (None, None),
-        sampling_ratio: (float, float) = (1.0, 1.0),
-        learning_rate: float = DEFAULTS.trainer.learning_rate,
-        max_span_width: int = DEFAULTS.max_span_width,
-        max_training_segments: int = DEFAULTS.max_training_segments,
-        coref_loss_mean: bool = DEFAULTS.coref_loss_mean,
-        coref_higher_order: int = DEFAULTS.coref_higher_order,
+        tasks_2: List[Tuple[str, float, bool]],
+        debug: bool,
+        train_encoder: bool,
+        use_wandb: bool,
+        wandb_comment: str,
+        wandb_name: str,
+        filter_candidates_pos: bool,
+        ignore_speakers: bool,
+        shared_compressor: bool,
+        save: bool,
+        resume_dir: int,
+        use_pretrained_model: str,
+        lr_schedule: (str, float),
+        sampling_ratio: (float, float),
+        learning_rate: float,
+        max_span_width: int,
+        max_training_segments: int,
+        coref_loss_mean: bool,
+        coref_higher_order: int,
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: implement soft loading the model parameters somehow.
@@ -295,6 +300,10 @@ def run(
 
     if not tokenizer:
         tokenizer = encoder
+
+    if shared_compressor and dense_layers < 1:
+        raise BadParameters(f"You want the shared layers to compress the BERT embeddings but"
+                            f"also want to have zero (specifically: {dense_layers}) layers. That's not going to work.")
 
     # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
     wandb_trial = trim or debug
@@ -345,11 +354,14 @@ def run(
     config.wandb_trial = wandb_trial
     config.coref_loss_mean = coref_loss_mean
     config.dense_layers = dense_layers
+    config.shared_compressor = shared_compressor
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
     config.coref_higher_order = coref_higher_order
     config.coref_num_speakers = 0 if config.ignore_speakers else tasks.n_speakers + tasks_2.n_speakers
     config.vocab_size = tokenizer.get_vocab().__len__()
+    if shared_compressor:
+        config.unary_hdim = config.unary_hdim // 3
 
     # Make a trainer dict and also
     config.trainer = FancyDict()
@@ -457,7 +469,9 @@ def train(ctx):
     # Make the model
     model = MangoesMTL(dir_encoder, config=config, **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
-    print("Model params: ", sum([param.nelement() for param in model.parameters()]))
+    n_params = sum([param.nelement() for param in model.parameters()])
+    print("Model params: ", n_params)
+    config.params = n_params
 
     # Make the optimizer
     # opt_base = torch.optim.Adam

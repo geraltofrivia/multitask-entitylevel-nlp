@@ -310,6 +310,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'curdir',
         'n_classes_ner',
         'trainer',
+        'params',
         'task',
         'task_2',
         'dense_layers',

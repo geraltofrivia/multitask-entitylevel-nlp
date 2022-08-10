@@ -66,6 +66,7 @@ class MangoesMTL(nn.Module):
             skip_instance_after_nspan: int = -1,
             coref_num_speakers: int = 2,
             ignore_speakers: bool = False,
+            shared_compressor: bool = True,  # If True, it will reduce BERT embeddings from 768 to 256
 
             # This is a crucial flag which changes a lot of things
             freeze_encoder: bool = False,
