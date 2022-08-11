@@ -29,6 +29,7 @@ LOCATIONS: Dict[str, Path] = FancyDict(
         # Some datasets
         "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
         "ontonotes_conll": ROOT_LOC / "data" / "raw" / "ontonotes" / "conll-2012" / "v5" / "data",
+        "dwie": ROOT_LOC / "data" / "raw" / "dwie" / "data" / "annos_with_content",
         "scierc": ROOT_LOC / "data" / "raw" / "scierc",
         "cc_ami": ROOT_LOC / "data" / "raw" / "codicrac-ami",
         "cc_switchboard": ROOT_LOC / "data" / "raw" / "codicrac-switchboard",
@@ -69,6 +70,11 @@ KNOWN_SPLITS = FancyDict({
     'codicrac-switchboard': FancyDict({
         'train': 'train',
         'dev': 'dev',
+    }),
+    'dwie': FancyDict({
+        'train': 'train',
+        'dev': 'dev',
+        'test': 'test'
     })
 })
 KNOWN_HAS_SPEAKERS = [key for key in KNOWN_SPLITS.keys() if key.startswith('codicrac')]
