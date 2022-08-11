@@ -56,6 +56,6 @@ cd modules/dwie
 python src/dwie_download.py
 cd ../..
 # now move the raw data far from the `modules` dir, into the `raw` dir
-mkdir -p data/raw/dwie
+mkdir -pv data/raw/dwie
 mv modules/dwie/data/annos_with_content/* data/raw/dwie
 ./preproc.sh

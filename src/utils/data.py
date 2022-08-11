@@ -5,7 +5,7 @@ import copy
 import json
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
 from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
@@ -41,7 +41,7 @@ class Clusters:
     clusters = [
         [[0, 1]],                        # one cluster with one span (a span is a list of two ints)
         [[2, 4], [8, 9], [13, 14]]       # next cluster with three spans
-        [
+        [ ...
     ```
 
     """
@@ -100,6 +100,8 @@ class Clusters:
 
         self.words = clusters_
         self.words_head = clusters_h_
+
+        return self
 
     def add_pos(self, pos: List[List[str]]):
         """Same as self.add_words but for pos tags"""
@@ -295,7 +297,7 @@ class NamedEntities:
 
     # Gold annotations for named entity spans
     spans: List[List[int]]  # Looks like [[112, 113], [155, 159], ... ]
-    tags: List[str]  # Looks like [ 'Person', 'Cardinal' ...
+    tags: List[Union[str, List[str]]]  # Looks like [ 'Person', 'Cardinal' ... or [ ['t1', 't2'], ['t1', 't3] ... ]
     words: List[List[str]] = field(
         default_factory=list
     )  # Looks like [['Michael', 'Jackson'] ... ]
@@ -468,6 +470,34 @@ class Document:
             raise AssertionError(f"Number of tokens don't match between doc, and pos.\n"
                                  f"Doc     : {len(to_toks(self.document))}\n"
                                  f"Pos     : {len(to_toks(self.pos))}\n")
+
+        if not self.coref.isempty:
+            if not self.coref.words:
+                self.coref = self.coref.add_words(self.document)
+
+            if not self.coref.pos:
+                self.coref.add_pos(self.pos)
+
+        if not self.rel.isempty:
+            if not self.rel.words:
+                self.rel.add_words(self.document)
+
+            if not self.rel.pos:
+                self.rel.add_pos(self.document)
+
+        if not self.bridging.isempty:
+            if not self.bridging.words:
+                self.bridging.add_words(self.document)
+
+            if not self.bridging.pos:
+                self.bridging.add_words(self.document)
+
+        if not self.ner.isempty:
+            if not self.ner.words:
+                self.ner.add_words(self.document)
+
+            if not self.ner.pos:
+                self.ner.add_pos(self.document)
 
     @cached_property
     def sentence_map(self) -> List[int]:

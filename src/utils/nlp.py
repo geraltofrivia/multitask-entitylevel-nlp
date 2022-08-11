@@ -119,6 +119,19 @@ class PreTokenizedPreSentencizedTokenizer(DummyTokenizer):
         return Doc(self.vocab, words=to_toks(inp), sent_starts=sent_starts)
 
 
+class PreTokenziedTokenizer(DummyTokenizer):
+    """
+    Use it when the text is already tokenized but the doc's gotta go through spacy.
+    Usage: `nlp.tokenizer = CustomTokenizer(nlp.vocab)`
+    """
+
+    def __init__(self, vocab):
+        self.vocab = vocab
+
+    def __call__(self, words):
+        return Doc(self.vocab, words=words)
+
+
 def match_subwords_to_words(
         tokens: List[str],
         input_ids: dict,

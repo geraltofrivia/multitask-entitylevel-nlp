@@ -29,7 +29,7 @@ LOCATIONS: Dict[str, Path] = FancyDict(
         # Some datasets
         "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
         "ontonotes_conll": ROOT_LOC / "data" / "raw" / "ontonotes" / "conll-2012" / "v5" / "data",
-        "dwie": ROOT_LOC / "data" / "raw" / "dwie" / "data" / "annos_with_content",
+        "dwie": ROOT_LOC / "data" / "raw" / "dwie",
         "scierc": ROOT_LOC / "data" / "raw" / "scierc",
         "cc_ami": ROOT_LOC / "data" / "raw" / "codicrac-ami",
         "cc_switchboard": ROOT_LOC / "data" / "raw" / "codicrac-switchboard",
