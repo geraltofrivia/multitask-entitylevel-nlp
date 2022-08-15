@@ -83,28 +83,33 @@ class DWIEParser(GenericParser):
                 dataset.append(json.load(f))
 
         test_docs = []
-        train_docs = []
-        valid_docs = []
+        train_valid_docs = []
         for i, instance in enumerate(tqdm(dataset)):
-            # if i < len(dataset) // 2:
-            #     continue
 
             if 'test' in instance['tags']:
                 doc = self._parse_(instance, 'test')
                 test_docs.append(doc)
             elif 'train' in instance['tags']:
                 doc = self._parse_(instance, 'train')
-                train_docs.append(doc)
+                train_valid_docs.append(doc)
             else:
                 raise ValueError(f"Unexpected content of instance['tags']. Expected either 'train' or 'test' in there."
                                  f"Got {instance['tags']}")
 
-        raise NotImplementedError("REMOVE THE CONTINUE IN FOR LOOP")
-        tv_len = len(train_docs)
-        tv_indices = np.arange(tv_len)
+        train_valid_len = len(train_valid_docs)
+        test_len = len(test_docs)
+        tv_indices = np.arange(train_valid_len)
         np.random.shuffle(tv_indices)
 
-        print('potato')
+        # Get a test len sized portion out of tv_indices
+        train_indices, valid_indices = tv_indices[:-test_len], tv_indices[-test_len:]
+
+        valid_docs = [train_valid_docs[i] for i in valid_indices]
+        train_docs = [train_valid_docs[i] for i in train_indices]
+
+        self.write_to_disk('train', train_docs)
+        self.write_to_disk('dev', valid_docs)
+        self.write_to_disk('test', test_docs)
         #
         # train_valid_split, valid_test_index = int(flen * 0.8), int(flen * 0.1)
         # train_fnames, dev_fnames, test_fnames = fnames[:train_valid_split], \
@@ -220,6 +225,13 @@ class DWIEParser(GenericParser):
             # the mention overlaps with the trailing end
             if start_index < mention['begin'] < end_index < mention['end']:
                 mention['end'] += offset
+
+                # It could be either that the "change" happens before the span beigins or that it happens after
+                if mention['text'] == text[mention['begin']: mention['end']]:
+                    ...
+                else:
+                    mention['begin'] += offset
+
                 mention['text'] = text[mention['begin']: mention['end']]
                 mention['changed'] = 3
 
