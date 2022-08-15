@@ -22,8 +22,9 @@ except ImportError:
     from . import _pathfix
 from preproc.commons import GenericParser
 from utils.nlp import PreTokenziedTokenizer
-from config import LOCATIONS as LOC, NPRSEED as SEED
+from config import LOCATIONS as LOC, NPRSEED as SEED, KNOWN_SPLITS
 from modules.dwie.src.dataset.utils.tokenizer import TokenizerCPN
+from dataiter import DocumentReader
 from utils.data import Document, NamedEntities, Clusters, TypedRelations, BridgingAnaphors
 
 np.random.seed(SEED)
@@ -464,10 +465,36 @@ class DWIEParser(GenericParser):
 
         return spans, tags
 
+    @staticmethod
+    def create_label_dict():
+        relevant_splits = List[str] = KNOWN_SPLITS.dwie[:-1]
+        ner_labels = set()
+        rel_labels = set()
+        for split in relevant_splits:
+            reader = DocumentReader('dwie', split=split)
+            for doc in reader:
+                ner_labels = ner_labels.union(doc.ner.tags)
+                rel_labels = rel_labels.union(doc.rel.tags)
+
+        ner_labels = list(ner_labels)
+        rel_labels = list(rel_labels)
+
+        # Turn them into dicts and dump them as json
+        with (LOC.manual / 'ner_dwie_tag_dict.json').open('w+', encoding='utf8') as f:
+            ner_labels = {tag: i for i, tag in enumerate(sorted(ner_labels))}
+            json.dump(ner_labels, f)
+            print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ner_tag_dict.json')}")
+
+        with (LOC.manual / 'rel_dwie_tag_dict.json').open('w+', encoding='utf8') as f:
+            rel_labels = {tag: i for i, tag in enumerate(sorted(rel_labels))}
+            json.dump(rel_labels, f)
+            print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ner_tag_dict.json')}")
+
 
 def run():
     parser = DWIEParser(LOC.dwie)
     parser.run()
+    parser.create_label_dict()
 
 
 if __name__ == '__main__':
