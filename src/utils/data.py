@@ -365,6 +365,10 @@ class NamedEntities:
             raise AssertionError(f"Data source {src} not understood.")
         return [getattr(self, src)[i] for i, _tag in self.tags if _tag == tag]
 
+    def get_all_tags(self) -> List[str]:
+        tags = [tag for tags_this_token in self.tags for tag in tags_this_token]
+        return set(tags)
+
 
 @dataclass
 class Document:

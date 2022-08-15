@@ -11,6 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Iterable, Union, List, Dict
 
+import click
 import numpy as np
 import spacy
 from tqdm.auto import tqdm
@@ -467,13 +468,13 @@ class DWIEParser(GenericParser):
 
     @staticmethod
     def create_label_dict():
-        relevant_splits: List[str] = ['train', 'valid']
+        relevant_splits: List[str] = ['train', 'dev']
         ner_labels = set()
         rel_labels = set()
         for split in relevant_splits:
             reader = DocumentReader('dwie', split=split)
             for doc in reader:
-                ner_labels = ner_labels.union(doc.ner.tags)
+                ner_labels = ner_labels.union(doc.ner.get_all_tags())
                 rel_labels = rel_labels.union(doc.rel.tags)
 
         ner_labels = list(ner_labels)
@@ -491,10 +492,17 @@ class DWIEParser(GenericParser):
             print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ner_tag_dict.json')}")
 
 
-def run():
-    parser = DWIEParser(LOC.dwie)
-    parser.run()
-    parser.create_label_dict()
+@click.command()
+@click.option("--collect-labels", is_flag=True,
+              help="If this flag is True, we ignore everything else, "
+                   "just go through train, dev splits and collect unique labels and create a dict out of them.")
+def run(collect_labels: bool):
+    if collect_labels:
+        DWIEParser.create_label_dict()
+    else:
+        parser = DWIEParser(LOC.dwie)
+        parser.run()
+        parser.create_label_dict()
 
 
 if __name__ == '__main__':

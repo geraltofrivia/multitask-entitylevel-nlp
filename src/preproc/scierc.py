@@ -14,7 +14,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, KNOWN_SPLITS
+from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
 from dataiter import DocumentReader
 from utils.nlp import to_toks
@@ -129,7 +129,7 @@ def create_label_dict():
         If yes, go through all of them and find all unique output labels to encode them in a particular fashion.
     :return: None
     """
-    relevant_splits: List[str] = KNOWN_SPLITS.scierc[:-1]
+    relevant_splits: List[str] = ['train', 'dev']
 
     # Check if dump.json exists in all of these
     ner_labels = set()
@@ -137,7 +137,7 @@ def create_label_dict():
     for split in relevant_splits:
         reader = DocumentReader('scierc', split=split)
         for doc in reader:
-            ner_labels = ner_labels.union(doc.ner.tags)
+            ner_labels = ner_labels.union(doc.ner.get_all_tags())
             rel_labels = rel_labels.union(doc.rel.tags)
 
     # Turn them into dicts and dump them as json
