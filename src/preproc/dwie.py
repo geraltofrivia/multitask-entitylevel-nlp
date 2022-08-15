@@ -467,7 +467,7 @@ class DWIEParser(GenericParser):
 
     @staticmethod
     def create_label_dict():
-        relevant_splits = List[str] = ['train', 'dev']
+        relevant_splits: List[str] = ['train', 'valid']
         ner_labels = set()
         rel_labels = set()
         for split in relevant_splits:
