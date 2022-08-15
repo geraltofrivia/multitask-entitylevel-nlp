@@ -84,7 +84,10 @@ class DWIEParser(GenericParser):
         test_docs = []
         train_docs = []
         valid_docs = []
-        for instance in tqdm(dataset):
+        for i, instance in enumerate(tqdm(dataset)):
+            if i < len(dataset) // 2:
+                continue
+
             if 'test' in instance['tags']:
                 doc = self._parse_(instance, 'test')
                 test_docs.append(doc)
@@ -95,6 +98,7 @@ class DWIEParser(GenericParser):
                 raise ValueError(f"Unexpected content of instance['tags']. Expected either 'train' or 'test' in there."
                                  f"Got {instance['tags']}")
 
+        raise NotImplementedError("REMOVE THE CONTINUE IN FOR LOOP")
         tv_len = len(train_docs)
         tv_indices = np.arange(tv_len)
         np.random.shuffle(tv_indices)
@@ -157,7 +161,8 @@ class DWIEParser(GenericParser):
                     (abs(char_start - token['offset']) == 1 and token['token'][0] in ["'", '"']):
                 start_token = token_id
             if (char_end == token['offset'] + token['length']) or \
-                    (abs(char_end - (token['offset'] + token['length'])) == 1 and token['token'][-1] in ["'", '.']):
+                    (abs(char_end - (token['offset'] + token['length'])) == 1 and token['token'][-1] in ["'", '.',
+                                                                                                         '-']):
                 # i.e. if they match exactly or there is a one char difference and the token's last element is a s
                 end_token = token_id + 1
             if start_token >= 0 and end_token >= 0:
@@ -181,10 +186,13 @@ class DWIEParser(GenericParser):
         token_start, token_end = self._convert_charspan_to_tokspan_(mention['begin'], mention['end'], tokens)
         mention_words = [token['token'] for token in tokens[token_start: token_end]]
 
-        if not (' '.join(mention_words) == mention['text'] or ''.join(mention_words) == mention['text']) and \
-                mention['text'].isalnum():
+        if not (
+                ' '.join(mention_words) == mention['text'] or
+                ''.join(mention_words) == mention['text'] or
+                (' '.join(mention_words)[:-1] == mention['text'] and ' '.join(mention_words)[-1] in ['-', '.'])
+        ) and mention['text'].isalnum():
             # Exceptions time baby!
-            if ' '.join(mention_words) not in ['"Gauck']:
+            if ' '.join(mention_words) not in ['"Gauck', ]:
                 raise AssertionError(f"Given was: `{mention['text']}`. Found was `{' '.join(mention_words)}`")
 
         mention['words'] = mention_words
