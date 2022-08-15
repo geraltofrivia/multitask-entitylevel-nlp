@@ -7,6 +7,7 @@
 
 """
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Iterable, Union, List, Dict
 
@@ -47,11 +48,11 @@ class DWIEParser(GenericParser):
         self.nlp.tokenizer = PreTokenziedTokenizer(self.nlp.vocab)
 
         self.replacements = json.load((LOC.manual / 'replacements_dwie.json').open('r'))
-        for key, value in self.replacements.items():
-            if not len(key) == len(value):
-                raise AssertionError(f"Bad replacement dict. The length of key and value are unequal.\n"
-                                     f"\tlen({key}) = {len(key)}.\n"
-                                     f"\tlen({value}) = {len(value)}.")
+        # for key, value in self.replacements.items():
+        #     if not len(key) == len(value):
+        #         raise AssertionError(f"Bad replacement dict. The length of key and value are unequal.\n"
+        #                              f"\tlen({key}) = {len(key)}.\n"
+        #                              f"\tlen({value}) = {len(value)}.")
 
     def parse(self, split_nm: Union[Path, str]):
         # This is to shut up the AbstractMethodNotImplementedError
@@ -85,8 +86,8 @@ class DWIEParser(GenericParser):
         train_docs = []
         valid_docs = []
         for i, instance in enumerate(tqdm(dataset)):
-            if i < len(dataset) // 2:
-                continue
+            # if i < len(dataset) // 2:
+            #     continue
 
             if 'test' in instance['tags']:
                 doc = self._parse_(instance, 'test')
@@ -127,11 +128,116 @@ class DWIEParser(GenericParser):
         #     # Dump them to disk
         #     self.write_to_disk(split, outputs)
 
-    def manually_fix(self, content: str) -> str:
+    def manually_fix(self, raw: dict) -> dict:
+        """
+            If the replacements are smaller than the instance, fix the entire document's char to reflect that.
+            If they're the same size, just replace
+
+        """
+
         """ Pull a replacement dict from manually written things. """
         for k, v in self.replacements.items():
-            content = content.replace(k, v)
-        return content
+            if len(k) == len(v):
+                # simple replace
+                raw['content'] = raw['content'].replace(k, v)
+
+            elif k in raw['content']:
+                raw = self._manually_fix_considerate_(raw, k, v)
+
+        return raw
+
+    def _manually_fix_considerate_(self, raw: dict, k: str, v: str) -> dict:
+
+        while k in raw['content']:
+            start_index = raw['content'].index(k)
+            pre = raw['content'][:start_index]
+            post = raw['content'][start_index + len(k):]
+
+            # replace the text
+            raw['content'] = pre + v + post
+            raw['mentions'] = self._update_mentions_(mentions=raw['mentions'],
+                                                     start_index=start_index,
+                                                     end_index=start_index + len(k),
+                                                     offset=len(v) - len(k), text=raw['content'])
+
+            return raw
+
+    def _update_mentions_(self, mentions: List[dict], start_index: int, end_index: int, offset: int, text: str) \
+            -> List[dict]:
+        """
+            When your manual change causes the length of document to change, you have to adjust every char based
+                span change.
+
+            Start and End indices are old ones
+        """
+
+        for mention in mentions:
+            backup = deepcopy(mention)
+            # Case 1: mention lies before anything happens
+            if mention['end'] < start_index:
+                continue
+
+            # if mention['text'] == '18':
+            #     print('tomato')
+
+            # Case 2: bad overlap:
+            # the mention starts and ends within the change
+            if start_index <= mention['begin'] < mention['end'] < end_index:
+
+                _start_index = text[start_index: end_index].index(mention['text'])
+                _new_text = text[start_index + _start_index: start_index + _start_index + len(mention['text'])]
+
+                if not _new_text == mention['text']:
+                    raise AssertionError(f"POTATO")
+
+                mention['text'] = _new_text
+                mention['begin'] = start_index + _start_index
+                mention['end'] = start_index + _start_index + len(mention['text'])
+                mention['changed'] = 1
+
+                continue
+
+            # Case 3: good overlap (mention is bigger than change on both sides)
+            if mention['begin'] < start_index < end_index < mention['end']:
+                # Simply update the margins and pull new text
+                mention['end'] += offset
+                mention['text'] = text[mention['begin']: mention['end']]
+                mention['changed'] = 2
+
+                continue
+
+            # Case 4: left overlap:
+            # the mention starts before the start of change, and ends before the end of it
+            if mention['begin'] < start_index < mention['end'] < end_index:
+
+                # Same, just check if something needs to be changed
+                if not mention['text'] == text[mention['begin']: mention['end']]:
+                    raise AssertionError(f"TODO: ideally you should update index and text in this case")
+
+                continue
+
+            # Case 5: right overlap:
+            # the mention overlaps with the trailing end
+            if start_index < mention['begin'] < end_index < mention['end']:
+                mention['end'] += offset
+                mention['text'] = text[mention['begin']: mention['end']]
+                mention['changed'] = 3
+
+                continue
+
+            # Case 6: mention lies after the entire change happens
+            if mention['begin'] >= end_index:
+                mention['begin'] += offset
+                mention['end'] += offset
+                mention['changed'] = 4
+
+                continue
+
+            if not mention['text'] == text[mention['begin']: mention['end']]:
+                raise AssertionError(f"Text Mismatch")
+            raise AssertionError(f"New unknown condition")
+
+        return mentions
 
     @staticmethod
     def _get_tokenid_for_mention_(mention: dict, tokens: List[dict]) -> int:
@@ -158,11 +264,12 @@ class DWIEParser(GenericParser):
         end_token = -1
         for token_id, token in enumerate(tokens):
             if (char_start == token['offset']) or \
-                    (abs(char_start - token['offset']) == 1 and token['token'][0] in ["'", '"']):
+                    (abs(char_start - token['offset']) == 1 and
+                     token['token'][0] in ["'", '"', '-']):
                 start_token = token_id
             if (char_end == token['offset'] + token['length']) or \
-                    (abs(char_end - (token['offset'] + token['length'])) == 1 and token['token'][-1] in ["'", '.',
-                                                                                                         '-']):
+                    (abs(char_end - (token['offset'] + token['length'])) == 1 and
+                     token['token'][-1] in ["'", '.', 's']):
                 # i.e. if they match exactly or there is a one char difference and the token's last element is a s
                 end_token = token_id + 1
             if start_token >= 0 and end_token >= 0:
@@ -189,7 +296,8 @@ class DWIEParser(GenericParser):
         if not (
                 ' '.join(mention_words) == mention['text'] or
                 ''.join(mention_words) == mention['text'] or
-                (' '.join(mention_words)[:-1] == mention['text'] and ' '.join(mention_words)[-1] in ['-', '.'])
+                (' '.join(mention_words)[:-1] == mention['text'] and ' '.join(mention_words)[-1] in ['-', '.', 's']) or
+                (' '.join(mention_words)[1:] == mention['text'] and ' '.join(mention_words)[0] in ['-', '.'])
         ) and mention['text'].isalnum():
             # Exceptions time baby!
             if ' '.join(mention_words) not in ['"Gauck', ]:
@@ -235,9 +343,9 @@ class DWIEParser(GenericParser):
 
     def _parse_(self, content: dict, split_name: str) -> Document:
 
-        manually_fix_content = self.manually_fix(content['content'])
+        content = self.manually_fix(content)
 
-        tokenized = self._prebuilt_tokenizer_.tokenize(manually_fix_content)
+        tokenized = self._prebuilt_tokenizer_.tokenize(content['content'])
 
         """ 
             Step 1: NER
