@@ -22,7 +22,7 @@ except ImportError:
     from . import _pathfix
 from preproc.commons import GenericParser
 from utils.nlp import PreTokenziedTokenizer
-from config import LOCATIONS as LOC, NPRSEED as SEED, KNOWN_SPLITS
+from config import LOCATIONS as LOC, NPRSEED as SEED
 from modules.dwie.src.dataset.utils.tokenizer import TokenizerCPN
 from dataiter import DocumentReader
 from utils.data import Document, NamedEntities, Clusters, TypedRelations, BridgingAnaphors
@@ -467,7 +467,7 @@ class DWIEParser(GenericParser):
 
     @staticmethod
     def create_label_dict():
-        relevant_splits = List[str] = KNOWN_SPLITS.dwie[:-1]
+        relevant_splits = List[str] = ['train', 'dev']
         ner_labels = set()
         rel_labels = set()
         for split in relevant_splits:
