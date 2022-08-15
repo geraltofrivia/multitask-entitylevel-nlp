@@ -181,7 +181,7 @@ class DWIEParser(GenericParser):
         token_start, token_end = self._convert_charspan_to_tokspan_(mention['begin'], mention['end'], tokens)
         mention_words = [token['token'] for token in tokens[token_start: token_end]]
 
-        if (not ' '.join(mention_words) == mention['text'] or not ''.join(mention_words) == mention['text']) and \
+        if not (' '.join(mention_words) == mention['text'] or ''.join(mention_words) == mention['text']) and \
                 mention['text'].isalnum():
             # Exceptions time baby!
             if ' '.join(mention_words) not in ['"Gauck']:
