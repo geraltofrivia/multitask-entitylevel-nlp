@@ -12,6 +12,7 @@ from typing import Iterable, Union, List, Dict
 
 import numpy as np
 import spacy
+from tqdm.auto import tqdm
 
 # Local imports
 try:
@@ -45,6 +46,13 @@ class DWIEParser(GenericParser):
         self.nlp.add_pipe('sentencizer')
         self.nlp.tokenizer = PreTokenziedTokenizer(self.nlp.vocab)
 
+        self.replacements = json.load((LOC.manual / 'replacements_dwie.json').open('r'))
+        for key, value in self.replacements.items():
+            if not len(key) == len(value):
+                raise AssertionError(f"Bad replacement dict. The length of key and value are unequal.\n"
+                                     f"\tlen({key}) = {len(key)}.\n"
+                                     f"\tlen({value}) = {len(value)}.")
+
     def parse(self, split_nm: Union[Path, str]):
         # This is to shut up the AbstractMethodNotImplementedError
         ...
@@ -76,7 +84,7 @@ class DWIEParser(GenericParser):
         test_docs = []
         train_docs = []
         valid_docs = []
-        for instance in dataset:
+        for instance in tqdm(dataset):
             if 'test' in instance['tags']:
                 doc = self._parse_(instance, 'test')
                 test_docs.append(doc)
@@ -115,6 +123,12 @@ class DWIEParser(GenericParser):
         #     # Dump them to disk
         #     self.write_to_disk(split, outputs)
 
+    def manually_fix(self, content: str) -> str:
+        """ Pull a replacement dict from manually written things. """
+        for k, v in self.replacements.items():
+            content = content.replace(k, v)
+        return content
+
     @staticmethod
     def _get_tokenid_for_mention_(mention: dict, tokens: List[dict]) -> int:
         for i, token in enumerate(tokens):
@@ -139,15 +153,18 @@ class DWIEParser(GenericParser):
         start_token = -1
         end_token = -1
         for token_id, token in enumerate(tokens):
-            if char_start == token['offset']:
+            if (char_start == token['offset']) or \
+                    (abs(char_start - token['offset']) == 1 and token['token'][0] in ["'", '"']):
                 start_token = token_id
-            if char_end == token['offset'] + token['length']:
+            if (char_end == token['offset'] + token['length']) or \
+                    (abs(char_end - (token['offset'] + token['length'])) == 1 and token['token'][-1] in ["'", '.']):
+                # i.e. if they match exactly or there is a one char difference and the token's last element is a s
                 end_token = token_id + 1
             if start_token >= 0 and end_token >= 0:
                 break
 
         if start_token < 0 or end_token < 0:
-            raise ValueError(f"Could not find span corresponding to [{start_token}: {end_token}]."
+            raise ValueError(f"Could not find span corresponding to [{start_token}: {end_token}]. "
                              f"Our result was [{start_token}: {end_token}]")
 
         return start_token, end_token
@@ -164,8 +181,11 @@ class DWIEParser(GenericParser):
         token_start, token_end = self._convert_charspan_to_tokspan_(mention['begin'], mention['end'], tokens)
         mention_words = [token['token'] for token in tokens[token_start: token_end]]
 
-        if (not ' '.join(mention_words) == mention['text']) and mention['text'].isalnum():
-            raise AssertionError(f"Given was: `{mention['text']}`. Found was `{' '.join(mention_words)}`")
+        if (not ' '.join(mention_words) == mention['text'] or not ''.join(mention_words) == mention['text']) and \
+                mention['text'].isalnum():
+            # Exceptions time baby!
+            if ' '.join(mention_words) not in ['"Gauck']:
+                raise AssertionError(f"Given was: `{mention['text']}`. Found was `{' '.join(mention_words)}`")
 
         mention['words'] = mention_words
         mention['span'] = [token_start, token_end]
@@ -179,6 +199,24 @@ class DWIEParser(GenericParser):
         return mention
 
     @staticmethod
+    def get_empty_clusters(mention_based, content_based: list):
+        """ find all cntent based clusters which dont exist in mention based. check if they have count zero. """
+        empty_clusters = {}
+        for content_based_v in content_based:
+            content_based_k = content_based_v['concept']
+            if not content_based_k in mention_based:
+                """
+                    Check if the cluster is actually empty.
+                    Manually put in intercepts here, in case of annotation problems.
+                """
+                if content_based_v['count'] != 0 and not content_based_v['text'] in ['BSA']:
+                    raise AssertionError(f"Expected this cluster to have some mentions but none were found: "
+                                         f"{content_based_v}")
+                empty_clusters[content_based_k] = content_based_v
+
+        return empty_clusters
+
+    @staticmethod
     def aggregate_mentions(mentions: List[dict]):
         """ Rearrange mentions based on concept IDs """
         clusters = {}
@@ -189,7 +227,9 @@ class DWIEParser(GenericParser):
 
     def _parse_(self, content: dict, split_name: str) -> Document:
 
-        tokenized = self._prebuilt_tokenizer_.tokenize(content['content'])
+        manually_fix_content = self.manually_fix(content['content'])
+
+        tokenized = self._prebuilt_tokenizer_.tokenize(manually_fix_content)
 
         """ 
             Step 1: NER
@@ -220,7 +260,8 @@ class DWIEParser(GenericParser):
                 
                 (basically DWIE provides it on a cluster level but we want it on a relation level)
         """
-        spans, tags = self.parse_relations(clusters, content['relations'])
+        empty_clusters = self.get_empty_clusters(clusters, content['concepts'])
+        spans, tags = self.parse_relations(clusters, content['relations'], empty_clusters)
         rel = TypedRelations(spans=spans, tags=tags)
 
         # Empty Bridging Instance
@@ -271,7 +312,7 @@ class DWIEParser(GenericParser):
         return document
 
     @staticmethod
-    def parse_relations(clusters: Dict[str, List[dict]], relations: List[dict]):
+    def parse_relations(clusters: Dict[str, List[dict]], relations: List[dict], empty_clusters: Dict[str, dict]):
         """  """
 
         spans, tags = [], []
@@ -281,7 +322,10 @@ class DWIEParser(GenericParser):
                 sub_mentions = clusters[relation['s']]
                 obj_mentions = clusters[relation['o']]
             except KeyError as e:
-                print(relation)
+
+                # This key doesnt' appear because its an empty cluster (zero mentions in text, for some reason)
+                if e.args[0] in empty_clusters:
+                    continue
                 raise e
             relation_tag = relation['p']
 
