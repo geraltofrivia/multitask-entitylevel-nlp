@@ -456,22 +456,26 @@ class MultiTaskDataIter(Dataset):
             word2subword_starts: dict,
             word2subword_ends: dict,
     ) -> dict:
+        """ NOTE: NER could be multilabel or singlelabel."""
 
         if instance.ner.isempty:
             raise NoValidAnnotations("NER")
 
         """
             Work with generic processed stuff to also work with NER things
-z        """
+        """
         gold_starts, gold_ends, gold_labels = [], [], []
-        for span, tag in zip(instance.ner.spans, instance.ner.tags):
+        for span, tags in zip(instance.ner.spans, instance.ner.tags):
 
             if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
                 gold_starts.append(word2subword_starts[span[0]])
                 gold_ends.append(word2subword_ends[span[1] - 1])
-                if tag not in self.ner_tag_dict:
-                    raise AssertionError(f"Tag {tag} not found in Tag dict!")
-                gold_labels.append(self.ner_tag_dict[tag])
+                span_tags = [0] * len(self.ner_tag_dict)
+                for tag in tags:
+                    if tag not in self.ner_tag_dict:
+                        raise AssertionError(f"Tag {tag} not found in Tag dict!")
+                    span_tags[self.ner_tag_dict[tag]] = 1
+                gold_labels.append(span_tags)
             else:
                 if not is_split_train(dataset=self._src_, split=self._split_):
                     raise KeyError(

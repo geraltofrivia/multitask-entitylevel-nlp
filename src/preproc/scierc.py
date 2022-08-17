@@ -44,7 +44,7 @@ class SciERCParser(GenericParser):
 
             for ner in inst['ner'][sent_id]:
                 ner_spans.append([ner[0], ner[1] + 1])
-                ner_tags.append(ner[2])
+                ner_tags.append([ner[2]])
                 ner_words.append(doc[ner[0]: ner[1] + 1])
 
         return NamedEntities(spans=ner_spans, tags=ner_tags, words=ner_words)

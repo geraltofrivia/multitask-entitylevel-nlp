@@ -78,6 +78,7 @@ KNOWN_SPLITS = FancyDict({
     })
 })
 KNOWN_HAS_SPEAKERS = [key for key in KNOWN_SPLITS.keys() if key.startswith('codicrac')]
+NER_IS_MULTILABEL = ['dwie']  # Refer to this to know which datasets have mutlilabel NER targets
 
 
 def is_split_train(dataset: str, split: str):
@@ -136,10 +137,13 @@ DEFAULTS: dict = FancyDict({
 })
 LOSS_SCALES = {
     'coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
+    'coref_nermul_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
     'coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
     'coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'coref_nermul': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
     'coref': [1.0, ],
     'ner': [1.0, ],
+    'nermul': [1.0, ],
     'pruner': [1.0, ],
 }
 SCHEDULER_CONFIG = {

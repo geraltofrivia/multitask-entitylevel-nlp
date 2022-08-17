@@ -147,10 +147,18 @@ class DWIEParser(GenericParser):
             if len(k) == len(v):
                 # simple replace
                 raw['content'] = raw['content'].replace(k, v)
+                raw = self._update_mentions_text_(raw)
 
             elif k in raw['content']:
                 raw = self._manually_fix_considerate_(raw, k, v)
 
+        return raw
+
+    @staticmethod
+    def _update_mentions_text_(raw: Dict):
+        for i, mention in enumerate(raw['mentions']):
+            mention['text'] = raw['content'][mention['begin']: mention['end']]
+            raw['mentions'][i] = mention
         return raw
 
     def _manually_fix_considerate_(self, raw: dict, k: str, v: str) -> dict:

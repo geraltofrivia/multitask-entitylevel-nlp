@@ -17,5 +17,11 @@
   "Kögida- ": "Kögida - ",
   "Cologne- ": "Cologne - ",
   "Pegida- ": "Pegida - ",
-  "West- ": "West - "
+  "West- ": "West - ",
+  "\n.": ". ",
+  "?\n": "? ",
+  "\n": " ",
+  "\t": "    ",
+  "'.": ".'",
+  "?.Ottawa": "? Ottawa"
 }

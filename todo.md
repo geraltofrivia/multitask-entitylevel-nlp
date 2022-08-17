@@ -67,9 +67,16 @@ Other TODOs
 [x] Integration Logic remains in MTL but modules do their job well.
 --------    
 [x] Compute Baseline Results
-[ ] Implement Shared Pruner (integrated in there)
 [x] Implement Shared Dense Layers (2 layer dense net with same or half dimensionality)
 
-# 10-08-2022
+# 16-08-2022
 
-[ ] Figure out the deal with CoNLL12 
+[ ] Figure out the deal with CoNLL12
+[ ] Implement Shared Pruner (integrated in there)
+[ ] Figure out what's happening with Sampling Ratio
+[ ] Can we make the sample stuff resample every epoch?
+
+## Refactoring for multiple NER tags per span
+
+[ ] Figure out how loss scales work, and simplify it
+[ ] Figure out how sampling ratios work
