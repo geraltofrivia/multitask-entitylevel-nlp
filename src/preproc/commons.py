@@ -132,3 +132,23 @@ class GenericParser(ABC):
         #         writer.write_all([asdict(instance) for instance in instances])
 
         print(f"Successfully written {len(instances)} at {write_dir}.")
+
+    def _finalise_instance_(self, document: Document, spacy_doc: tokens.Doc) -> Document:
+        """ Find span heads... populate words in different annotations etc etc. """
+        spans = document.get_all_spans()
+        span_heads = self.get_span_heads(spacy_doc, spans=spans)
+
+        # Allocate span heads to these different forms of annotations
+        document.coref.allocate_span_heads(span_heads)
+        document.ner.allocate_span_heads(span_heads)
+        document.rel.allocate_span_heads(span_heads)
+        document.bridging.allocate_span_heads(span_heads)
+
+        # Assign words to coref (should be done AFTER assigning span heads)
+        # NOTE: this automatically adds words_head and pos_head also.
+        document.coref.add_words(document.document)
+        document.ner.add_words(document.document)
+        document.coref.add_pos(document.pos)
+        document.ner.add_pos(document.pos)
+
+        return document

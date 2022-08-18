@@ -117,9 +117,11 @@ DEFAULTS: dict = FancyDict({
     'pruner_use_width': True,  # if False, we ignore span width as a feature in span width embeddings and pruning spans.
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
-    'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
+    'bias_in_last_layers': False,  # model's last lin layers will have bias set based on this flag
     'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
     'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
+    'ner_threshold': 0.5,  # for DWIE, we do multilabel clf, where we use this threshold to determine if sthing is
+    # NER or not, and if, which.
     # truncate the train set (never the dev set tho)
 
     # TODO: implement code to turn these two below to TRUE

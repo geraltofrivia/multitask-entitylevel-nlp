@@ -10,7 +10,7 @@ from typing import Dict, Callable, List, Union, Optional, Type
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment as linear_assignment
-from torchmetrics import Precision, Recall, F1Score
+from torchmetrics import Precision, Recall, F1Score, LabelRankingAveragePrecision, AUROC
 from tqdm.auto import tqdm
 
 # Local imports
@@ -134,6 +134,7 @@ class PRF1Macro(CustomMetric):
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
+        # TODO: update this for multiclass multilabel stuff as well?
         logits = logits.int() if logits.shape.__len__() == 1 else logits
         labels = labels.int()
 
@@ -478,26 +479,35 @@ class NERAcc(CustomMetric):
             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
-# class NERSpanRecognitionPR(CustomMetric):
-#
-#     def __init__(self, debug: bool = True):
-#         super().__init__(debug=debug)
-#         self.values = ['p', 'r']
-#         self.prefix = 'spanrec'
-#         self.task = 'ner'
-#
-#     def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
-#         """
-#             Treat as binary clf. And find proportion of spans which were correctly recognized as being spans
-#             (regardless of the label).
-#         """
-#         _logits = torch.argmax(logits, dim=1)  # n_spans, 1
-#         p = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
-#         r = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((_logits > 0).to(float))
-#         op = {'p': p, 'r': r}
-#
-#         for k, v in op.items():
-#             self.logs[k] = self.logs.get(k, []) + [v.item()]
+class NERMultiLabelAcc(CustomMetric):
+
+    def __init__(self, nc: int, threshold: float, debug: bool = True):
+        super().__init__(debug=debug)
+        self.values = ['acc', 'acc_nonzero']
+        self.task = 'ner'
+        self.prefix = None
+        self.threshold = threshold
+        self.labelrankingaverageprecision = LabelRankingAveragePrecision()
+        self.auroc = AUROC(num_classes=nc)
+
+    def update(self, logits, labels, *args, **kwargs):
+        """
+            Does not distinguish b/w invalid spans, and actually annotated spans.
+            The last class is a the 'null class'
+        :param logits: n_spans, n_classes
+        :param labels: n_spans, n_classes
+        :return: scalar
+        """
+        label_nonzero_indices = labels
+
+        op = {
+            'labelrank_p': self.labelrankingaverageprecision(logits, labels),
+            'auroc': self.auroc(logits, labels),
+            'acc_nonzero': torch.mean((torch.argmax(logits[labels != 0], dim=1) == labels[labels != 0]).float())
+        }
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
 class PrunerPRMacro(PRF1Macro):

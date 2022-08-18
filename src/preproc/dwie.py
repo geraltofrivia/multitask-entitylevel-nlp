@@ -152,6 +152,37 @@ class DWIEParser(GenericParser):
             elif k in raw['content']:
                 raw = self._manually_fix_considerate_(raw, k, v)
 
+        if 'pretty easy' in raw['content']:
+            print('potato')
+
+        # If there are '\n' in text, replace them with ' ' if they appear after a PUNCT.
+        # ### Else if they appear w/o any punct, replace them with a punct.
+        while '\n' in raw['content']:
+            index = raw['content'].index('\n')
+
+            if index > 0 and (
+                    raw['content'][index - 1] not in [' ', '.', '?', '!'] and
+                    raw['content'][index + 1] not in [' ', '.', '?', '!']
+            ):
+                raw['content'] = raw['content'][:index] + '. ' + raw['content'][index + 1:]
+                raw['mentions'] = self._update_mentions_(mentions=raw['mentions'],
+                                                         start_index=index,
+                                                         end_index=index + 1,
+                                                         offset=1, text=raw['content'])
+            elif index > 1 and raw['content'][index - 1] in [' ']:
+                raw['content'] = raw['content'][:index - 1] + '. ' + raw['content'][index + 1:]
+            elif index > 0 and (
+                    '.' in raw['content'][index - 2: index + 2] or
+                    '?' in raw['content'][index - 2: index + 2] or
+                    '!' in raw['content'][index - 2: index + 2]
+            ):
+                raw['content'] = raw['content'][:index] + ' ' + raw['content'][index + 1:]
+            else:
+                raw['content'] = raw['content'][:index] + '.' + raw['content'][index + 1:]
+
+        if '  ' in raw['content']:
+            raw = self._manually_fix_considerate_(raw, '  ', ' ')
+
         return raw
 
     @staticmethod
@@ -177,7 +208,8 @@ class DWIEParser(GenericParser):
 
             return raw
 
-    def _update_mentions_(self, mentions: List[dict], start_index: int, end_index: int, offset: int, text: str) \
+    @staticmethod
+    def _update_mentions_(mentions: List[dict], start_index: int, end_index: int, offset: int, text: str) \
             -> List[dict]:
         """
             When your manual change causes the length of document to change, you have to adjust every char based
@@ -189,7 +221,7 @@ class DWIEParser(GenericParser):
         for mention in mentions:
             backup = deepcopy(mention)
             # Case 1: mention lies before anything happens
-            if mention['end'] < start_index:
+            if mention['end'] <= start_index:
                 continue
 
             # if mention['text'] == '18':

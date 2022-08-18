@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Union, List, Dict, Optional
 
 import click
-from spacy import tokens
 
 # Local imports
 try:
@@ -322,26 +321,6 @@ class CODICRACParser(GenericParser):
 
         return outputs
 
-    def _finalise_instance_(self, document: Document, spacy_doc: tokens.Doc) -> Document:
-        """ Find span heads... populate words in different annotations etc etc. """
-        spans = document.get_all_spans()
-        span_heads = self.get_span_heads(spacy_doc, spans=spans)
-
-        # Allocate span heads to these different forms of annotations
-        document.coref.allocate_span_heads(span_heads)
-        document.ner.allocate_span_heads(span_heads)
-        document.rel.allocate_span_heads(span_heads)
-        document.bridging.allocate_span_heads(span_heads)
-
-        # Assign words to coref (should be done AFTER assigning span heads)
-        # NOTE: this automatically adds words_head and pos_head also.
-        document.coref.add_words(document.document)
-        document.ner.add_words(document.document)
-        document.coref.add_pos(document.pos)
-        document.ner.add_pos(document.pos)
-
-        return document
-
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
         """ where actual preproc happens"""
 
@@ -557,7 +536,7 @@ class CODICRACParser(GenericParser):
             # Get the named entities prepped
             doc_named_entities = named_entities[docname]
             ner_spans = [[x.start, x.end] for x in doc_named_entities]
-            ner_tags = [x.metadata for x in doc_named_entities]
+            ner_tags = [[x.metadata] for x in doc_named_entities]
             ner_words = [x.words for x in doc_named_entities]
             ner = NamedEntities(spans=ner_spans, tags=ner_tags, words=ner_words)
 

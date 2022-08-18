@@ -384,7 +384,7 @@ class CoNLLOntoNotesParser(GenericParser):
                 ner_span, ner_text, ner_tag = stack.pop(word_id + 1)
                 finalised_annotations_span.append(ner_span)
                 finalised_annotations_text.append(ner_text)
-                finalised_annotation_tag.append(ner_tag)
+                finalised_annotation_tag.append([ner_tag])
 
         return (
             finalised_annotations_span,
@@ -409,7 +409,7 @@ class CoNLLOntoNotesParser(GenericParser):
         for split_code, split_name in relevant_splits.items():
             reader = DocumentReader('ontonotes', split=split_name)
             for doc in reader:
-                ner_labels = ner_labels.union(doc.ner.tags)
+                ner_labels = ner_labels.union(doc.ner.get_all_tags())
 
         # Turn them into dicts and dump them as json
         with (LOC.manual / 'ner_ontonotes_tag_dict.json').open('w+', encoding='utf8') as f:

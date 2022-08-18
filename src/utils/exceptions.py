@@ -78,7 +78,7 @@ class DatasetNotEncoded(FileNotFoundError):
         self.reason = reason
 
     def __str__(self):
-        return f"The location: {self.reason} does not exist. We need to execute run.py."
+        return f"The location: {self.reason} does not exist. You need to execute run.py with the --encode flag."
 
 
 class InstanceNotEncoded(FileNotFoundError):

@@ -22,10 +22,10 @@ from preproc.encode import PreEncoder
 from models.multitask import MangoesMTL
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, NER_IS_MULTILABEL
 from utils.exceptions import ImproperDumpDir, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
-    PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates
+    PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates, NERMultiLabelAcc
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -499,7 +499,9 @@ def train(ctx):
         metrics[task.dataset] += [TraceCandidates]
 
         if 'ner' in task:
-            metrics[task.dataset] += [NERAcc,
+            metrics[task.dataset] += [NERAcc if not task.dataset in NER_IS_MULTILABEL else \
+                                          partial(NERMultiLabelAcc, nc=task.n_classes_ner,
+                                                  threshold=config.ner_threshold),
                                       partial(NERSpanRecognitionMicro, device=config.device),
                                       partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner,
                                               device=config.device)]

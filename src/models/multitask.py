@@ -113,7 +113,8 @@ class MangoesMTL(nn.Module):
             pruner_dropout=pruner_dropout,
             pruner_use_width=pruner_use_width,
             pruner_max_num_spans=pruner_max_num_spans,
-            pruner_top_span_ratio=pruner_top_span_ratio
+            pruner_top_span_ratio=pruner_top_span_ratio,
+            bias_in_last_layers=bias_in_last_layers
         )
         self.coref = CorefDecoder(
             max_top_antecedents=max_top_antecedents,
@@ -124,7 +125,8 @@ class MangoesMTL(nn.Module):
             coref_metadata_feature_size=coref_metadata_feature_size,
             coref_dropout=coref_dropout,
             coref_higher_order=coref_higher_order,
-            coref_num_speakers=coref_num_speakers
+            coref_num_speakers=coref_num_speakers,
+            bias_in_last_layers=bias_in_last_layers
         )
         # self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False)
 
@@ -148,13 +150,13 @@ class MangoesMTL(nn.Module):
             # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
         )
         self.unary_ner_specific = nn.ModuleDict({
-            task.dataset: nn.Linear(ffnn_hidden_size, task.n_classes_ner, bias=bias_in_last_layers)
+            task.dataset: nn.Linear(ffnn_hidden_size, task.n_classes_ner + 1, bias=bias_in_last_layers)
             for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
         })
 
         # Loss management for pruner
         self.pruner_loss = self._rescaling_weights_bce_loss_
-        self.ner_loss = nn.functional.cross_entropy
+        self.ner_loss = nn.functional.binary_cross_entropy_with_logits
 
         self.max_span_width = max_span_width
         self.max_top_antecedents = max_top_antecedents
@@ -224,8 +226,11 @@ class MangoesMTL(nn.Module):
         same_end = torch.eq(labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0))  # [num_labeled, num_candidates]
         same_span = torch.logical_and(same_start, same_end)  # [num_labeled, num_candidates]
         # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
-        candidate_labels = torch.mm(labels.unsqueeze(0).float(), same_span.float()).long()  # [1, num_candidates]
-        return candidate_labels.squeeze(0)  # [num_candidates]
+        if labels.shape.__len__ == 1:
+            candidate_labels = torch.mm(labels.unsqueeze(0).float(), same_span.float()).long()  # [1, num_candidates]
+        else:
+            candidate_labels = torch.mm(same_span.transpose(1, 0).float(), labels.float())  # [nclasses, num_candidates]
+        return candidate_labels.squeeze(0)  # [num_candidates] or [nclasses, num_candidate]
 
     def todel_get_predicted_antecedents(self, antecedent_idx, antecedent_scores):
         """ CPU list input """
@@ -600,6 +605,13 @@ class MangoesMTL(nn.Module):
             ner_labels = self.get_candidate_labels(candidate_starts, candidate_ends,
                                                    ner_gold_starts, ner_gold_ends,
                                                    ner_gold_label_values)
+
+            """
+                At this point NER Labels is a n_spans, n_classes+1 matrix where most rows are zero.
+                We want to turn all those zero rows into ones where the last element is active (not an entity class)
+            """
+            zero_indices = torch.sum(ner_labels, dim=1) == 0  # n_spans
+            ner_labels[zero_indices, -1] = 1
 
             # Calculating the loss
             # if self.ner_unweighted:

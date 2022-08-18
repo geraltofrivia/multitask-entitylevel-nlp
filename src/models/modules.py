@@ -167,6 +167,7 @@ class SpanPruner(torch.nn.Module):
             pruner_dropout: float,
             pruner_use_width: bool,
             pruner_max_num_spans: int,
+            bias_in_last_layers: bool,
             pruner_top_span_ratio: float,
     ):
         super().__init__()
@@ -184,7 +185,7 @@ class SpanPruner(torch.nn.Module):
             nn.Linear(span_embedding_dim, unary_hdim),
             nn.ReLU(),
             nn.Dropout(self._dropout),
-            nn.Linear(unary_hdim, 1),
+            nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
         )
 
         if self._use_width:
@@ -318,6 +319,7 @@ class CorefDecoder(torch.nn.Module):
             coref_metadata_feature_size: int,
             coref_dropout: float,
             coref_higher_order: int,
+            bias_in_last_layers: bool,
             coref_num_speakers: int = 2
     ):
         super().__init__()
@@ -340,7 +342,7 @@ class CorefDecoder(torch.nn.Module):
             nn.Linear((_span_embedding_dim * 3) + _final_metadata_size, unary_hdim),
             nn.ReLU(),
             nn.Dropout(self._dropout),
-            nn.Linear(unary_hdim, 1),
+            nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
         )
         self.slow_antecedent_projection = torch.nn.Linear(_span_embedding_dim * 2, _span_embedding_dim)
         # TODO: wire this up as well
