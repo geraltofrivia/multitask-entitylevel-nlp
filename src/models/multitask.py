@@ -21,7 +21,7 @@ from utils.data import Tasks
 from config import _SEED_ as SEED
 from preproc.encode import Retriever
 from models.modules import SpanPruner, CorefDecoder, SharedDense
-from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException
+from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -620,10 +620,12 @@ class MangoesMTL(nn.Module):
             else:
                 ner_loss = self.ner_loss(ner_logits, ner_labels, weight=ner["weights"])
 
-            assert not torch.isnan(ner_loss), \
-                f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, " \
-                f"\n\tLabels shape: {ner_labels.shape}, " \
-                f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
+            if torch.isnan(ner_loss):
+                raise NANsFound(
+                    f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, "
+                    f"\n\tLabels shape: {ner_labels.shape}, "
+                    f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
+                )
 
             outputs["loss"]["ner"] = ner_loss
             outputs["ner"] = {"logits": ner_logits, "labels": ner_labels}

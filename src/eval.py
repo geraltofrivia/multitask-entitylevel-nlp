@@ -20,7 +20,7 @@ except ImportError:
     from . import _pathfix
 from utils.misc import change_device
 from utils.data import Tasks
-from utils.exceptions import UnknownDomainException
+from utils.exceptions import UnknownDomainException, NANsFound
 from eval_mangoes import CorefEvaluator
 
 """
@@ -128,9 +128,9 @@ class PRF1Macro(CustomMetric):
 
     def __init__(self, n_classes: int, debug: bool, device: str):
         super().__init__(debug=debug)
-        self._p = Precision(average='macro', num_classes=n_classes).to(device)
-        self._r = Recall(average='macro', num_classes=n_classes).to(device)
-        self._f1 = F1Score(average='macro', num_classes=n_classes).to(device)
+        self._p = Precision(average='macro', num_classes=n_classes + 1).to(device)
+        self._r = Recall(average='macro', num_classes=n_classes + 1).to(device)
+        self._f1 = F1Score(average='macro', num_classes=n_classes + 1).to(device)
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
@@ -498,15 +498,31 @@ class NERMultiLabelAcc(CustomMetric):
         :param labels: n_spans, n_classes
         :return: scalar
         """
-        label_nonzero_indices = labels
+
+        # Turn pred logits into pred ints
+        print('potato')
+
+        labels = labels.long()
+
+        nonzero_indices = torch.sum(labels, dim=1) != 0
+        preds = (logits > self.threshold)
+        intersection = torch.logical_and(preds, labels.bool())
+        union = torch.logical_or(preds, labels.bool())
+
+        intersection_nz = intersection[nonzero_indices]
+        union_nz = union[nonzero_indices]
 
         op = {
             'labelrank_p': self.labelrankingaverageprecision(logits, labels),
             'auroc': self.auroc(logits, labels),
-            'acc_nonzero': torch.mean((torch.argmax(logits[labels != 0], dim=1) == labels[labels != 0]).float())
+            'acc': (intersection.float() / (union.float() + torch.e ** 10)).sum(dim=1).float().mean(),
+            'acc_nonzero': (intersection_nz.float() / (union_nz.float() + torch.e ** 10)).sum(dim=1).float().mean()
         }
 
         for k, v in op.items():
+            if torch.isnan(v):
+                raise NANsFound(f"Found nan in metric computation. Here are some details - {op}.")
+
             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
