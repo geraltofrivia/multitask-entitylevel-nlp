@@ -24,8 +24,8 @@ from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, NER_IS_MULTILABEL
 from utils.exceptions import ImproperDumpDir, BadParameters
-from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, NERSpanRecognitionMacro, \
-    PrunerPRMicro, PrunerPRMacro, CorefBCubed, CorefMUC, CorefCeafe, TraceCandidates, NERMultiLabelAcc
+from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
+    TraceCandidates, NERMultiLabelAcc
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -499,15 +499,17 @@ def train(ctx):
         metrics[task.dataset] += [TraceCandidates]
 
         if 'ner' in task:
-            metrics[task.dataset] += [NERAcc if not task.dataset in NER_IS_MULTILABEL else \
-                                          partial(NERMultiLabelAcc, nc=task.n_classes_ner,
-                                                  threshold=config.ner_threshold),
-                                      partial(NERSpanRecognitionMicro, device=config.device),
-                                      partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner,
-                                              device=config.device)]
+            metrics[task.dataset] += [
+                NERAcc if not task.dataset in NER_IS_MULTILABEL else
+                partial(NERMultiLabelAcc, nc=task.n_classes_ner, threshold=config.ner_threshold),
+                partial(NERSpanRecognitionMicro, device=config.device),
+                # partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner, device=config.device)
+            ]
         if 'pruner' in task:
-            metrics[task.dataset] += [partial(PrunerPRMicro, device=config.device),
-                                      partial(PrunerPRMacro, n_classes=task.n_classes_pruner, device=config.device)]
+            metrics[task.dataset] += [
+                partial(PrunerPRMicro, device=config.device),
+                # partial(PrunerPRMacro, n_classes=task.n_classes_pruner, device=config.device)
+            ]
         if 'coref' in task:
             metrics[task.dataset] += [CorefBCubed, CorefMUC, CorefCeafe]
 

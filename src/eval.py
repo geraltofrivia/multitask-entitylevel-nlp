@@ -82,13 +82,13 @@ class CustomMetric(ABC):
         self.logs: Dict[str, List] = {}
 
 
-class PRF1Micro(CustomMetric):
+class PRF1MicroBinary(CustomMetric):
 
     def __init__(self, debug: bool, device: str):
         super().__init__(debug=debug)
-        self._p = Precision().to(device)
-        self._r = Recall().to(device)
-        self._f1 = F1Score().to(device)
+        self._p = Precision(multiclass=False).to(device)
+        self._r = Recall(multiclass=False).to(device)
+        self._f1 = F1Score(multiclass=False).to(device)
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
@@ -439,7 +439,7 @@ class TraceCandidates(Trace):
             self.logs[k] = self.logs.get(k, []) + [v]
 
 
-class NERSpanRecognitionMicro(PRF1Micro):
+class NERSpanRecognitionMicro(PRF1MicroBinary):
 
     def __init__(self, device: str = 'cpu', debug: bool = True):
         super().__init__(debug=debug, device=device)
@@ -534,7 +534,7 @@ class PrunerPRMacro(PRF1Macro):
         self.prefix = 'macro'
 
 
-class PrunerPRMicro(PRF1Micro):
+class PrunerPRMicro(PRF1MicroBinary):
 
     def __init__(self, debug: bool = True, device: str = 'cpu'):
         super().__init__(debug=debug, device=device)

@@ -201,6 +201,8 @@ def match_subwords_to_words(
                         or sw_phrase.startswith('Waldschl')
                         or sw_phrase.startswith('YouAintNo')
                         or sw_phrase.startswith('story.asp')
+                        or sw_phrase.startswith('<$BlogBack')
+                        or sw_phrase.startswith('christopher')
                 ):
                     print('potato')
                     print("TOO LONG: ", sw_phrase)

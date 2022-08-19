@@ -18,7 +18,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.data import Tasks
-from config import _SEED_ as SEED
+from config import _SEED_ as SEED, NER_IS_MULTILABEL
 from preproc.encode import Retriever
 from models.modules import SpanPruner, CorefDecoder, SharedDense
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
@@ -163,6 +163,7 @@ class MangoesMTL(nn.Module):
         self.max_training_segments = max_training_segments
         self.coref_depth = coref_higher_order
         self.coref_loss_mean = coref_loss_mean
+        self.ner_n_classes = {task.dataset: task.n_classes_ner for task in [task_1, task_2]}
         self._skip_instance_after_nspan = skip_instance_after_nspan
         self._ignore_speaker = ignore_speakers
         self._freeze_encoder = freeze_encoder
@@ -226,7 +227,7 @@ class MangoesMTL(nn.Module):
         same_end = torch.eq(labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0))  # [num_labeled, num_candidates]
         same_span = torch.logical_and(same_start, same_end)  # [num_labeled, num_candidates]
         # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
-        if labels.shape.__len__ == 1:
+        if labels.shape.__len__() == 1:
             candidate_labels = torch.mm(labels.unsqueeze(0).float(), same_span.float()).long()  # [1, num_candidates]
         else:
             candidate_labels = torch.mm(same_span.transpose(1, 0).float(), labels.float())  # [nclasses, num_candidates]
@@ -609,9 +610,14 @@ class MangoesMTL(nn.Module):
             """
                 At this point NER Labels is a n_spans, n_classes+1 matrix where most rows are zero.
                 We want to turn all those zero rows into ones where the last element is active (not an entity class)
+                If NER is not a multilabel class, we want to turn those indices which have a zero to n_classes
             """
-            zero_indices = torch.sum(ner_labels, dim=1) == 0  # n_spans
-            ner_labels[zero_indices, -1] = 1
+            if domain in NER_IS_MULTILABEL:
+                zero_indices = torch.sum(ner_labels, dim=1) == 0  # n_spans
+                ner_labels[zero_indices, -1] = 1  # n_spans, n_classes+1
+            else:
+                zero_indices = ner_labels == 0
+                ner_labels[zero_indices] = self.ner_n_classes[domain]
 
             # Calculating the loss
             # if self.ner_unweighted:

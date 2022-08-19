@@ -489,7 +489,7 @@ class MultiTaskDataIter(Dataset):
         if self._src_ in NER_IS_MULTILABEL:
             gold_labels = torch.tensor(gold_labels, dtype=torch.long, device='cpu')
         else:
-            gold_labels = torch.tensor([max(doc_ner) for doc_ner in gold_labels],
+            gold_labels = torch.tensor([np.argmax(doc_ner) for doc_ner in gold_labels],
                                        dtype=torch.long, device='cpu')
 
         ner_specific = {
