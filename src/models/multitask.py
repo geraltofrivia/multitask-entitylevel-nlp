@@ -156,7 +156,12 @@ class MangoesMTL(nn.Module):
 
         # Loss management for pruner
         self.pruner_loss = self._rescaling_weights_bce_loss_
-        self.ner_loss = nn.functional.binary_cross_entropy_with_logits
+        self.ner_loss = {}
+        for task in [task_1, task_2]:
+            if task.dataset in NER_IS_MULTILABEL:
+                self.ner_loss[task.dataset] = nn.functional.binary_cross_entropy_with_logits
+            else:
+                self.ner_loss[task.dataset] = nn.functional.cross_entropy
 
         self.max_span_width = max_span_width
         self.max_top_antecedents = max_top_antecedents
@@ -377,7 +382,7 @@ class MangoesMTL(nn.Module):
 
             # Depending on the domain, select the right decoder
             logits = self.unary_ner_specific[domain](fc1)
-            logits = torch.nn.functional.softmax(logits, dim=1)
+            # logits = torch.nn.functional.softmax(logits, dim=1)
             ner_specific = {"ner_logits": logits}
 
         else:
@@ -622,9 +627,9 @@ class MangoesMTL(nn.Module):
             # Calculating the loss
             # if self.ner_unweighted:
             if self.is_unweighted(task='ner', domain=domain):
-                ner_loss = self.ner_loss(ner_logits, ner_labels)
+                ner_loss = self.ner_loss[domain](ner_logits, ner_labels)
             else:
-                ner_loss = self.ner_loss(ner_logits, ner_labels, weight=ner["weights"])
+                ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner["weights"])
 
             if torch.isnan(ner_loss):
                 raise NANsFound(
