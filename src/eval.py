@@ -2,6 +2,7 @@
     Collection of evaluation functions for different tasks.
     We use torch metrics whenever possible.
 """
+import warnings
 from abc import ABC, abstractmethod
 from collections import Counter
 from typing import Dict, Callable, List, Union, Optional, Type
@@ -9,7 +10,7 @@ from typing import Dict, Callable, List, Union, Optional, Type
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment as linear_assignment
-from torchmetrics import Precision, Recall, F1Score
+from torchmetrics import Precision, Recall, F1Score, LabelRankingAveragePrecision, AUROC
 from tqdm.auto import tqdm
 
 # Local imports
@@ -18,6 +19,8 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import change_device
+from utils.data import Tasks
+from utils.exceptions import UnknownDomainException, NANsFound
 from eval_mangoes import CorefEvaluator
 
 """
@@ -79,17 +82,17 @@ class CustomMetric(ABC):
         self.logs: Dict[str, List] = {}
 
 
-class PRF1Micro(CustomMetric):
+class PRF1MicroBinary(CustomMetric):
 
     def __init__(self, debug: bool, device: str):
         super().__init__(debug=debug)
-        self._p = Precision().to(device)
-        self._r = Recall().to(device)
-        self._f1 = F1Score().to(device)
+        self._p = Precision(multiclass=False).to(device)
+        self._r = Recall(multiclass=False).to(device)
+        self._f1 = F1Score(multiclass=False).to(device)
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
-        logits = logits.int()
+        logits = logits.int() if logits.shape.__len__() == 1 else logits
         labels = labels.int()
 
         p = self._p(logits, labels)
@@ -125,13 +128,14 @@ class PRF1Macro(CustomMetric):
 
     def __init__(self, n_classes: int, debug: bool, device: str):
         super().__init__(debug=debug)
-        self._p = Precision(average='macro', num_classes=n_classes).to(device)
-        self._r = Recall(average='macro', num_classes=n_classes).to(device)
-        self._f1 = F1Score(average='macro', num_classes=n_classes).to(device)
+        self._p = Precision(average='macro', num_classes=n_classes + 1).to(device)
+        self._r = Recall(average='macro', num_classes=n_classes + 1).to(device)
+        self._f1 = F1Score(average='macro', num_classes=n_classes + 1).to(device)
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
-        logits = logits.int()
+        # TODO: update this for multiclass multilabel stuff as well?
+        logits = logits.int() if logits.shape.__len__() == 1 else logits
         labels = labels.int()
 
         p = self._p(logits, labels)
@@ -249,8 +253,10 @@ class Evaluator:
             self,
             predict_fn: Callable,
             dataset_partial: Callable,
-            metrics: List[Type[CustomMetric]],
+            # TODO: turn it into a list, and make it similar when initing metrics
+            metrics: Dict[str, List[Type[CustomMetric]]],
             device: Union[str, torch.device],
+            model: torch.nn.Module = None,
             debug: bool = True
     ):
         """
@@ -261,6 +267,7 @@ class Evaluator:
         :param device: torch device (just pass 'cpu' or 'cuda')
         :param debug: bool: if True, we don't worry about any metric op being a nan. Otherwise we quit.
             Also, when true, we report some general metrics like avg num of candidates per document, etc.
+        :param model: the model instance so we can move us to cpu to do the compute for some instances.
         """
 
         self.predict_fn = predict_fn
@@ -268,17 +275,21 @@ class Evaluator:
         self.ds = self.ds_partial()
         self.debug = debug
         self.device = device
+        self._model_ = model
 
-        # Initialise all metrics
-        self.metrics = {}
-        for metric_cls in metrics:
-            metric = metric_cls(debug=self.debug)
-            self.metrics[metric.task] = self.metrics.get(metric.task, []) + [metric]
+        self.tasks: List[Tasks] = [self.ds.tasks] if type(self.ds.tasks) is Tasks else self.ds.tasks
+
+        self.results = {task.dataset for task in self.tasks}
+        self.metrics = {task.dataset: {} for task in self.tasks}
+        for metric_dataset, metric_cls_list in metrics.items():
+            for metric_cls in metric_cls_list:
+                metric = metric_cls(debug=self.debug)
+                self.metrics[metric_dataset][metric.task] = self.metrics[metric_dataset].get(metric.task, []) + [metric]
 
         # If there are task agnostic metrics/traces, check the flag true
-        self.has_general_traces = 'general' in self.metrics.keys()
-
-        self.results = {}
+        self.has_general_traces: Dict[str, bool] = {k: 'general' in v.keys() for k, v in self.metrics.items()}
+        self._computed_results: bool = False  # flag to indicate whether to re-compute or just report metrics
+        self.results = {task.dataset: {} for task in self.tasks}
 
     def update(self, instance: dict, outputs: dict):
         """
@@ -296,19 +307,32 @@ class Evaluator:
         :return: None
         """
 
-        if self.has_general_traces:
+        # Check the source of the prediction
+        try:
+            metrics = self.metrics[instance['domain']]
+            has_general_traces = self.has_general_traces[instance['domain']]
+        except KeyError:
+            raise UnknownDomainException(f"Domain: {instance['domain']} is unrecognized.")
+
+        # Now log the metrics
+        if has_general_traces:
             # We also want to compute the debug cases
-            for metric in self.metrics['general']:
+            for metric in metrics['general']:
                 metric.update(**outputs)
 
         for task_nm in instance['tasks']:
 
             if task_nm == 'coref':
-                for metric in self.metrics['coref']:
+                # try:
+                for metric in metrics['coref']:
                     metric.update(**outputs['coref'])
+                # except KeyError:
+                #     print(instance['domain'])
+                #     print(metrics)
+                #     print(task_nm)
 
             else:
-                for metric in self.metrics[task_nm]:
+                for metric in metrics[task_nm]:
                     metric.update(**outputs[task_nm])
 
     def run(self):
@@ -322,7 +346,17 @@ class Evaluator:
                 instance["prep_coref_eval"] = True
 
                 # Forward Pass
-                outputs = self.predict_fn(**instance)
+                try:
+                    outputs = self.predict_fn(**instance)
+                except RuntimeError as e:
+                    if self._model_ is None:
+                        raise e
+                    self._model_.to('cpu')
+                    warnings.warn("Couldn't fit the instance in GPU mem. Let's move to CPU and try again.")
+                    # Move the model to cpu, move the instances to CPU
+                    instance = change_device(instance, 'cpu')
+                    outputs = self.predict_fn(**instance)
+                    self._model_.to(self.device)
 
                 # Now we can pass these outputs out and collect the metrics
                 self.update(instance, outputs)
@@ -337,41 +371,55 @@ class Evaluator:
 
     def report(self):
 
-        if self.results:
+        # If any of the results exist already, return them
+
+        if self._computed_results:
             return self.results
 
-        for task_nm, task_metrics in self.metrics.items():
-            if task_nm not in self.results:
-                self.results[task_nm] = {}
+        # Compute the results
+        for dataset_nm, metrics in self.metrics.items():
+            for task_nm, task_metrics in metrics.items():
 
-            for metric in task_metrics:
-                summary = metric.compute()
-                for nm, vl in summary.items():
-                    self.results[task_nm][nm] = vl
+                # Init metrics name in results dict
+                if task_nm not in self.results[dataset_nm]:
+                    self.results[dataset_nm][task_nm] = {}
 
+                for metric in task_metrics:
+                    summary = metric.compute()
+                    for nm, vl in summary.items():
+                        self.results[dataset_nm][task_nm][nm] = vl
+
+        self._computed_results = True
         return self.results
 
     # def __repr__(self):
     #     raise NotImplementedError
 
     def reset(self):
-        for metrics in self.metrics.values():
-            for metric in metrics:
-                metric.reset()
+        for metrics_task_dict in self.metrics.values():
+            for metrics in metrics_task_dict.values():
+                for metric in metrics:
+                    metric.reset()
 
-        self.results = {}
+        self._computed_results: bool = False
+        self.results = {task.dataset: {} for task in self.tasks}
 
     @staticmethod
     def aggregate_reports(aggregate, current):
         """ expect every value in 'current' to also be there in the aggregate """
-        for task_nm, task_metrics in current.items():
-            if task_nm not in aggregate:
-                aggregate[task_nm] = {}
 
-            for metric_nm, metric_vl in task_metrics.items():
-                if metric_nm not in aggregate[task_nm]:
-                    aggregate[task_nm][metric_nm] = []
-                aggregate[task_nm][metric_nm].append(metric_vl)
+        for dataset in current.keys():
+            if dataset not in aggregate:
+                aggregate[dataset] = {}
+
+            for task_nm, task_metrics in current[dataset].items():
+                if task_nm not in aggregate[dataset]:
+                    aggregate[dataset][task_nm] = {}
+
+                for metric_nm, metric_vl in task_metrics.items():
+                    if metric_nm not in aggregate[dataset][task_nm]:
+                        aggregate[dataset][task_nm][metric_nm] = []
+                    aggregate[dataset][task_nm][metric_nm].append(metric_vl)
 
         return aggregate
 
@@ -391,12 +439,40 @@ class TraceCandidates(Trace):
             self.logs[k] = self.logs.get(k, []) + [v]
 
 
-class NERSpanRecognitionMicro(PRF1Micro):
+class NERSpanRecognitionMicro(PRF1MicroBinary):
 
     def __init__(self, device: str = 'cpu', debug: bool = True):
         super().__init__(debug=debug, device=device)
         self.task = 'ner'
         self.prefix = 'spanrec_micro'
+
+    def update(self, logits, labels, *args, **kwargs):
+        """ logits are (n_spans, n_classes+1), labels are (n_spans)"""
+        # Turn the labels from 0-n+1 classes to 0-1
+        labels = (labels > 0).long()
+
+        # Turn the logits from being of n classes to whether the argmax is class zero (no ent) or not (yes ent)
+        logits = (logits.argmax(dim=1) != 0).long()
+
+        super().update(logits, labels)
+
+
+class NERSpanRecognitionMicroMultiLabel(PRF1MicroBinary):
+
+    def __init__(self, device: str = 'cpu', debug: bool = True):
+        super().__init__(debug=debug, device=device)
+        self.task = 'ner'
+        self.prefix = 'spanrec_micro'
+
+    def update(self, logits, labels, *args, **kwargs):
+        """ logits are (n_spans, n_classes+1), labels are (n_spans, n_classes+1)"""
+        # Turn the labels from 0-n+1 classes to 0-1
+        labels = (labels.argmax(dim=1) > 0).long()
+
+        # Turn the logits from being of n classes to whether the argmax is class zero (no ent) or not (yes ent)
+        logits = (logits.argmax(dim=1) != 0).long()
+
+        super().update(logits, labels)
 
 
 class NERSpanRecognitionMacro(PRF1Macro):
@@ -431,26 +507,51 @@ class NERAcc(CustomMetric):
             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
-# class NERSpanRecognitionPR(CustomMetric):
-#
-#     def __init__(self, debug: bool = True):
-#         super().__init__(debug=debug)
-#         self.values = ['p', 'r']
-#         self.prefix = 'spanrec'
-#         self.task = 'ner'
-#
-#     def update(self, logits: torch.Tensor, labels: torch.Tensor, *args, **kwargs):
-#         """
-#             Treat as binary clf. And find proportion of spans which were correctly recognized as being spans
-#             (regardless of the label).
-#         """
-#         _logits = torch.argmax(logits, dim=1)  # n_spans, 1
-#         p = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((labels > 0).to(float))
-#         r = torch.sum((_logits > 0).to(float) * (labels > 0).to(float)) / torch.sum((_logits > 0).to(float))
-#         op = {'p': p, 'r': r}
-#
-#         for k, v in op.items():
-#             self.logs[k] = self.logs.get(k, []) + [v.item()]
+class NERMultiLabelAcc(CustomMetric):
+
+    def __init__(self, nc: int, threshold: float, debug: bool = True):
+        super().__init__(debug=debug)
+        self.values = ['acc', 'acc_nonzero']
+        self.task = 'ner'
+        self.prefix = None
+        self.threshold = threshold
+        self.labelrankingaverageprecision = LabelRankingAveragePrecision()
+        self.auroc = AUROC(num_classes=nc)
+
+    def update(self, logits, labels, *args, **kwargs):
+        """
+            Does not distinguish b/w invalid spans, and actually annotated spans.
+            The last class is a the 'null class'
+        :param logits: n_spans, n_classes
+        :param labels: n_spans, n_classes
+        :return: scalar
+        """
+
+        # Turn pred logits into pred ints
+        print('potato')
+
+        labels = labels.long()
+
+        nonzero_indices = torch.sum(labels, dim=1) != 0
+        preds = (logits > self.threshold)
+        intersection = torch.logical_and(preds, labels.bool())
+        union = torch.logical_or(preds, labels.bool())
+
+        intersection_nz = intersection[nonzero_indices]
+        union_nz = union[nonzero_indices]
+
+        op = {
+            'labelrank_p': self.labelrankingaverageprecision(logits, labels),
+            'auroc': self.auroc(logits, labels),
+            'acc': (intersection.float() / (union.float() + torch.e ** 10)).sum(dim=1).float().mean(),
+            'acc_nonzero': (intersection_nz.float() / (union_nz.float() + torch.e ** 10)).sum(dim=1).float().mean()
+        }
+
+        for k, v in op.items():
+            if torch.isnan(v):
+                raise NANsFound(f"Found nan in metric computation. Here are some details - {op}.")
+
+            self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
 class PrunerPRMacro(PRF1Macro):
@@ -458,15 +559,15 @@ class PrunerPRMacro(PRF1Macro):
     def __init__(self, n_classes: int, debug: bool = True, device: str = 'cpu'):
         super().__init__(debug=debug, n_classes=n_classes, device=device)
         self.task = 'pruner'
-        self.suffix = 'macro'
+        self.prefix = 'macro'
 
 
-class PrunerPRMicro(PRF1Micro):
+class PrunerPRMicro(PRF1MicroBinary):
 
     def __init__(self, debug: bool = True, device: str = 'cpu'):
         super().__init__(debug=debug, device=device)
         self.task = 'pruner'
-        self.suffix = 'micro'
+        self.prefix = 'micro'
 
 
 # noinspection PyUnusedLocal

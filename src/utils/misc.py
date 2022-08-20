@@ -1,13 +1,25 @@
+import hashlib
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
-from typing import List, Union, Optional, Iterable
+from typing import List, Union, Optional, Dict, Any
 
 import numpy as np
 import torch
 import transformers
 from mytorch.utils.goodies import FancyDict
 from transformers import BertConfig
+
+
+class SerializedBertConfig(transformers.BertConfig):
+
+    def to_dict(self):
+        output = super().to_dict()
+        for k, v in output.items():
+            if is_dataclass(v):
+                output[k] = asdict(v)
+
+        return output
 
 
 def pop(data: list, ids: Union[np.ndarray, List[int]]) -> Optional[list]:
@@ -48,6 +60,18 @@ def weighted_addition_losses(losses, tasks, scales):
     stacked = torch.hstack([losses[task_nm] for task_nm in tasks])
     weighted = stacked * scales
     return torch.sum(weighted)
+
+
+def load_speaker_tag_dict(parentdir: Path, src: str) -> Optional[Dict[str, str]]:
+    """
+        If a dict containing self._src_ is in parentdir for speakers, pull it else return None
+        PS: Parentdir should be config.LOCATIONS.manual
+    """
+    loc = parentdir / f'speaker_{src}_tag_dict.json'
+    if not loc.exists():
+        return None
+    with loc.open('r') as f:
+        return json.load(f)
 
 
 @dataclass
@@ -246,7 +270,7 @@ def is_equal(a, b) -> bool:
     return False
 
 
-def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, BertConfig],
+def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, SerializedBertConfig],
                         verbose: bool = True, find_alternatives: bool = True) -> bool:
     """
         If the config stored in the dir mismatches the config passed as param, find out places where it does mismatch
@@ -269,6 +293,7 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'ner_class_weights',
         'freeze_encoder',
         'filter_candidates_pos_threshold',
+        'skip_instance_after_nspan',
         'learning_rate',
         'bias_in_last_layers',
         'encoder_learning_rate',
@@ -279,19 +304,32 @@ def check_dumped_config(config: transformers.BertConfig, old: Union[dict, Path, 
         'wandb_trial',
         'wandbid',
         'savedir',
-        'tasks',
         'debug',
         'coref_loss_mean',
         'coref_higher_order',
         'curdir',
         'n_classes_ner',
-        'trainer'
+        'trainer',
+        'params',
+        'shared_compressor',
+        'task',
+        'task_2',
+        'dense_layers',
+        'ignore_speakers',
+        'unary_hdim',
+        'encoder_dropout',
+        'pruner_dropout',
+        'ner_dropout',
+        'pruner_top_span_ratio',
+        'pruner_max_num_spans',
+        'pruner_use_width',
+        'coref_dropout',
     ]
 
     # If old is a dict, we don't need to pull
     if type(old) is dict:
         old_config = old
-    elif type(old) is BertConfig:
+    elif type(old) in [BertConfig, SerializedBertConfig]:
         old_config = old.to_dict()
     else:
         # Pull the old config
@@ -362,25 +400,39 @@ def merge_configs(old, new):
     for k, v in old.items():
 
         try:
-            _ = new.__getattribute__(k) if type(new) is BertConfig else new.__getattr__(k)
+            _ = new.__getattribute__(k) if type(new) in [BertConfig, SerializedBertConfig] else new.__getattr__(k)
 
             # Check if the Value is nested
             if type(v) in [BertConfig, FancyDict, dict]:
                 # If so, call the fn recursively
-                v = merge_configs(v, new.__getattribute__(k) if type(new) is BertConfig else new.__getattr__(k))
+                v = merge_configs(v, new.__getattribute__(k) if type(new) in [BertConfig, SerializedBertConfig] \
+                    else new.__getattr__(k))
                 new.__setattr__(k, v)
-        except (AttributeError, KeyError) as e:
+        except (AttributeError, KeyError) as _:
             new.__setattr__(k, v)
 
     return new
 
 
-def compute_class_weight_sparse(class_names, class_frequencies: Iterable[int], class_zero_freq: int = 0) -> List[int]:
+def compute_class_weight_sparse(class_names, class_frequencies: np.ndarray, class_zero_freq: int = 0) -> np.ndarray:
     """ if class zero freq is provided, we replace the first value of bincount with it """
     if class_zero_freq > 0:
         class_frequencies[0] = class_zero_freq
 
     total = np.sum(class_frequencies)
-    return [total / (len(class_names) * freq) for freq in class_frequencies]
+    return np.array([total / (len(class_names) * freq) for freq in class_frequencies])
 
-    ...
+
+def argsort(seq):
+    # http://stackoverflow.com/questions/3071415/efficient-method-to-calculate-the-rank-vector-of-a-list-in-python
+    return sorted(range(len(seq)), key=seq.__getitem__)
+
+
+def deterministic_hash(obj: Any) -> str:
+    """ Any serializable obj is serialized and hashed using md5 to get a key which should be deterministic."""
+
+    # If obj is dict, sort by keys
+    if isinstance(obj, dict):
+        obj = type(obj)(**{k: obj[k] for k in sorted(obj.keys())})
+
+    return hashlib.md5(json.dumps(obj).encode()).hexdigest()

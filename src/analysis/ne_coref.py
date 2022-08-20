@@ -14,20 +14,21 @@ Specifically can finding NER directly lead to an estimation of num of clusters, 
 
 # Imports
 import json
-import click
-import spacy
-from thefuzz import fuzz
-from pprint import pprint
 from copy import deepcopy
-from tqdm.auto import tqdm
-from spacy.tokens import Doc
+from pprint import pprint
 from typing import List, Tuple, Dict, Union
 
-from utils.misc import pop
-from utils.data import Document
-from dataiter import DocumentReader
+import click
+import spacy
+from spacy.tokens import Doc
+from thefuzz import fuzz
+from tqdm.auto import tqdm
+
 from config import LOCATIONS as LOC
-from utils.nlp import to_toks, remove_pos, NullTokenizer, is_nchunk
+from dataiter import DocumentReader
+from utils.data import Document, Tasks
+from utils.misc import pop
+from utils.nlp import to_toks, remove_pos, PreTokenizedPreSentencizedTokenizer, is_nchunk
 
 DEBUG = False
 ENTITY_TAG_BLACKLIST = {
@@ -526,11 +527,11 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
 
     DEBUG = debug
     summary = {}
-    nlp = spacy.load("en_core_web_sm")
+    nlp = spacy.load("en_core_web_sm", exclude=['parser', 'senter'])
     # This tokenizer DOES not tokenize documents.
     # Use this is the document is already tokenized.
-    nlp.tokenizer = NullTokenizer(nlp.vocab)
-    ds = DocumentReader("ontonotes", split, tasks=("coref",))
+    nlp.tokenizer = PreTokenizedPreSentencizedTokenizer(nlp.vocab)
+    ds = DocumentReader("ontonotes", split, tasks=Tasks.parse('ontonotes', [("coref", 1.0, True)]))
 
     assert entity_source in ["spacy", "gold"], f"Unknown entity source: {entity_source}"
     ent_src = f"ner_{entity_source}"
@@ -566,7 +567,7 @@ def run(split: str, entity_source: str, filter_named_entities: bool, debug: bool
 
         # Get the spacy doc object for this one. It will be needed. Trust me.
         # noinspection PyTypeChecker
-        spacy_doc = nlp(to_toks(doc.document))
+        spacy_doc = nlp(doc.document)
 
         # Find the number of tokens in a document
         summary["tokens_per_doc"].append(len(to_toks(doc.document)))

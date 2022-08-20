@@ -1,14 +1,16 @@
 """
     Contain multiple dataclasses and types to control the chaos that is a large python codebase.
 """
-
-from functools import cached_property
+import copy
+import json
 from dataclasses import dataclass, field
-from typing import List
+from functools import cached_property
+from typing import List, Optional, Tuple, Union
 
+from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
+from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
+from utils.misc import argsort, load_speaker_tag_dict
 from utils.nlp import to_toks
-from config import KNOWN_TASKS
-from utils.exceptions import UnknownTaskException
 
 
 @dataclass
@@ -39,7 +41,7 @@ class Clusters:
     clusters = [
         [[0, 1]],                        # one cluster with one span (a span is a list of two ints)
         [[2, 4], [8, 9], [13, 14]]       # next cluster with three spans
-        [
+        [ ...
     ```
 
     """
@@ -98,6 +100,8 @@ class Clusters:
 
         self.words = clusters_
         self.words_head = clusters_h_
+
+        return self
 
     def add_pos(self, pos: List[List[str]]):
         """Same as self.add_words but for pos tags"""
@@ -293,7 +297,7 @@ class NamedEntities:
 
     # Gold annotations for named entity spans
     spans: List[List[int]]  # Looks like [[112, 113], [155, 159], ... ]
-    tags: List[str]  # Looks like [ 'Person', 'Cardinal' ...
+    tags: List[Union[str, List[str]]]  # Looks like [ 'Person', 'Cardinal' ... or [ ['t1', 't2'], ['t1', 't3] ... ]
     words: List[List[str]] = field(
         default_factory=list
     )  # Looks like [['Michael', 'Jackson'] ... ]
@@ -361,6 +365,10 @@ class NamedEntities:
             raise AssertionError(f"Data source {src} not understood.")
         return [getattr(self, src)[i] for i, _tag in self.tags if _tag == tag]
 
+    def get_all_tags(self) -> List[str]:
+        tags = [tag for tags_this_token in self.tags for tag in tags_this_token]
+        return set(tags)
+
 
 @dataclass
 class Document:
@@ -418,6 +426,9 @@ class Document:
     # Pos tags, noun phrases in the document computed using the spacy doc
     pos: List[List[str]]
 
+    # Speaker IDs, an int corresponding to every sentence
+    speakers: List[int]
+
     # Docname corresponds to the ontonotes doc
     docname: str
 
@@ -446,18 +457,51 @@ class Document:
     def generate_pos_tags(cls, doc_text):
         return [['FAKE' for _ in sent] for sent in doc_text]
 
-    def finalise(self):
+    def __post_init__(self):
         """
         Sanity checks:
             -> every span in clusters, named_entities_gold has their corresponding span head found out
             -> length of doc pos and doc words (flattened) is the same
         """
 
-        if not (
-                len(self.document) == len(self.pos)
-                and len(to_toks(self.document)) == len(to_toks(self.pos))
-        ):
-            raise AssertionError("Length mismatch between doc words and doc pos tags")
+        if not len(self.document) == len(self.pos) == len(self.speakers):
+            raise AssertionError(f"Number of sentences don't match between doc, pos, and speakers\n"
+                                 f"Doc     : {len(self.document)}\n"
+                                 f"Pos     : {len(self.pos)}\n"
+                                 f"Speakers: {len(self.speakers)}\n")
+
+        if not len(to_toks(self.document)) == len(to_toks(self.pos)):
+            raise AssertionError(f"Number of tokens don't match between doc, and pos.\n"
+                                 f"Doc     : {len(to_toks(self.document))}\n"
+                                 f"Pos     : {len(to_toks(self.pos))}\n")
+
+        if not self.coref.isempty:
+            if not self.coref.words:
+                self.coref = self.coref.add_words(self.document)
+
+            if not self.coref.pos:
+                self.coref.add_pos(self.pos)
+
+        if not self.rel.isempty:
+            if not self.rel.words:
+                self.rel.add_words(self.document)
+
+            if not self.rel.pos:
+                self.rel.add_pos(self.document)
+
+        if not self.bridging.isempty:
+            if not self.bridging.words:
+                self.bridging.add_words(self.document)
+
+            if not self.bridging.pos:
+                self.bridging.add_words(self.document)
+
+        if not self.ner.isempty:
+            if not self.ner.words:
+                self.ner.add_words(self.document)
+
+            if not self.ner.pos:
+                self.ner.add_pos(self.document)
 
     @cached_property
     def sentence_map(self) -> List[int]:
@@ -497,56 +541,161 @@ class Document:
         return [list(span) for span in set(spans)]
 
 
-class Tasks(list):
-    """
-        Custom list which has restricted values.
-        Also, you can't delete things from it :]
+@dataclass
+class Tasks:
+    names: List[str]
+    loss_scales: List[float]
+    use_class_weights: List[bool]
+    dataset: str
 
-        Can use it like
-            Tasks('coref', 'ner')
-        or
-            Tasks(['coref', 'ner'])
+    n_classes_ner: Optional[int] = field(default_factory=int)
+    n_classes_pruner: Optional[int] = field(default_factory=int)
+    n_speakers: Optional[int] = field(default_factory=int)
 
-        PS: Don't bother deeply understanding this code, I wrote this in a fit of pseudo productive stupor
-            wherein I want to write something non trivial but also not important.
-    """
+    @classmethod
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], ignore_speakers: bool = False):
 
-    # noinspection PyUnusedLocal
-    def __init__(self, *args, **kwargs):
+        if not type(datasrc) in [type(None), str]:
+            raise BadParameters(
+                f"datasrc is not a string but {type(datasrc)}. Maybe you forgot to pass the data source?"
+                f"Ensure that you're calling Tasks(datasource, tuples=task_tuples) and not"
+                f"Tasks(*task_tuples) or Tasks(tuples=task_tuples.")
 
-        # First you want to allow for both forms of addressing (in comments above)
-        if type(args[0]) in [list, tuple]:
-            if len(args) != 1:
-                raise ValueError("You both provide a list in args[0] and provide other args? Please don't.")
-            args = args[0]
+        _raw_ = copy.deepcopy(tuples)
+        dataset = datasrc
 
-        # Check Values
-        if len(set(args)) != len(args):
+        # Check if every element is a tuple or not
+        for tupl in tuples:
+            if type(tupl) is not tuple:
+                raise TypeError(f"Expected a list of tuples as input. Got {type(tupl)}")
+
+        names = [tupl[0] for tupl in tuples]
+
+        # Check if every task name is known
+        for task_nm in names:
+            if task_nm not in KNOWN_TASKS:
+                raise UnknownTaskException(f"An unrecognized task name sent: {task_nm}. "
+                                           f"So far, we can work with {KNOWN_TASKS}.")
+
+        # Check for duplicates
+        if len(set(names)) != len(names):
             raise ValueError("Duplicates were passed in args. Please don't.")
 
-        for val in args:
-            if not type(val) is str:
-                raise TypeError("We only expected to deal with strings here !?!")
+        # Picking loss scales
+        loss_scales = cls._parse_loss_scales_(names=names, scales=[arg[1] for arg in tuples])
+        use_class_weights = [arg[2] for arg in tuples]
 
-            if val not in KNOWN_TASKS:
-                raise UnknownTaskException(f"{val} is not a known task.")
+        n_classes_ner = 0
+        n_classes_pruner = 0
+        n_speakers = 0
 
-        args = sorted(args)
+        return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights, dataset=dataset,
+                   n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_speakers=n_speakers)
 
-        # Init List
-        super().__init__(args)
+    def __post_init__(self, *args, **kwargs):
+        self.sort()
 
-    def __hash__(self):
-        super().__hash__()
+        """ 
+            Now for ease of use things
+            1. If NER is in tasks, we try and pull the NER n_classes
+            2. If this dataset is known to have speakers, we also pull those
+        """
+        if 'ner' in self.names:
+            self.n_classes_ner = self._get_n_classes_(task='ner', dataset=self.dataset)
 
-    def __setitem__(self, ii, val):
-        raise ValueError("Es Ist Verboten !!")
+        if 'pruner' in self.names:
+            self.n_classes_pruner = 2
 
-    def insert(self, ii, val):
-        raise ValueError("Es Ist Verboten !!")
+        if self.dataset in KNOWN_HAS_SPEAKERS:
+            self.n_speakers = self._get_n_speakers_(dataset=self.dataset)
 
-    def pop(self, *args, **kwargs):
-        raise ValueError("Es Ist Verboten !!")
+    def sort(self):
+        """ Rearranges all artefacts to sort them in the right order """
 
-    def append(self, val):
-        raise ValueError("Es Ist Verboten !!")
+        if len(self) == 0:
+            return
+
+        sorted_ind = argsort(self)
+        self.names = [self.names[i] for i in sorted_ind]
+        self.loss_scales = [self.loss_scales[i] for i in sorted_ind]
+        self.use_class_weights = [self.use_class_weights[i] for i in sorted_ind]
+
+    def _task_unweighted_(self, task_nm: str) -> bool:
+        if task_nm not in self:
+            raise UnknownTaskException(f"Asked for {task_nm} but task does not exist.")
+
+        task_index = self.names.index(task_nm)
+        return not self.use_class_weights[task_index]
+
+    def ner_unweighted(self) -> bool:
+        return self._task_unweighted_('ner')
+
+    def coref_unweighted(self) -> bool:
+        return self._task_unweighted_('coref')
+
+    def pruner_unweighted(self) -> bool:
+        return self._task_unweighted_('pruner')
+
+    @staticmethod
+    def _get_n_classes_(task: str, dataset: str) -> int:
+        try:
+            with (LOC.manual / f"{task}_{dataset}_tag_dict.json").open("r") as f:
+                ner_tag_dict = json.load(f)
+                return len(ner_tag_dict)
+        except FileNotFoundError:
+            # The tag dictionary does not exist. Report and quit.
+            raise LabelDictNotFound(f"No label dict found for ner task for {dataset}: {task}")
+
+    @staticmethod
+    def _get_n_speakers_(dataset: str) -> int:
+        speaker_tag_dict = load_speaker_tag_dict(LOC.manual, dataset)
+        if speaker_tag_dict is None:
+            raise LabelDictNotFound(f"No label dict of speakers found for {dataset}")
+        return len(speaker_tag_dict)
+
+    @staticmethod
+    def _parse_loss_scales_(names: List[str], scales: List[float]) -> List[float]:
+        """
+            If all scales are negative, use the predefined scale in LOSS_SCALES (for the task combination).
+            If there is at least one positive value, replace the negative values with the defaults given in LOSS_SCALES
+            If they're all positive, well, just return it as-is.
+
+            If any value is zero, we consider it as positive.
+        """
+
+        if len(scales) == 0:
+            return []
+
+        all_neg = all([val < 0 for val in scales])
+        if all_neg:
+
+            key = '_'.join(sorted(names))
+            return LOSS_SCALES[key]
+
+        else:
+            # There is at least one positive value
+            for i, val in enumerate(scales):
+                if val < 0:
+                    scales[i] = LOSS_SCALES[names[i]][0]
+
+            return scales
+
+    def __len__(self):
+        return len(self.names)
+
+    def raw(self):
+        return [(self.names[i], self.loss_scales[i], self.use_class_weights[i]) for i in range(len(self))]
+
+    def __iter__(self):
+        for task in self.names:
+            yield task
+
+    def __getitem__(self, i):
+        return self.names[i]
+
+    @classmethod
+    def create(cls):
+        return Tasks.parse(datasrc=None, tuples=[])
+
+    def isempty(self):
+        return self.dataset is None and len(self) == 0

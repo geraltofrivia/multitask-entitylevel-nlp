@@ -9,17 +9,17 @@ Specifically, we want
 
 The dataclass is going to be document based. That is, one instance is one document.
 """
-import re
+import copy
 import json
-import click
-import spacy
+import re
 import warnings
-import unidecode
-from pathlib import Path
 from copy import deepcopy
+from pathlib import Path
+from typing import Iterable, Union, List, Dict
+
+import click
+import unidecode
 from tqdm.auto import tqdm
-from spacy.tokens import Token
-from typing import Iterable, Union, List
 
 # Local imports
 try:
@@ -28,9 +28,10 @@ except ImportError:
     from . import _pathfix
 from utils.data import Document, Clusters, NamedEntities, TypedRelations, BridgingAnaphors
 from utils.misc import NERAnnotationBlockStack
-from utils.nlp import to_toks, NullTokenizer
+from utils.nlp import to_toks
 from preproc.commons import GenericParser
-from config import LOCATIONS as LOC
+from config import LOCATIONS as LOC, KNOWN_SPLITS
+from dataiter import DocumentReader
 
 
 class CoNLLOntoNotesParser(GenericParser):
@@ -49,32 +50,16 @@ class CoNLLOntoNotesParser(GenericParser):
         """
         super().__init__(raw_dir=raw_dir, suffixes=suffixes, ignore_empty_documents=ignore_empty_documents)
         self.dir: Path = raw_dir
-        self.splits = (
+        self.suffixes = (
             ["train", "development", "test", "conll-2012-test"]
             if not self.suffixes
             else self.suffixes
         )
-        self.parsed: dict = {split_nm: [] for split_nm in self.splits}
 
         self.flag_ignore_empty_documents: bool = ignore_empty_documents
         self.write_dir = self.write_dir / "ontonotes"
 
         self.re_ner_tags = r"\([a-zA-Z]*|\)"
-
-        self.nlp = spacy.load("en_core_web_sm")
-        # This tokenizer DOES not tokenize documents.
-        # Use this is the document is already tokenized.
-        self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
-
-    def run(self):
-
-        for split in self.splits:
-            # First, clear out all the previously processed things from the disk
-            self.delete_preprocessed_files(split)
-            outputs = self.parse(split)
-
-            # Dump them to disk
-            self.write_to_disk(split, outputs)
 
     def parse(self, split_nm: Union[Path, str]):
         """Where the actual parsing happens. One split at a time."""
@@ -144,16 +129,17 @@ class CoNLLOntoNotesParser(GenericParser):
                 # Convert cluster spans to text
                 flat_doc = to_toks(documents[i])
                 # noinspection PyTypeChecker
-                spacy_doc = self.nlp(flat_doc)
+                # spacy_doc = self._get_spacy_doc_(documents[i])
+                spacy_doc = self.nlp(documents[i])
                 clusters_ = []
                 for cluster_id, cluster in enumerate(clusters[i]):
                     clusters_.append([])
                     for span in cluster:
                         clusters_[cluster_id].append(flat_doc[span[0]: span[1]])
 
-                # debug
-                if clusters[i]:
-                    print('potato')
+                # # debug
+                # if clusters[i]:
+                #     print('potato')
 
                 # Make a coref clusters object
                 coref = Clusters(spans=list(clusters[i]))
@@ -200,6 +186,7 @@ class CoNLLOntoNotesParser(GenericParser):
                 doc = Document(
                     document=documents[i],
                     pos=doc_pos[i],
+                    speakers=[0] * len(documents[i]),
                     docname=doc_names[i],
                     split=split_nm,
                     genre=genre,
@@ -213,15 +200,6 @@ class CoNLLOntoNotesParser(GenericParser):
                 outputs.append(doc)
 
         return outputs
-
-    @staticmethod
-    def _spacy_process_ner_tags_(
-            doc: spacy.tokens.Doc,
-    ) -> (List[str], List[Union[int]], List[str]):
-        ents = [[ent.start, ent.end] for ent in doc.ents]
-        ents_ = [[tok.text for tok in ent] for ent in doc.ents]
-        ents_tags = [ent.label_ for ent in doc.ents]
-        return ents, ents_, ents_tags
 
     def _normalize_word_(self, word, language):
         # We normalise unicode etc here. It will make working with HF tokenizers down the road much easier.
@@ -406,7 +384,7 @@ class CoNLLOntoNotesParser(GenericParser):
                 ner_span, ner_text, ner_tag = stack.pop(word_id + 1)
                 finalised_annotations_span.append(ner_span)
                 finalised_annotations_text.append(ner_text)
-                finalised_annotation_tag.append(ner_tag)
+                finalised_annotation_tag.append([ner_tag])
 
         return (
             finalised_annotations_span,
@@ -414,12 +392,38 @@ class CoNLLOntoNotesParser(GenericParser):
             finalised_annotation_tag,
         )
 
+    @staticmethod
+    def create_label_dict():
+        """
+            Check if two trainable splits of scierc - train, and dev are already processed or not.
+            If not, return error.
+
+            If yes, go through all of them and find all unique output labels to encode them in a particular fashion.
+        :return: None
+        """
+        relevant_splits: Dict[str, str] = copy.deepcopy(KNOWN_SPLITS.ontonotes)
+        relevant_splits.pop('test')
+
+        # Check if dump.json exists in all of these
+        ner_labels = set()
+        for split_code, split_name in relevant_splits.items():
+            reader = DocumentReader('ontonotes', split=split_name)
+            for doc in reader:
+                ner_labels = ner_labels.union(doc.ner.get_all_tags())
+
+        # Turn them into dicts and dump them as json
+        with (LOC.manual / 'ner_ontonotes_tag_dict.json').open('w+', encoding='utf8') as f:
+            ner_labels = {tag: i for i, tag in enumerate(ner_labels)}
+            json.dump(ner_labels, f)
+            print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ontonotes_tag_dict.json')}")
+
 
 @click.command()
 @click.option(
     "--suffix",
     "-s",
     type=str,
+    default='train',
     help="The name of the dataset SPLIT e.g. train, test, development, conll-2012-test etc",
 )
 @click.option(
@@ -428,11 +432,20 @@ class CoNLLOntoNotesParser(GenericParser):
     is_flag=True,
     help="If True, we ignore the documents without any coref annotation",
 )
-def run(suffix: str, ignore_empty: bool):
-    parser = CoNLLOntoNotesParser(
-        LOC.ontonotes_conll, suffixes=[suffix], ignore_empty_documents=ignore_empty
-    )
-    parser.run()
+@click.option("--run_all", "-a", is_flag=True, help="If flag is given, we process every ontonotes split.")
+def run(suffix: str, ignore_empty: bool, run_all: bool = False):
+    if not run_all:
+        parser = CoNLLOntoNotesParser(
+            LOC.ontonotes_conll, suffixes=[suffix], ignore_empty_documents=ignore_empty
+        )
+        parser.run()
+    else:
+        suffixes = ['train', 'development', 'conll-2012-test', 'test']
+        parser = CoNLLOntoNotesParser(
+            LOC.ontonotes_conll, suffixes=suffixes, ignore_empty_documents=ignore_empty
+        )
+        parser.run()
+        parser.create_label_dict()
 
 
 if __name__ == "__main__":

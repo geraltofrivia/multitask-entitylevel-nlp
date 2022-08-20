@@ -3,21 +3,21 @@
 
 """
 import json
-import click
-import spacy
-import jsonlines
 from pathlib import Path
 from typing import Iterable, Union, List
+
+import click
+import jsonlines
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, KNOWN_SPLITS
+from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
 from dataiter import DocumentReader
-from utils.nlp import to_toks, NullTokenizer
+from utils.nlp import to_toks
 from utils.data import Document, NamedEntities, TypedRelations, Clusters, BridgingAnaphors
 
 
@@ -35,9 +35,6 @@ class SciERCParser(GenericParser):
         self.write_dir = LOC.parsed / "scierc"
         self.write_dir.mkdir(parents=True, exist_ok=True)
 
-        self.nlp = spacy.load("en_core_web_sm")
-        self.nlp.tokenizer = NullTokenizer(self.nlp.vocab)
-
     @staticmethod
     def get_named_entity_objs(inst: dict) -> NamedEntities:
 
@@ -47,7 +44,7 @@ class SciERCParser(GenericParser):
 
             for ner in inst['ner'][sent_id]:
                 ner_spans.append([ner[0], ner[1] + 1])
-                ner_tags.append(ner[2])
+                ner_tags.append([ner[2]])
                 ner_words.append(doc[ner[0]: ner[1] + 1])
 
         return NamedEntities(spans=ner_spans, tags=ner_tags, words=ner_words)
@@ -84,8 +81,18 @@ class SciERCParser(GenericParser):
         for line in lines:
             doc_text = line['sentences']
             # noinspection PyTypeChecker
-            doc = self.nlp(to_toks(doc_text))
-            doc_pos = self.get_pos_tags(doc)
+            try:
+                doc = self.nlp(doc_text)
+                # doc = self._get_spacy_doc_(doc_text)
+                doc_pos = self.get_pos_tags(doc)
+            except ValueError as e:
+                if len(doc_text) == 1:
+                    # This happens due to there being only sentence in spacy doc. This is kinda weird ngl.
+                    # We make a doc with the sentence repeated twice and only give the first one to get_pos_tag
+                    doc = self.nlp(doc_text + doc_text)
+                    doc_pos = [self.get_pos_tags(doc)[0]]
+                else:
+                    raise e
             doc_name = line['doc_key']
 
             # Parse out NER stuff
@@ -103,6 +110,7 @@ class SciERCParser(GenericParser):
                 document=doc_text,
                 pos=doc_pos,
                 docname=doc_name,
+                speakers=[0] * len(doc_text),
                 coref=coref,
                 ner=ner,
                 rel=rel,
@@ -121,7 +129,7 @@ def create_label_dict():
         If yes, go through all of them and find all unique output labels to encode them in a particular fashion.
     :return: None
     """
-    relevant_splits: List[str] = KNOWN_SPLITS.scierc[:-1]
+    relevant_splits: List[str] = ['train', 'dev']
 
     # Check if dump.json exists in all of these
     ner_labels = set()
@@ -129,7 +137,7 @@ def create_label_dict():
     for split in relevant_splits:
         reader = DocumentReader('scierc', split=split)
         for doc in reader:
-            ner_labels = ner_labels.union(doc.ner.tags)
+            ner_labels = ner_labels.union(doc.ner.get_all_tags())
             rel_labels = rel_labels.union(doc.rel.tags)
 
     # Turn them into dicts and dump them as json

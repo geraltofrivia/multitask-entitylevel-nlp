@@ -24,10 +24,12 @@ LOCATIONS: Dict[str, Path] = FancyDict(
         "glove": ROOT_LOC / "models" / "glove",
         "manual": ROOT_LOC / "data" / "manual",
         "models": ROOT_LOC / "models" / "trained",
+        "encoded": ROOT_LOC / "data" / "encoded",
 
         # Some datasets
         "ontonotes_raw": ROOT_LOC / "data" / "raw" / "ontonotes" / "ontonotes-release-5.0",
         "ontonotes_conll": ROOT_LOC / "data" / "raw" / "ontonotes" / "conll-2012" / "v5" / "data",
+        "dwie": ROOT_LOC / "data" / "raw" / "dwie",
         "scierc": ROOT_LOC / "data" / "raw" / "scierc",
         "cc_ami": ROOT_LOC / "data" / "raw" / "codicrac-ami",
         "cc_switchboard": ROOT_LOC / "data" / "raw" / "codicrac-switchboard",
@@ -41,7 +43,7 @@ LOCATIONS: Dict[str, Path] = FancyDict(
     }
 )
 
-KNOWN_TASKS = ["coref", "ner", "ner_spacy", "pruner", "rel"]
+KNOWN_TASKS = ["coref", "ner", "pruner", "rel"]
 KNOWN_SPLITS = FancyDict({
     'scierc': FancyDict({
         'train': 'train',
@@ -64,8 +66,24 @@ KNOWN_SPLITS = FancyDict({
     'codicrac-light': FancyDict({
         'train': 'train',
         'dev': 'dev',
+    }),
+    'codicrac-switchboard': FancyDict({
+        'train': 'train',
+        'dev': 'dev',
+    }),
+    'dwie': FancyDict({
+        'train': 'train',
+        'dev': 'dev',
+        'test': 'test'
     })
 })
+KNOWN_HAS_SPEAKERS = [key for key in KNOWN_SPLITS.keys() if key.startswith('codicrac')]
+NER_IS_MULTILABEL = ['dwie']  # Refer to this to know which datasets have mutlilabel NER targets
+
+
+def is_split_train(dataset: str, split: str):
+    """ Look at known splits and determine if KNOWN_SPLITS[dataset]['train'] == split """
+    return KNOWN_SPLITS[dataset]['train'] == split
 
 
 def unalias_split(split: str) -> str:
@@ -79,17 +97,33 @@ def unalias_split(split: str) -> str:
 
 # LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
 # changed CNP ratio now that coref is normalised to 1
-LOSS_RATIO_CNP = [1.0, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
+LOSS_RATIO_CNP = [1.0, 1.0, 0.1]  # Loss ratio to use to train coref, ner and pruner
 LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0, 1.0]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = FancyDict({
-    'filter_candidates_pos_threshold': 15000,
+    'skip_instance_after_nspan': 15000,
     'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
-    'coref_max_training_segments': 5,  # used to determine max in segment distance part of coref
+    'max_training_segments': 5,  # used to determine max in segment distance part of coref
+    'coref_dropout': 0.3,
+    'pruner_dropout': 0.3,
+    'ner_dropout': 0.3,
+    'encoder_dropout': 0.3,
+    'unary_hdim': 1500,
+    'dense_layers': 1,  # Dense layers are parameterized transformation right after encoder in mtl model.
+
+    'pruner_top_span_ratio': 0.4,
+    'pruner_max_num_spans': 250,  # Can never have more than this number of spans post pruning
+    'pruner_use_width': True,  # if False, we ignore span width as a feature in span width embeddings and pruning spans.
     'coref_higher_order': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
-    'bias_in_last_layers': True,  # model's last lin layers will have bias set based on this flag
+    'bias_in_last_layers': False,  # model's last lin layers will have bias set based on this flag
+    'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
+    'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
+    'ner_threshold': 0.5,  # for DWIE, we do multilabel clf, where we use this threshold to determine if sthing is
+    # NER or not
+    'weights_clip_min': 0.0005,  # these are class weights used for weighted cross entropy loss
+    'weights_clip_max': 500,  # these are class weights used for weighted cross entropy loss
 
     # TODO: implement code to turn these two below to TRUE
     'ner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
@@ -102,14 +136,19 @@ DEFAULTS: dict = FancyDict({
         'adam_epsilon': 1e-6,
         'clip_gradients_norm': 1.0,
         'learning_rate': 0.0001,
-
     }),
 })
 LOSS_SCALES = {
-    'loss_scales_coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
-    'loss_scales_coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
-    'loss_scales_coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
-    'loss_scales_coref': [1.0, ],
-    'loss_scales_ner': [1.0, ],
-    'loss_scales_pruner': [1.0, ],
+    'coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
+    'coref_nermul_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
+    'coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
+    'coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'coref_nermul': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'coref': [1.0, ],
+    'ner': [1.0, ],
+    'nermul': [1.0, ],
+    'pruner': [1.0, ],
+}
+SCHEDULER_CONFIG = {
+    'gamma': {'decay_rate': 0.9}
 }

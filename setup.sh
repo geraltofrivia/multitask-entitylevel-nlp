@@ -44,10 +44,18 @@ src/preproc/conll-2012/v3/scripts/skeleton2conll.sh -D data/raw/ontonotes/ontono
 pip install -r requirements.txt
 
 # Downloading the spacy model
-python -m spacy download en_core_web_sm
+python -m spacy download en_core_web_sm-3.1.0 --direct
 
 # Downloading glove
 wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
 unzip models/glove/glove.6B.zip -d models/glove/
 
+# For DWIE corpora
+git submodule update --init --recursive
+cd modules/dwie
+python src/dwie_download.py
+cd ../..
+# now move the raw data far from the `modules` dir, into the `raw` dir
+mkdir -pv data/raw/dwie
+mv modules/dwie/data/annos_with_content/* data/raw/dwie
 ./preproc.sh

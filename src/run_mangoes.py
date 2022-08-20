@@ -24,7 +24,7 @@ from utils.data import Tasks
 from loops import training_loop
 from models.multitask import BasicMTL
 from utils.misc import check_dumped_config
-from dataiter import MultiTaskDataIter, DataIterCombiner
+from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, LOSS_SCALES, _SEED_ as SEED
 from utils.exceptions import ImproperDumpDir, LabelDictNotFound, BadParameters
 from mangoes.modeling import BERTForCoreferenceResolution
@@ -251,14 +251,14 @@ def get_save_parent_dir(parentdir: Path, dataset: str, tasks: Tasks,
                         dataset_2: Optional[str], tasks_2: Optional[Tasks],
                         config: Union[transformers.BertConfig, dict]) -> Path:
     """
-        Normally returns parentdir/dataset+dataset2/'_'.join(sorted(tasks))+'-'+'_'.join(sorted(tasks_2)).
-        E.g. if dataset, tasks are ontonotes and ['coref', 'pruner'] and
+        Normally returns parentdir/dataset+dataset2/'_'.join(sorted(names))+'-'+'_'.join(sorted(tasks_2)).
+        E.g. if dataset, names are ontonotes and ['coref', 'pruner'] and
             dataset_2, tasks_2 are scierc and ['ner'], the output will be
             parentdir/ontonotes_scierc/coref_pruner-ner
 
         However, if we find that trim flag is active in config, or that the run is going to wandb-trials
             then the output is
-                parentdir/trial/dataset+dataset2/'_'.join(sorted(tasks+tasks_2)).
+                parentdir/trial/dataset+dataset2/'_'.join(sorted(names+tasks_2)).
     """
     # if dataset_2 is alphabetically before dataset, start with it
     if dataset_2 and dataset_2[0] < dataset[0]:
@@ -406,6 +406,8 @@ def run(
     if set(tasks).intersection(tasks_2):
         raise BadParameters("Tasks are overlapping between the two sources. That should not happen.")
 
+    raise NotImplementedError("We haven't changed this code to work with multiple domains. "
+                              "We'll have to start with changing the click args, and keep going down after that.")
     # Convert task args to a proper tasks obj
     tasks = Tasks(tasks)
     tasks_2 = Tasks(tasks_2)
@@ -536,8 +538,8 @@ def run(
         train_ds_2, dev_ds_2 = get_dataiter_partials(config, tasks_2, dataset=dataset_2, tokenizer=tokenizer,
                                                      ignore_task=t2_ignore_task)
         # Make combined iterators since we have two sets of datasets and tasks
-        train_ds = partial(DataIterCombiner, srcs=[train_ds, train_ds_2])
-        dev_ds = partial(DataIterCombiner, srcs=[dev_ds, dev_ds_2])
+        train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2])
+        dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2])
 
     # Make evaluators
     train_eval = Evaluator(

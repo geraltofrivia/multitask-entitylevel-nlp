@@ -1,8 +1,9 @@
-import torch
-import unidecode
-import transformers
 from copy import deepcopy
-from typing import List, Any, Dict
+from typing import List, Any, Dict, Optional, Union
+
+import spacy
+import torch
+import transformers
 from spacy.tokens import Doc
 
 try:
@@ -41,9 +42,10 @@ SPAN_POS_BLACKLIST_SUFFIX = (".", "POS")
 NCHUNK_POS_WHITELIST = ("NN", "NNS", "NNP", "NNPS")
 
 
-def to_toks(doc: List[List[Any]]) -> List[Any]:
+def to_toks(doc: List[List[Any]], suffix: Optional[str] = None) -> List[Any]:
     """[ ['a', 'sent'], ['another' 'sent'] ] -> ['a', 'sent', 'another', 'sent']"""
-    return [word for sent in doc for word in sent]
+    return [word for sent_nr, sent in enumerate(doc) for word in
+            (sent + [suffix] if suffix and not sent_nr + 1 == len(doc) else sent)]
 
 
 def to_str(raw: List[List[str]]) -> str:
@@ -99,7 +101,25 @@ def remove_pos(
     return span
 
 
-class NullTokenizer(DummyTokenizer):
+class PreTokenizedPreSentencizedTokenizer(DummyTokenizer):
+    """Custom tokenizer to be used in spaCy when the text is already pretokenized and broken into sentences."""
+
+    def __init__(self, vocab: spacy.vocab.Vocab):
+        """Initialize tokenizer with a given vocab
+        :param vocab: an existing vocabulary (see https://spacy.io/api/vocab)
+        """
+        self.vocab = vocab
+
+    def __call__(self, inp: Union[List[str], str, List[List[str]]]) -> Doc:
+        """Call the tokenizer on input `inp`.
+        :param inp: either a string to be split on whitespace, or a list of tokens
+        :return: the created Doc object
+        """
+        sent_starts = to_toks([[1] + [0] * (len(sent) - 1) for sent in inp])
+        return Doc(self.vocab, words=to_toks(inp), sent_starts=sent_starts)
+
+
+class PreTokenziedTokenizer(DummyTokenizer):
     """
     Use it when the text is already tokenized but the doc's gotta go through spacy.
     Usage: `nlp.tokenizer = CustomTokenizer(nlp.vocab)`
@@ -178,6 +198,11 @@ def match_subwords_to_words(
                         or sw_phrase.startswith("!!")
                         or sw_phrase.startswith("hahahaha")
                         or sw_phrase.startswith("==")
+                        or sw_phrase.startswith('Waldschl')
+                        or sw_phrase.startswith('YouAintNo')
+                        or sw_phrase.startswith('story.asp')
+                        or sw_phrase.startswith('<$BlogBack')
+                        or sw_phrase.startswith('christopher')
                 ):
                     print('potato')
                     print("TOO LONG: ", sw_phrase)

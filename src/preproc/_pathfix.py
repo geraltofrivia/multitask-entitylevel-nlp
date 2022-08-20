@@ -19,14 +19,18 @@ import os
 import sys
 from pathlib import Path
 
-root_dir: str = os.getcwd()
-if not root_dir.endswith("src"):
-    # noinspection PyTypeChecker
-    root_dir = Path(root_dir) / "src"
-sys.path.append(str(root_dir))
+root_dir: Path = Path(os.getcwd())
+if root_dir.name == "src":
+    root_dir = root_dir.parent
+if root_dir.name == 'preproc':
+    root_dir = root_dir.parent.parent
 
-print(f"Fixing paths from {root_dir}")
+sys.path.append(str(root_dir))
+sys.path.append(str(root_dir / "src"))
 
 
 def suppress_unused_import():
     pass
+
+
+print(f"Fixing paths from {root_dir}")

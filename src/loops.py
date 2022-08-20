@@ -1,8 +1,7 @@
 import json
 import pickle
-import warnings
 from pathlib import Path
-from typing import Iterable, Callable, Union, Optional
+from typing import List, Callable, Union, Optional, Type
 
 import numpy as np
 import torch
@@ -14,8 +13,10 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.misc import change_device, weighted_addition_losses
 from eval import Evaluator
+from utils.misc import change_device, weighted_addition_losses
+from utils.exceptions import AnticipateOutOfMemException
+from utils.data import Tasks
 
 
 def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
@@ -25,10 +26,11 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
     return inter_epoch
 
 
+# noinspection PyProtectedMember
 def training_loop(
         model: torch.nn.Module,
         epochs: int,
-        tasks: Iterable[str],
+        tasks: List[Tasks],
         opt: torch.optim,
         forward_fn: Callable,
         device: Union[str, torch.device],
@@ -40,13 +42,15 @@ def training_loop(
         save_dir: Optional[Path] = None,
         epochs_last_run: int = 0,
         save_config: dict = None,
-        filter_candidates_len_threshold: int = -1,
         debug: bool = False,
+        scheduler: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
     TODO: write about every param
 
+    :param debug:
+    :param clip_grad_norm:
     :param model:
     :param epochs:
     :param tasks:
@@ -61,16 +65,15 @@ def training_loop(
     :param save_dir:
     :param epochs_last_run:
     :param save_config:
-    :param filter_candidates_len_threshold: this is LEN threshold, not POS threshold.
-        You divide the POS threshold by max span width and send that here.
-    :return:
+    :param scheduler: a lr_scheduler object (or none), preconfigured with our optimizer.
     """
     if flag_save and save_config is None:
         save_config = {}
 
-    train_loss = {task_nm: [] for task_nm in tasks}
+    train_loss = {task_obj.dataset: {task_nm: [] for task_nm in task_obj} for task_obj in tasks}
     train_metrics = {}
     dev_metrics = {}
+    skipped = {task_obj.dataset: [] for task_obj in tasks}
 
     trn_dataset = trn_dl()
 
@@ -79,7 +82,10 @@ def training_loop(
 
         # Make data
         # trn_dataset = trn_dl()
-        per_epoch_loss = {task_nm: [] for task_nm in tasks}
+        per_epoch_loss = {task_obj.dataset: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}
+        per_epoch_skipped = {task_obj.dataset: 0 for task_obj in tasks}
+
+        model.train()
 
         # Training (on the train set)
         for i, instance in enumerate(tqdm(trn_dataset)):
@@ -89,24 +95,15 @@ def training_loop(
 
             instance["prep_coref_eval"] = True
 
-            # if there are more than a certain amount of (roughly) candidates, we skip the instance. save mem
-            if instance['attention_mask'].view(-1).sum().item() > filter_candidates_len_threshold > 0:
-                warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-                              f"Input: {instance['attention_mask'].view(-1).sum().item()}.")
-                continue
-
             # Move all input tensors to the right devices
             instance = change_device(instance, device)
 
-            # # DEBUG: if there are more than 9k candidates, skip the instance. save mem.
-            # if instance['candidate_starts'].shape[0] > 9000:
-            #     warnings.warn(f"Skipping {i:5d}. Too many candidates. "
-            #                   f"Input: {instance['input_ids'].shape}."
-            #                   f"Spans: {instance['candidate_starts'].shape}")
-            #     continue
-
             # Forward Pass
-            outputs = forward_fn(**instance)
+            try:
+                outputs = forward_fn(**instance)
+            except AnticipateOutOfMemException:
+                per_epoch_skipped[instance["domain"]] += 1
+                continue
 
             # Calc loss
             loss = weighted_addition_losses(outputs["loss"], instance["tasks"], instance['loss_scales'])
@@ -126,33 +123,49 @@ def training_loop(
             train_eval.update(instance=instance, outputs=outputs)
 
             for task_nm in instance['tasks']:
-                per_epoch_loss[task_nm].append(outputs["loss"][task_nm].item())
+                per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
 
+        model.eval()
         # Evaluation (on the validation set)
         dev_eval.run()
+
+        # If LR scheduler is provided, run it
+        if scheduler is not None:
+            scheduler.step()
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
         dev_metrics = dev_eval.aggregate_reports(dev_metrics, dev_eval.report())
-        if flag_wandb:
-            wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
-        for task_nm in tasks:
-            train_loss[task_nm].append(np.mean(per_epoch_loss[task_nm]))
+        for task in tasks:
+            for task_nm in task:
+                train_loss[task.dataset][task_nm].append(np.mean(per_epoch_loss[task.dataset][task_nm]))
 
             if flag_wandb:
-                task_specific_wandb_logs = {"loss": train_loss[task_nm][-1]}
-                wandb.log({task_nm: task_specific_wandb_logs}, step=e)
+                _loss_logs = {task_nm: {"loss": train_loss[task.dataset][task_nm][-1]} for task_nm in task}
+                wandb.log({task.dataset: _loss_logs}, step=e)
+
+        for k in skipped.keys():
+            skipped[k].append(per_epoch_skipped[k])
+        lrs = [param_group['lr'] for param_group in opt.param_groups]
+        if flag_wandb:
+            wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
+            wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
+            wandb.log({"skipped": {k: v[-1] for k, v in skipped.items()}})
+
+        # print(train_metrics)
 
         # Printing
-        print(f"\nEpoch: {e:3d}" +
-              '\n\t'.join([f" | {task_nm} Loss: {float(np.mean(per_epoch_loss[task_nm])):.5f}\n" +
-                           ''.join([f" | {task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in train_metrics[task_nm].items()]) + '\n' +
-                           ''.join([f" | {task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
-                                    for metric_nm, metric_vls in dev_metrics[task_nm].items()])
+        print(f"\nEpoch: {e:5d}" +
+              '\n\t'.join([f" | {task.dataset + task_nm} Loss: "
+                           f"{float(np.mean(per_epoch_loss[task.dataset][task_nm])):.5f}\n" +
+                           ''.join([f" | {task.dataset + task_nm} Tr_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                    for metric_nm, metric_vls in
+                                    train_metrics[task.dataset][task_nm].items()]) + '\n' +
+                           ''.join([f" | {task.dataset + task_nm} Vl_{metric_nm}: {float(metric_vls[-1]):.3f}"
+                                    for metric_nm, metric_vls in dev_metrics[task.dataset][task_nm].items()])
                            # f" | {task_nm} Tr_c: {float(np.mean(per_epoch_tr_acc[task_nm])):.5f}" +
                            # f" | {task_nm} Vl_c: {float(np.mean(per_epoch_vl_acc[task_nm])):.5f}"
-                           for task_nm in tasks]))
+                           for task in tasks for task_nm in task]))
 
         # Saving code
         if flag_save:
@@ -171,6 +184,7 @@ def training_loop(
                 'epochs_last_run': e,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': opt.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict() if scheduler else None,
             }, Path(save_dir) / 'torch.save')
             print(f"Model saved on Epoch {e} at {save_dir}.")
 

@@ -15,7 +15,7 @@ from mytorch.utils.goodies import FancyDict
 
 # Local imports
 from dataiter import DocumentReader
-from utils.data import Document
+from utils.data import Document, Tasks
 
 
 class Analyser:
@@ -41,13 +41,33 @@ class Analyser:
 
         stats.n_documents = len(self.data)
         stats.avg_len_documents = np.mean([self.get_document_length(doc) for doc in self.data])
+        stats.avg_len_documents_ = np.std([self.get_document_length(doc) for doc in self.data])
+        stats.avg_len_span_coref, stats.avg_len_span_coref_ = self.get_span_length('coref', self.data)
+        stats.avg_num_span_coref, stats.avg_num_span_coref_ = self.get_span_num('coref', self.data)
 
         self.report(stats)
+
+    @staticmethod
+    def get_span_num(task: str, data: Union[Iterable[Document], DocumentReader]):
+        nums = []
+        for datum in data:
+            if task == 'coref':
+                nums.append(len(datum.coref.get_all_spans()))
+        return np.mean(nums), np.std(nums)
+
+    @staticmethod
+    def get_span_length(task: str, data: Union[Iterable[Document], DocumentReader]):
+        length = []
+        for datum in data:
+            if task == 'coref':
+                length += [span[1] - span[0] for span in datum.coref.get_all_spans()]
+        return np.mean(length), np.std(length)
 
 
 if __name__ == '__main__':
     # Get a dataset (temp)
     # TODO: wire up click here
 
-    dr = DocumentReader('codicrac-ami', 'train')
-    Analyser("CODICRAC 22 - AMI", dr)
+    task = Tasks.parse(datasrc='ontonotes', tuples=[('coref', 1.0, True)])
+    dr = DocumentReader('ontonotes', 'train', tasks=task)
+    Analyser("ontonotes", dr)

@@ -1,9 +1,11 @@
 import json
 import pickle
-from spacy import tokens
-from pathlib import Path
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Union, List, Dict, Tuple, Iterable, Optional
+
+import spacy
+from spacy import tokens
 
 # Local imports
 try:
@@ -11,6 +13,7 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.data import Document
+from utils.nlp import PreTokenizedPreSentencizedTokenizer
 from config import LOCATIONS as LOC
 
 
@@ -33,6 +36,12 @@ class GenericParser(ABC):
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
+
+        exclude = ["senter", "parser"]
+        self.nlp = spacy.load("en_core_web_sm", exclude=exclude)
+        self.nlp.tokenizer = PreTokenizedPreSentencizedTokenizer(self.nlp.vocab)
+
+        self._speaker_vocab_ = {}
 
     @abstractmethod
     def parse(self, split_nm: Union[Path, str]):
@@ -123,3 +132,23 @@ class GenericParser(ABC):
         #         writer.write_all([asdict(instance) for instance in instances])
 
         print(f"Successfully written {len(instances)} at {write_dir}.")
+
+    def _finalise_instance_(self, document: Document, spacy_doc: tokens.Doc) -> Document:
+        """ Find span heads... populate words in different annotations etc etc. """
+        spans = document.get_all_spans()
+        span_heads = self.get_span_heads(spacy_doc, spans=spans)
+
+        # Allocate span heads to these different forms of annotations
+        document.coref.allocate_span_heads(span_heads)
+        document.ner.allocate_span_heads(span_heads)
+        document.rel.allocate_span_heads(span_heads)
+        document.bridging.allocate_span_heads(span_heads)
+
+        # Assign words to coref (should be done AFTER assigning span heads)
+        # NOTE: this automatically adds words_head and pos_head also.
+        document.coref.add_words(document.document)
+        document.ner.add_words(document.document)
+        document.coref.add_pos(document.pos)
+        document.ner.add_pos(document.pos)
+
+        return document

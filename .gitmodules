@@ -1,0 +1,3 @@
+[submodule "modules/dwie"]
+	path = modules/dwie
+	url = git@github.com:klimzaporojets/DWIE.git

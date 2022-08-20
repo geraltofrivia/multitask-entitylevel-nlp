@@ -15,18 +15,17 @@ import transformers
 from mytorch.utils.goodies import FancyDict
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
-from transformers import BertConfig
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, DEFAULTS, unalias_split
-from utils.exceptions import NoValidAnnotations, LabelDictNotFound
+from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig, deterministic_hash
+from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split, is_split_train, NER_IS_MULTILABEL
+from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
-from utils.misc import check_dumped_config, compute_class_weight_sparse
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -42,11 +41,11 @@ class MultiTaskDataIter(Dataset):
             self,
             src: str,
             split: str,
-            config: Union[FancyDict, BertConfig],
+            tasks: Tasks,
+            config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
+            allow_speaker_ids: bool = True,
             shuffle: bool = False,
-            tasks: Iterable[str] = (),
-            loss_scales: Optional[np.ndarray] = None,
             rebuild_cache: bool = False
     ):
         """
@@ -55,30 +54,31 @@ class MultiTaskDataIter(Dataset):
                 - ideally you should delete the Dataset and make a new one every time you start a new epoch.
         :param src: the name of the main dataset (e.g. ontonotes)
         :param split: the name of the dataset split (e.g. 'train', or 'development')
-        :param config: the config dict (BertConfig + required params)
+        :param config: the config dict (SerializedBertConfig + required params)
         :param tokenizer: a pretrained BertTokenizer
         :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
-        :param tasks: a list of tasks we need to process (e.g. ['ner', 'coref', 'pruner'] or ['ner',] or ['coref',]
+        :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
         :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
+        :param allow_speaker_ids: a bool which if turned to False will hide the speaker ID from __getitem__.
+            in an ideal world, this should prevent the model from doing anything with speakers.
         """
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
         self._shuffle_ = shuffle
-        self._tasks_ = sorted(tasks)
+        self.tasks: Tasks = tasks
         self.tokenizer = tokenizer
         self.config = config
         self.uncased = config.uncased
-        self.filter_candidates_pos_threshold = config.filter_candidates_pos_threshold \
-            if config.filter_candidates_pos_threshold > 0 else 10 ** 20
+        self._flag_allow_speaker_ids = allow_speaker_ids
 
-        self.loss_scales = torch.tensor(loss_scales, dtype=torch.float)
+        self.loss_scales = torch.tensor(tasks.loss_scales, dtype=torch.float)
 
         # Pull word replacements from the manually entered list
         with (LOC.manual / "replacements.json").open("r") as f:
             self.replacements = json.load(f)
 
-        if 'ner' in self._tasks_:
+        if 'ner' in self.tasks:
             # We need a tag dictionary
 
             try:
@@ -88,7 +88,7 @@ class MultiTaskDataIter(Dataset):
                 # The tag dictionary does not exist. Report and quit.
                 raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
 
-        if 'rel' in self._tasks_:
+        if 'rel' in self.tasks:
 
             try:
                 with (LOC.manual / f"rel_{self._src_}_tag_dict.json").open("r") as f:
@@ -103,10 +103,10 @@ class MultiTaskDataIter(Dataset):
         if not flag_successfully_pulled_from_disk:
 
             # Init the list of documents (pull it from disk)
-            self.dataset = DocumentReader(src=src, split=split, tasks=self._tasks_, shuffle=shuffle)
+            self.dataset = DocumentReader(src=src, split=split, tasks=self.tasks, shuffle=shuffle)
 
             # Temporarily set class weights for all tasks as [0.5, 0.5]
-            for task_nm in self._tasks_:
+            for task_nm in self.tasks:
                 if task_nm in ['ner', 'pruner']:
                     self.task_weights[task_nm] = torch.ones(2, dtype=torch.float) / 2
 
@@ -115,9 +115,9 @@ class MultiTaskDataIter(Dataset):
 
             # Calculate actual class weights
             if not unalias_split(self._split_) == 'test':
-                for task_nm in self._tasks_:
-                    if (task_nm == 'ner' and not self.config.ner_unweighted) or \
-                            (task_nm == 'pruner' and not self.config.pruner_unweighted):
+                for task_nm in self.tasks:
+                    if (task_nm == 'ner' and not self.tasks.ner_unweighted()) or \
+                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted()):
                         self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
                                                                   dtype=torch.float)
             # Update self.data with these class weights
@@ -146,10 +146,19 @@ class MultiTaskDataIter(Dataset):
 
         # Create a flat (long, long) list of all labels
         # print(self.data[0][task]['gold_labels'])
-        y = torch.cat([datum[task]['gold_label_values'] for datum in self.data]).to('cpu')
-        zero_spans = sum(approx_n_spans(datum['n_subwords'], self.config.max_span_width) for datum in self.data) - len(
+        # print(self.data[0][task]['gold_labels'])
+        if task == 'ner' and self.tasks.dataset in NER_IS_MULTILABEL:
+            y = torch.cat([datum[task]['gold_label_values'].nonzero(as_tuple=False)[:, 1] for datum in self.data])
+        else:
+            y = torch.cat([datum[task]['gold_label_values'] for datum in self.data])
+        y = y.to('cpu')
+        n_zero = sum(approx_n_spans(datum['n_subwords'], self.config.max_span_width) for datum in self.data) - len(
             y)
-        return compute_class_weight_sparse(np.unique(y), class_frequencies=np.bincount(y), class_zero_freq=zero_spans)
+
+        # Clip away les truc
+        weights = compute_class_weight_sparse(np.unique(y), class_frequencies=np.bincount(y), class_zero_freq=n_zero)
+        weights = weights.clip(self.config.weights_clip_min, self.config.weights_clip_max)
+        return weights
         # return compute_class_weight('balanced', np.unique(you), y.numpy()).tolist()
 
     def write_to_disk(self):
@@ -162,7 +171,7 @@ class MultiTaskDataIter(Dataset):
         """
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
-        for task in self._tasks_:
+        for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
 
@@ -186,7 +195,7 @@ class MultiTaskDataIter(Dataset):
 
         # Prep the file name
         dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
-        for task in self._tasks_:
+        for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
 
@@ -205,6 +214,12 @@ class MultiTaskDataIter(Dataset):
         # Check if config matches
         if check_dumped_config(self.config, old=old_config, find_alternatives=False, verbose=True):
             print(f"Pulled {len(data)} instances from {dump_fname}.")
+
+            # This is the only time where we actually return data.
+            # In this situation, we want to update the loss scales, and maybe something else in the future.
+            for datum in data:
+                datum['loss_scales'] = self.loss_scales
+
             return data, True
         else:
             warnings.warn(
@@ -218,7 +233,14 @@ class MultiTaskDataIter(Dataset):
         return self.data.__len__()
 
     def __getitem__(self, item):
-        return self.data[item]
+        obj = self.data[item]
+
+        # Append relevant things to it
+        if not self._flag_allow_speaker_ids:
+            # And this automatically makes it so the model doesn't have to worry about it
+            obj['speaker_ids'] = None
+
+        return obj
 
     def __setitem__(self, i, item):
         self.data[i] = item
@@ -237,6 +259,24 @@ class MultiTaskDataIter(Dataset):
 
     def handle_replacements(self, tokens: List[str]) -> List[str]:
         return [self.replacements.get(tok, tok) for tok in tokens]
+
+    @staticmethod
+    def _get_speaker_ids_(attention_mask, sentid_for_subword, speakers_list: List[int]):
+        """ Extrapolate the speakers across tokens. use attn mask for padding. Use sentid for sentences per swtoken """
+
+        # This is commented out because speakers will never be None
+        # if len(speakers_list) == 0:
+        #     return None
+
+        # n_subwords,
+        speakerid_for_subword = torch.tensor(speakers_list, dtype=torch.long, device='cpu')[sentid_for_subword]
+
+        # Pad it out to attention mask
+        # 1, len
+        padded = torch.zeros_like(attention_mask) - 1
+        padded[0, :speakerid_for_subword.shape[0]] = speakerid_for_subword
+
+        return padded
 
     @staticmethod
     def get_candidate_labels(
@@ -345,7 +385,6 @@ class MultiTaskDataIter(Dataset):
         # candidate_ends = generic_processed_stuff["candidate_ends"]
         gold_starts = coref_processed_stuff["gold_starts"]
         gold_ends = coref_processed_stuff["gold_ends"]
-        gold_cluster_ids = coref_processed_stuff["gold_label_values"]
 
         # replace gold labels with all ones.
         new_cluster_ids = torch.ones_like(gold_starts)
@@ -364,6 +403,7 @@ class MultiTaskDataIter(Dataset):
 
         return pruner_specific
 
+    # noinspection PyUnusedLocal
     def process_coref(
             self,
             instance: Document,
@@ -378,43 +418,35 @@ class MultiTaskDataIter(Dataset):
         :return: a dict which gets should be added to generic_processed_stuff
         """
 
+        if instance.coref.isempty:
+            raise NoValidAnnotations("Coref")
+
         """
-           # Label management:
+            # Label management:
                - change the label from being a word level index to a subword (bert friendly) level index
+            NOTE: the document may be truncated. 
+                So, if you don't find a particular span there, check if the document can be truncated (is train split)
+                If not, raise KeyError. If yes, ignore span.
         """
-        try:
-            gold_starts = torch.tensor([
-                word2subword_starts[span[0]]
-                for cluster in instance.coref.spans
-                for span in cluster
-            ], dtype=torch.long, device="cpu")  # n_gold
-            gold_ends = torch.tensor([
-                word2subword_ends[span[1] - 1]
-                for cluster in instance.coref.spans
-                for span in cluster
-            ], dtype=torch.long, device="cpu")  # n_gold
-        except KeyError as e:
-            raise KeyError(
-                f"No sw found for token #{e.args[0]}: {to_toks(instance.document)[e.args[0]]}"
-                f"in {instance.docname}."
-            )
+        gold_starts, gold_ends, gold_cluster_ids = [], [], []
+        for cluster_id, cluster in enumerate(instance.coref.spans):
+            for span in cluster:
 
-        # 1 is added at cluster ID ends because zero represents "no link/no cluster". I think...
-        gold_cluster_ids = (
-                torch.tensor([
-                    cluster_id
-                    for cluster_id, cluster in enumerate(instance.coref.spans)
-                    for _ in range(len(cluster))
-                ],
-                    dtype=torch.long, device="cpu") + 1
-        )  # n_gold
+                if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
+                    gold_starts.append(word2subword_starts[span[0]])
+                    gold_ends.append(word2subword_ends[span[1] - 1])
+                    gold_cluster_ids.append(cluster_id)
+                else:
+                    if not is_split_train(dataset=self._src_, split=self._split_):
+                        raise KeyError(
+                            f"No sw found for span {span}: {to_toks(instance.document)[span[0]: span[1]]}"
+                            f"in {instance.docname}."
+                        )
 
-        # candidate_starts = generic_processed_stuff["candidate_starts"]
-        # candidate_ends = generic_processed_stuff["candidate_ends"]
-
-        # cluster_labels = self.get_candidate_labels_mangoes(
-        #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_cluster_ids
-        # )  # [n_cand, n_cand]
+        gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
+        gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
+        gold_cluster_ids = torch.tensor(gold_cluster_ids, dtype=torch.long, device='cpu') + 1
+        """ This +1 may be important, in distinguishing actual clusters from singletons/non mentions"""
 
         coref_specific = {  # Pred stuff
             # "gold_cluster_ids_on_candidates": cluster_labels,
@@ -432,36 +464,41 @@ class MultiTaskDataIter(Dataset):
             word2subword_starts: dict,
             word2subword_ends: dict,
     ) -> dict:
+        """ NOTE: NER could be multilabel or singlelabel."""
+
+        if instance.ner.isempty:
+            raise NoValidAnnotations("NER")
+
         """
             Work with generic processed stuff to also work with NER things
-            TODO: what do we need ?
-        :return:
         """
-        gold_starts = torch.tensor(
-            [word2subword_starts[span[0]] for span in instance.ner.spans],
-            dtype=torch.long,
-            device="cpu",
-        )  # n_gold
-        gold_ends = torch.tensor(
-            [word2subword_ends[span[1] - 1] for span in instance.ner.spans],
-            dtype=torch.long,
-            device="cpu",
-        )
-        gold_labels = []
-        for tag in instance.ner.tags:
-            if tag not in self.ner_tag_dict:
-                raise AssertionError(f"Tag {tag} not found in Tag dict!")
-            gold_labels.append(self.ner_tag_dict[tag])
-        gold_labels = torch.tensor(
-            gold_labels, dtype=torch.long, device="cpu"
-        )
+        gold_starts, gold_ends, gold_labels = [], [], []
+        for span, tags in zip(instance.ner.spans, instance.ner.tags):
 
-        # Now to superimpose this tensor on the candidate space.
-        # candidate_starts = generic_processed_stuff["candidate_starts"]
-        # candidate_ends = generic_processed_stuff["candidate_ends"]
-        # gold_labels = self.get_candidate_labels_mangoes(
-        #     candidate_starts, candidate_ends, gold_starts, gold_ends, gold_labels
-        # )  # [n_cand, n_cand]
+            if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
+                gold_starts.append(word2subword_starts[span[0]])
+                gold_ends.append(word2subword_ends[span[1] - 1])
+                span_tags = [0] * (len(self.ner_tag_dict) + 1)
+                for tag in tags:
+                    if tag not in self.ner_tag_dict:
+                        raise AssertionError(f"Tag {tag} not found in Tag dict!")
+                    span_tags[self.ner_tag_dict[tag] + 1] = 1
+                gold_labels.append(span_tags)
+            else:
+                if not is_split_train(dataset=self._src_, split=self._split_):
+                    raise KeyError(
+                        f"No sw found for span {span}: {to_toks(instance.document)[span[0]: span[1]]}"
+                        f"in {instance.docname}."
+                    )
+
+        gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
+        gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
+
+        if self._src_ in NER_IS_MULTILABEL:
+            gold_labels = torch.tensor(gold_labels, dtype=torch.long, device='cpu')
+        else:
+            gold_labels = torch.tensor([np.argmax(doc_ner) for doc_ner in gold_labels],
+                                       dtype=torch.long, device='cpu')
 
         ner_specific = {
             "gold_starts": gold_starts,
@@ -500,15 +537,20 @@ class MultiTaskDataIter(Dataset):
         """
         tokens = to_toks(instance.document)
         tokens = self.handle_replacements(tokens)
+
+        """ 
+            Truncation logic: if we are working with the train set, truncate the documents. Not otherwise.
+        """
         tokenized = self.tokenizer(
             tokens,
             add_special_tokens=False,
             padding=True,
-            truncation=False,
+            truncation=is_split_train(dataset=self._src_, split=self._split_),
             pad_to_multiple_of=n_mlen,
             is_split_into_words=True,
             return_tensors="pt",
             return_length=True,
+            max_length=n_mlen * self.config.max_training_segments
         )
 
         n_subwords = tokenized.attention_mask.sum().item()
@@ -537,6 +579,8 @@ class MultiTaskDataIter(Dataset):
             dtype=torch.long,
             device="cpu",
         )
+        speaker_ids = self._get_speaker_ids_(tokenized.attention_mask, sentid_for_subword, instance.speakers)
+
         # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
         #                                          for word_id in range(len(word2subword_starts))],
         #                                         dtype=torch.long, device="cpu")
@@ -553,23 +597,35 @@ class MultiTaskDataIter(Dataset):
         input_ids = tokenized.input_ids.reshape((-1, n_mlen))  # n_seq, m_len
         token_type_ids = tokenized.token_type_ids.reshape((-1, n_mlen))  # n_seq, m_len
         attention_mask = tokenized.attention_mask.reshape((-1, n_mlen))
+        speaker_ids = speaker_ids.reshape((-1, n_mlen)) if speaker_ids is not None else speaker_ids
 
         """
             Span Iteration: find all valid contiguous sequences of inputs. 
         
-            We create subsequences from it, upto length K and pass them all through a span scorer.
+            We create subsequences from it, up to length K and pass them all through a span scorer.
             1. Create dumb start, end indices
             2. Exclude the ones which exist at the end of sentences (i.e. start in one, end in another)
         """
 
-        # candidate_starts = (
-        #     torch.arange(start=0, end=n_subwords, device="cpu").unsqueeze(1).repeat(1, self.config.max_span_width)
-        # )  # n_subwords, max_span_width
-        # candidate_ends = candidate_starts + torch.arange(
-        #     start=0, end=self.config.max_span_width, device="cpu"
-        # ).unsqueeze(
-        #     0
-        # )  # n_subwords, max_span_width
+        # calculate all possible spans
+        candidate_starts = torch.arange(start=0,
+                                        end=n_subwords,
+                                        device="cpu").view(-1, 1) \
+            .repeat(1, self.config.max_span_width)  # n_words, max_span_width
+        candidate_ends = candidate_starts + torch.arange(start=0, end=self.config.max_span_width,
+                                                         device="cpu").unsqueeze(
+            0)  # [num_words, max_span_width]
+        candidate_start_sentence_indices = sentid_for_subword[candidate_starts]  # n_seq, max_span_width
+        candidate_end_sentence_indices = sentid_for_subword[
+            torch.clamp(candidate_ends, max=n_subwords - 1)]  # n_seq, max_span_width
+        # find spans that are in the same segment and don't run past the end of the text
+        # noinspection PyTypeChecker
+        candidate_mask = torch.logical_and(candidate_ends < n_subwords,
+                                           torch.eq(candidate_start_sentence_indices,
+                                                    candidate_end_sentence_indices)).view(
+            -1).bool()  # n_seq * max_span_width -> n_can
+        candidate_starts = torch.masked_select(candidate_starts.view(-1), candidate_mask)  # n_can
+        candidate_ends = torch.masked_select(candidate_ends.view(-1), candidate_mask)  # n_can
 
         """
             # Ignoring invalid spans
@@ -625,40 +681,43 @@ class MultiTaskDataIter(Dataset):
         # candidate_ends = torch.masked_select(
         #     candidate_ends.view(-1), candidate_mask
         # )  # n_subwords*max_span_width
-        tasks = [task if not task.startswith("ner") else "ner" for task in self._tasks_]
+        tasks = [task if not task.startswith("ner") else "ner" for task in self.tasks.names]
 
         return_dict = {
             "tasks": tasks,
+            "domain": self.tasks.dataset,
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
             "word_map": wordid_for_subword,
+            "speaker_ids": speaker_ids,
             "sentence_map": sentid_for_subword,
             "n_words": n_words,
             "n_subwords": n_subwords,
-            # "candidate_starts": candidate_starts,
-            # "candidate_ends": candidate_ends,
+            "candidate_starts": candidate_starts,
+            "candidate_ends": candidate_ends,
             "loss_scales": self.loss_scales,
+            "hash": deterministic_hash(instance.document),  # dump and retrieve tensors to and from disk
             "coref": {},
             "ner": {},
             "pruner": {}
         }
 
-        if "coref" in self._tasks_ or "pruner" in self._tasks_:
+        if "coref" in self.tasks or "pruner" in self.tasks:
 
             coref_op = self.process_coref(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
-            if "coref" in self._tasks_:
+            if "coref" in self.tasks:
                 return_dict["coref"] = coref_op
 
-            if "pruner" in self._tasks_:
+            if "pruner" in self.tasks:
                 return_dict["pruner"] = self.process_pruner(
                     instance, return_dict, coref_op
                 )
 
-        if "ner" in self._tasks_:
+        if "ner" in self.tasks:
             return_dict["ner"] = self.process_ner(
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
@@ -668,7 +727,7 @@ class MultiTaskDataIter(Dataset):
 
 class DocumentReader(Dataset):
     def __init__(
-            self, src: str, split: Optional[str] = None, shuffle: bool = False, tasks: Iterable[str] = ()
+            self, src: str, split: Optional[str] = None, shuffle: bool = False, tasks: Tasks = Tasks.create()
     ):
         """
             Returns an iterable that yields one document at a time.
@@ -691,12 +750,12 @@ class DocumentReader(Dataset):
         # Sanity check params
         for task in tasks:
             if task not in KNOWN_TASKS:
-                raise AssertionError(
+                raise UnknownTaskException(
                     f"An unrecognized task name sent: {task}. "
                     f"So far, we can work with {KNOWN_TASKS}."
                 )
             # if "ner" in task and "ner_spacy" in task:
-            #     raise AssertionError("Multiple NER specific tasks passed. Pas bon!")
+            #     raise AssertionError("Multiple NER specific names passed. Pas bon!")
 
         # super().__init__()
         self._src_ = src
@@ -722,7 +781,8 @@ class DocumentReader(Dataset):
             np.random.shuffle(filenames)
 
         if len(filenames) == 0:
-            raise FileNotFoundError(f"No preprocessed documents found in the desired location.")
+            raise FileNotFoundError(f"No preprocessed documents found in the desired location."
+                                    f" - {self._src_}, {self._split_}")
 
         for fname in filenames:
 
@@ -799,12 +859,12 @@ class DataLoaderToHFTokenizer:
         return self.ds.__len__()
 
 
-class DataIterCombiner(Dataset):
+class MultiDomainDataCombiner(Dataset):
     def __init__(
             self,
             srcs: List[Callable],
-            sampling_ratio: Optional[Iterable[float]] = None
-
+            sampling_ratio: Optional[Iterable[float]] = None,
+            speaker_offsets: Optional[List[int]] = None,
     ):
         """
             A data iter that should be given multiple data iter callables.
@@ -816,7 +876,7 @@ class DataIterCombiner(Dataset):
             ontonotes_di_partial = partial(MultiTaskDataIter, src='ontonotes', split='train', ...)
             scierc_di_partial = partial(MultiTaskDataIter, src='scierc', split='train', ...)
 
-            dic = DataIterCombiner(src=[ontonotes_di_partial, scierc_di_partial])
+            dic = MultiDomainDataCombiner(src=[ontonotes_di_partial, scierc_di_partial])
             for inst in dic:
                 # sometime you get instances from ontonotes, sometimes from scierc
                 ...
@@ -826,24 +886,27 @@ class DataIterCombiner(Dataset):
         :param sampling_ratio: list of weights for each dataiter. e.g. [0.5, 0.5] implies we sample equally from both.
         """
 
-        # Init all data iters.
+        # Init all data iterators.
         self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
-
+        self.tasks: List[Tasks] = [dataiter.tasks for dataiter in self.dataiters]
+        self._speaker_offsets = speaker_offsets if speaker_offsets is not None else [0] * len(self.tasks)
         """
             Set dataset sampling indices.
             The list should be roughly the same size as combined length of all dataiters.
         """
         self.source_indices = []
         self.source_pointers = [-1] * len(self.dataiters)
-        if not sampling_ratio:
-            sampling_ratio = [1] * len(self.dataiters)
+
+        # TODO: interpret sampling ratios properly.
+        self.sampling_ratio = [1] * len(self.dataiters) if not sampling_ratio else sampling_ratio
 
         # Normalise sampling_ratios, weighted by aggregate length of all dataiters
-        weights = [int(x * len(self) / float(sum(sampling_ratio))) for x in sampling_ratio]
+        weights = [len(dataiter) for dataiter in self.dataiters]
+        self.weights = [int(weight * ratio) for weight, ratio in zip(weights, self.sampling_ratio)]
 
         # Create a list of ints based on these weights which dictate which iter to choose the next sample from
 
-        for i, dataset_specific_weight in enumerate(weights):
+        for i, dataset_specific_weight in enumerate(self.weights):
             self.source_indices += [i] * dataset_specific_weight
 
         # Now shuffle these
@@ -854,7 +917,7 @@ class DataIterCombiner(Dataset):
         self.history: Dict[int, Tuple[int, int]] = {}
 
     def __len__(self):
-        return sum(len(dataiter) for dataiter in self.dataiters)
+        return sum(self.weights)
 
     # def __iter__(self):
     #     for dataiter_index in self.source_indices:
@@ -884,6 +947,13 @@ class DataIterCombiner(Dataset):
             # Pull the index
             instance = di[pointer_index % len(di)]
 
+            """
+                Now, for some custom logic
+            """
+            # Apply speaker offset if speaker IDs are not none
+            if instance['speaker_ids'] is not None:
+                instance['speaker_ids'] += self._speaker_offsets[dataiter_index]
+
             # Update pointer registry
             self.source_pointers[dataiter_index] = pointer_index
 
@@ -901,57 +971,11 @@ class DataIterCombiner(Dataset):
             raise KeyError(f"Tried to set item in position {i}, when we've only been through {len(self.history)} items")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 
-    dataset: str = 'scierc'
-    epochs: int = 10
-    encoder: str = "bert-base-uncased"
-    tasks: Tasks = Tasks('ner', )
-    device: str = "cpu"
-    trim: bool = True
-    train_encoder: bool = False
-    ner_unweighted: bool = False
-    pruner_unweighted: bool = False
-    filter_candidates_pos = True
+    task = Tasks.parse(datasrc='codicrac-persuasion', tuples=[('coref', 1.0, True)])
+    di = DocumentReader('codicrac-persuasion', 'train', tasks=task)
 
-    # # Attempt to pull from disk
-    # encoder = transformers.BertModel.from_pretrained(LOC.root / 'models' / 'huggingface'
-    # / 'bert-base-uncased' / 'encoder')
-    tokenizer = transformers.BertTokenizer.from_pretrained(
-        LOC.root / "models" / "huggingface" / "bert-base-uncased" / "tokenizer"
-    )
-    config = transformers.BertConfig(
-        LOC.root / "models" / "huggingface" / "bert-base-uncased" / "tokenizer"
-    )
-
-    config.max_span_width = 5
-    config.coref_dropout = 0.3
-    config.metadata_feature_size = 20
-    config.unary_hdim = 1000
-    config.binary_hdim = 2000
-    config.top_span_ratio = 0.4
-    config.max_top_antecedents = 50
-    config.device = device
-    config.epochs = epochs
-    config.trim = trim
-    config.freeze_encoder = not train_encoder
-    config.ner_unweighted = ner_unweighted
-    config.pruner_unweighted = pruner_unweighted
-    config.filter_candidates_pos_threshold = DEFAULTS['filter_candidates_pos_threshold'] \
-        if filter_candidates_pos else -1
-
-    ds = MultiTaskDataIter(
-        dataset,
-        "train",
-        config=config,
-        tokenizer=tokenizer,
-        tasks=tasks,
-        rebuild_cache=True,
-    )
-
-    # Custom fields in config
-    # config.
-
-    for x in ds:
-        # process_document(x, tokenizer, config)
+    for x in di:
+        print('potato')
         break
