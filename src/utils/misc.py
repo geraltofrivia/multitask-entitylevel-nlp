@@ -414,13 +414,13 @@ def merge_configs(old, new):
     return new
 
 
-def compute_class_weight_sparse(class_names, class_frequencies: List[int], class_zero_freq: int = 0) -> List[int]:
+def compute_class_weight_sparse(class_names, class_frequencies: np.ndarray, class_zero_freq: int = 0) -> np.ndarray:
     """ if class zero freq is provided, we replace the first value of bincount with it """
     if class_zero_freq > 0:
         class_frequencies[0] = class_zero_freq
 
     total = np.sum(class_frequencies)
-    return [total / (len(class_names) * freq) for freq in class_frequencies]
+    return np.array([total / (len(class_names) * freq) for freq in class_frequencies])
 
 
 def argsort(seq):

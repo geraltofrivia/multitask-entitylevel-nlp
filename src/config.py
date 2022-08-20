@@ -121,8 +121,9 @@ DEFAULTS: dict = FancyDict({
     'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
     'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
     'ner_threshold': 0.5,  # for DWIE, we do multilabel clf, where we use this threshold to determine if sthing is
-    # NER or not, and if, which.
-    # truncate the train set (never the dev set tho)
+    # NER or not
+    'weights_clip_min': 0.0005,  # these are class weights used for weighted cross entropy loss
+    'weights_clip_max': 500,  # these are class weights used for weighted cross entropy loss
 
     # TODO: implement code to turn these two below to TRUE
     'ner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp

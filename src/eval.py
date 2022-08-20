@@ -446,6 +446,34 @@ class NERSpanRecognitionMicro(PRF1MicroBinary):
         self.task = 'ner'
         self.prefix = 'spanrec_micro'
 
+    def update(self, logits, labels, *args, **kwargs):
+        """ logits are (n_spans, n_classes+1), labels are (n_spans)"""
+        # Turn the labels from 0-n+1 classes to 0-1
+        labels = (labels > 0).long()
+
+        # Turn the logits from being of n classes to whether the argmax is class zero (no ent) or not (yes ent)
+        logits = (logits.argmax(dim=1) != 0).long()
+
+        super().update(logits, labels)
+
+
+class NERSpanRecognitionMicroMultiLabel(PRF1MicroBinary):
+
+    def __init__(self, device: str = 'cpu', debug: bool = True):
+        super().__init__(debug=debug, device=device)
+        self.task = 'ner'
+        self.prefix = 'spanrec_micro'
+
+    def update(self, logits, labels, *args, **kwargs):
+        """ logits are (n_spans, n_classes+1), labels are (n_spans, n_classes+1)"""
+        # Turn the labels from 0-n+1 classes to 0-1
+        labels = (labels.argmax(dim=1) > 0).long()
+
+        # Turn the logits from being of n classes to whether the argmax is class zero (no ent) or not (yes ent)
+        logits = (logits.argmax(dim=1) != 0).long()
+
+        super().update(logits, labels)
+
 
 class NERSpanRecognitionMacro(PRF1Macro):
 

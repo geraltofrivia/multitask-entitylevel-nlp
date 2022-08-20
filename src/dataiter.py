@@ -147,10 +147,18 @@ class MultiTaskDataIter(Dataset):
         # Create a flat (long, long) list of all labels
         # print(self.data[0][task]['gold_labels'])
         # print(self.data[0][task]['gold_labels'])
-        y = torch.cat([datum[task]['gold_label_values'] for datum in self.data]).to('cpu')
-        zero_spans = sum(approx_n_spans(datum['n_subwords'], self.config.max_span_width) for datum in self.data) - len(
+        if task == 'ner' and self.tasks.dataset in NER_IS_MULTILABEL:
+            y = torch.cat([datum[task]['gold_label_values'].nonzero(as_tuple=False)[:, 1] for datum in self.data])
+        else:
+            y = torch.cat([datum[task]['gold_label_values'] for datum in self.data])
+        y = y.to('cpu')
+        n_zero = sum(approx_n_spans(datum['n_subwords'], self.config.max_span_width) for datum in self.data) - len(
             y)
-        return compute_class_weight_sparse(np.unique(y), class_frequencies=np.bincount(y), class_zero_freq=zero_spans)
+
+        # Clip away les truc
+        weights = compute_class_weight_sparse(np.unique(y), class_frequencies=np.bincount(y), class_zero_freq=n_zero)
+        weights = weights.clip(self.config.weights_clip_min, self.config.weights_clip_max)
+        return weights
         # return compute_class_weight('balanced', np.unique(you), y.numpy()).tolist()
 
     def write_to_disk(self):
@@ -474,7 +482,7 @@ class MultiTaskDataIter(Dataset):
                 for tag in tags:
                     if tag not in self.ner_tag_dict:
                         raise AssertionError(f"Tag {tag} not found in Tag dict!")
-                    span_tags[self.ner_tag_dict[tag]] = 1
+                    span_tags[self.ner_tag_dict[tag] + 1] = 1
                 gold_labels.append(span_tags)
             else:
                 if not is_split_train(dataset=self._src_, split=self._split_):

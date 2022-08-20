@@ -615,14 +615,16 @@ class MangoesMTL(nn.Module):
             """
                 At this point NER Labels is a n_spans, n_classes+1 matrix where most rows are zero.
                 We want to turn all those zero rows into ones where the last element is active (not an entity class)
-                If NER is not a multilabel class, we want to turn those indices which have a zero to n_classes
+                If NER is not a multilabel class, then those positions are already at zero. Don't have to do anything.
             """
             if domain in NER_IS_MULTILABEL:
                 zero_indices = torch.sum(ner_labels, dim=1) == 0  # n_spans
-                ner_labels[zero_indices, -1] = 1  # n_spans, n_classes+1
+                ner_labels[zero_indices, 0] = 1  # n_spans, n_classes+1
             else:
-                zero_indices = ner_labels == 0
-                ner_labels[zero_indices] = self.ner_n_classes[domain]
+                # Don't have to do this. The zero indices SHOULD have zero label.
+                ...
+                # zero_indices = ner_labels == 0
+                # ner_labels[zero_indices] = self.ner_n_classes[domain]
 
             # Calculating the loss
             # if self.ner_unweighted:
