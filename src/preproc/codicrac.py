@@ -17,6 +17,7 @@ except ImportError:
     from . import _pathfix
 from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
+from dataiter import DocumentReader
 from utils.nlp import to_toks
 from utils.data import Document, NamedEntities, BridgingAnaphors, Clusters, TypedRelations
 from utils.misc import NestedAnnotationBlock, NestedAnnotationBlockStack
@@ -576,17 +577,30 @@ class CODICRACParser(GenericParser):
         """ We assume that every split is processed at the same time.
             So now we go out and create a label dict for speakers as well."""
 
-        write_dir = LOC.manual / f'speaker_{self.dataset}_tag_dict.json'
+        relevant_splits = ['dev', 'train']
+        pos_labels = set()
+        for split in relevant_splits:
+            reader = DocumentReader(self.dataset, split)
+            for doc in reader:
+                pos_labels = pos_labels.union(set(to_toks(doc.pos)))
+        pos_labels = list(pos_labels)
 
+        write_dir = LOC.manual / f'speaker_{self.dataset}_tag_dict.json'
         with write_dir.open('w+', encoding='utf8') as f:
             json.dump(self._speaker_vocab_, f)
             print(f"Wrote a dict of {len(self._speaker_vocab_)} to {str(write_dir)}")
+
+        write_dir = LOC.manual / f"pos_{self.dataset}_tag_dict.json"
+        with write_dir.open('w+', encoding='utf8') as f:
+            pos_labels = {tag: i for i, tag in enumerate(pos_labels)}
+            json.dump(pos_labels, f)
+            print(f"Wrote a dict of {len(pos_labels)} items to {write_dir}")
 
 
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of the dataset like 'persuasion', 'light', 'arrau' etc.")
 @click.option("--suffix", "-s", type=str, default=None,
-              help="The name of the suffix (for Arrau) like 't91', 't93', 'gnome', 'pear', or 'rst'.")
+              help="The name of (LOC.manual / 'pos_ontonotes_tag_dict.json')the suffix (for Arrau) like 't91', 't93', 'gnome', 'pear', or 'rst'.")
 @click.option("--run_all", "-a", is_flag=True, help="If flag is given, we process every CODICRAC split.")
 def run(dataset: str, suffix: str, run_all: bool):
     if run_all:

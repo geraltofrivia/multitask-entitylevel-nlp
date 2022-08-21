@@ -26,6 +26,7 @@ from utils.nlp import PreTokenziedTokenizer
 from config import LOCATIONS as LOC, NPRSEED as SEED
 from modules.dwie.src.dataset.utils.tokenizer import TokenizerCPN
 from dataiter import DocumentReader
+from utils.nlp import to_toks
 from utils.data import Document, NamedEntities, Clusters, TypedRelations, BridgingAnaphors
 
 np.random.seed(SEED)
@@ -511,14 +512,17 @@ class DWIEParser(GenericParser):
         relevant_splits: List[str] = ['train', 'dev']
         ner_labels = set()
         rel_labels = set()
+        pos_labels = set()
         for split in relevant_splits:
             reader = DocumentReader('dwie', split=split)
             for doc in reader:
                 ner_labels = ner_labels.union(doc.ner.get_all_tags())
                 rel_labels = rel_labels.union(doc.rel.tags)
+                pos_labels = pos_labels.union(set(to_toks(doc.pos)))
 
         ner_labels = list(ner_labels)
         rel_labels = list(rel_labels)
+        pos_labels = list(pos_labels)
 
         # Turn them into dicts and dump them as json
         with (LOC.manual / 'ner_dwie_tag_dict.json').open('w+', encoding='utf8') as f:
@@ -530,6 +534,11 @@ class DWIEParser(GenericParser):
             rel_labels = {tag: i for i, tag in enumerate(sorted(rel_labels))}
             json.dump(rel_labels, f)
             print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ner_tag_dict.json')}")
+
+        with (LOC.manual / 'pos_dwie_tag_dict.json').open('w+', encoding='utf8') as f:
+            po = {tag: i for i, tag in enumerate(sorted(pos_labels))}
+            json.dump(pos_labels, f)
+            print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ner_tag_dict.json')}")
 
 
 @click.command()

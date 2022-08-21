@@ -406,15 +406,15 @@ class CoNLLOntoNotesParser(GenericParser):
 
         # Check if dump.json exists in all of these
         ner_labels = set()
-        pos_tags = set()
+        pos_labels = set()
         for split_code, split_name in relevant_splits.items():
             reader = DocumentReader('ontonotes', split=split_name)
             for doc in reader:
                 ner_labels = ner_labels.union(doc.ner.get_all_tags())
-                pos_tags = pos_tags.union(set(to_toks(doc.pos)))
+                pos_labels = pos_labels.union(set(to_toks(doc.pos)))
 
         ner_labels = sorted(list(ner_labels))
-        pos_tags = sorted(list(pos_tags))
+        pos_labels = sorted(list(pos_labels))
 
         # Turn them into dicts and dump them as json
         with (LOC.manual / 'ner_ontonotes_tag_dict.json').open('w+', encoding='utf8') as f:
@@ -423,7 +423,7 @@ class CoNLLOntoNotesParser(GenericParser):
             print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ontonotes_tag_dict.json')}")
 
         with (LOC.manual / 'pos_ontonotes_tag_dict.json').open('w+', encoding='utf8') as f:
-            pos_labels = {pos: i for i, pos in enumerate(pos_tags)}
+            pos_labels = {pos: i for i, pos in enumerate(pos_labels)}
             json.dump(pos_labels, f)
             print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ontonotes_tag_dict.json')}")
 
