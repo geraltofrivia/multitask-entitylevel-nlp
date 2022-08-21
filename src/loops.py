@@ -80,6 +80,9 @@ def training_loop(
     # Epoch level
     for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
 
+        if device == 'cuda':
+            torch.cuda.empty_cache()
+
         # Make data
         # trn_dataset = trn_dl()
         per_epoch_loss = {task_obj.dataset: {task_nm: [] for task_nm in task_obj.names} for task_obj in tasks}

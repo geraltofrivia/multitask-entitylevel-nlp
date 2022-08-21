@@ -10,7 +10,7 @@ from typing import Dict, Callable, List, Union, Optional, Type
 import numpy as np
 import torch
 from scipy.optimize import linear_sum_assignment as linear_assignment
-from torchmetrics import Precision, Recall, F1Score, LabelRankingAveragePrecision, AUROC
+from torchmetrics import Precision, Recall, F1Score, AUROC
 from tqdm.auto import tqdm
 
 # Local imports
@@ -306,6 +306,9 @@ class Evaluator:
         :param outputs:
         :return: None
         """
+        # Change device to CPU. Trust me. We'll all be much happier.
+        # instance = change_device(instance)
+        outputs = change_device(outputs, 'cpu')
 
         # Check the source of the prediction
         try:
@@ -321,17 +324,7 @@ class Evaluator:
                 metric.update(**outputs)
 
         for task_nm in instance['tasks']:
-
-            if task_nm == 'coref':
-                # try:
-                for metric in metrics['coref']:
-                    metric.update(**outputs['coref'])
-                # except KeyError:
-                #     print(instance['domain'])
-                #     print(metrics)
-                #     print(task_nm)
-
-            else:
+            with torch.no_grad():
                 for metric in metrics[task_nm]:
                     metric.update(**outputs[task_nm])
 
@@ -460,6 +453,7 @@ class NERSpanRecognitionMicro(PRF1MicroBinary):
 class NERSpanRecognitionMicroMultiLabel(PRF1MicroBinary):
 
     def __init__(self, device: str = 'cpu', debug: bool = True):
+        # device= 'cpu'   # TO DELETE
         super().__init__(debug=debug, device=device)
         self.task = 'ner'
         self.prefix = 'spanrec_micro'
@@ -471,6 +465,9 @@ class NERSpanRecognitionMicroMultiLabel(PRF1MicroBinary):
 
         # Turn the logits from being of n classes to whether the argmax is class zero (no ent) or not (yes ent)
         logits = (logits.argmax(dim=1) != 0).long()
+
+        logits = logits.cpu()
+        labels = labels.cpu()
 
         super().update(logits, labels)
 
@@ -515,7 +512,9 @@ class NERMultiLabelAcc(CustomMetric):
         self.task = 'ner'
         self.prefix = None
         self.threshold = threshold
-        self.labelrankingaverageprecision = LabelRankingAveragePrecision(device=device)
+        # self.labelrankingaverageprecision = LabelRankingAveragePrecision(device=device)
+
+        # device ='cpu'    # TO DELETE
         self.auroc = AUROC(num_classes=nc, device=device)
 
     def update(self, logits, labels, *args, **kwargs):
@@ -528,10 +527,6 @@ class NERMultiLabelAcc(CustomMetric):
         """
 
         # Turn pred logits into pred ints
-
-        labels = labels.long()
-        # logits = logits
-
         nonzero_indices = torch.sum(labels, dim=1) != 0
         preds = (logits > self.threshold)
         intersection = torch.logical_and(preds, labels.bool())
@@ -541,7 +536,7 @@ class NERMultiLabelAcc(CustomMetric):
         union_nz = union[nonzero_indices]
 
         op = {
-            'labelrank_p': self.labelrankingaverageprecision(logits, labels),
+            # 'labelrank_p': self.labelrankingaverageprecision(logits, labels),
             'auroc': self.auroc(logits, labels),
             'acc': (intersection.float() / (union.float() + torch.e ** 10)).sum(dim=1).float().mean(),
             'acc_nonzero': (intersection_nz.float() / (union_nz.float() + torch.e ** 10)).sum(dim=1).float().mean()

@@ -501,19 +501,12 @@ def train(ctx):
         if 'ner' in task:
             metrics[task.dataset] += [
                 NERAcc if not task.dataset in NER_IS_MULTILABEL else \
-                    partial(NERMultiLabelAcc,
-                            nc=task.n_classes_ner,
-                            threshold=config.ner_threshold,
-                            device=config.device),
-                partial(NERSpanRecognitionMicro, device=config.device) if task.dataset not in NER_IS_MULTILABEL else \
-                    partial(NERSpanRecognitionMicroMultiLabel, device=config.device),
+                    partial(NERMultiLabelAcc, nc=task.n_classes_ner, threshold=config.ner_threshold),
+                NERSpanRecognitionMicro if task.dataset not in NER_IS_MULTILABEL else NERSpanRecognitionMicroMultiLabel,
                 # partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner, device=config.device)
             ]
         if 'pruner' in task:
-            metrics[task.dataset] += [
-                partial(PrunerPRMicro, device=config.device),
-                # partial(PrunerPRMacro, n_classes=task.n_classes_pruner, device=config.device)
-            ]
+            metrics[task.dataset] += [PrunerPRMicro]
         if 'coref' in task:
             metrics[task.dataset] += [CorefBCubed, CorefMUC, CorefCeafe]
 
