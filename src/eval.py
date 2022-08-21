@@ -509,14 +509,14 @@ class NERAcc(CustomMetric):
 
 class NERMultiLabelAcc(CustomMetric):
 
-    def __init__(self, nc: int, threshold: float, debug: bool = True):
+    def __init__(self, nc: int, threshold: float, debug: bool = True, device='cpu'):
         super().__init__(debug=debug)
         self.values = ['acc', 'acc_nonzero']
         self.task = 'ner'
         self.prefix = None
         self.threshold = threshold
-        self.labelrankingaverageprecision = LabelRankingAveragePrecision(compute_on_cpu=True)
-        self.auroc = AUROC(num_classes=nc, compute_on_cpu=True)
+        self.labelrankingaverageprecision = LabelRankingAveragePrecision(device=device)
+        self.auroc = AUROC(num_classes=nc, device=device)
 
     def update(self, logits, labels, *args, **kwargs):
         """
@@ -529,8 +529,8 @@ class NERMultiLabelAcc(CustomMetric):
 
         # Turn pred logits into pred ints
 
-        labels = labels.long().cpu()
-        logits = logits.cpu()
+        labels = labels.long()
+        # logits = logits
 
         nonzero_indices = torch.sum(labels, dim=1) != 0
         preds = (logits > self.threshold)
