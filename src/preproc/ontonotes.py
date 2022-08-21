@@ -406,16 +406,26 @@ class CoNLLOntoNotesParser(GenericParser):
 
         # Check if dump.json exists in all of these
         ner_labels = set()
+        pos_tags = set()
         for split_code, split_name in relevant_splits.items():
             reader = DocumentReader('ontonotes', split=split_name)
             for doc in reader:
                 ner_labels = ner_labels.union(doc.ner.get_all_tags())
+                pos_tags = pos_tags.union(set(to_toks(doc.pos)))
+
+        ner_labels = sorted(list(ner_labels))
+        pos_tags = sorted(list(pos_tags))
 
         # Turn them into dicts and dump them as json
         with (LOC.manual / 'ner_ontonotes_tag_dict.json').open('w+', encoding='utf8') as f:
             ner_labels = {tag: i for i, tag in enumerate(ner_labels)}
             json.dump(ner_labels, f)
             print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ontonotes_tag_dict.json')}")
+
+        with (LOC.manual / 'pos_ontonotes_tag_dict.json').open('w+', encoding='utf8') as f:
+            pos_labels = {pos: i for i, pos in enumerate(pos_tags)}
+            json.dump(pos_labels, f)
+            print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ontonotes_tag_dict.json')}")
 
 
 @click.command()
@@ -433,12 +443,17 @@ class CoNLLOntoNotesParser(GenericParser):
     help="If True, we ignore the documents without any coref annotation",
 )
 @click.option("--run_all", "-a", is_flag=True, help="If flag is given, we process every ontonotes split.")
-def run(suffix: str, ignore_empty: bool, run_all: bool = False):
+@click.option("--collect-labels", is_flag=True,
+              help="If this flag is True, we ignore everything else, "
+                   "just go through train, dev splits and collect unique labels and create a dict out of them.")
+def run(suffix: str, collect_labels: bool, ignore_empty: bool, run_all: bool = False):
     if not run_all:
         parser = CoNLLOntoNotesParser(
             LOC.ontonotes_conll, suffixes=[suffix], ignore_empty_documents=ignore_empty
         )
         parser.run()
+    elif collect_labels:
+        CoNLLOntoNotesParser.create_label_dict()
     else:
         suffixes = ['train', 'development', 'conll-2012-test', 'test']
         parser = CoNLLOntoNotesParser(
