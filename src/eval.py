@@ -525,6 +525,7 @@ class NERMultiLabelAcc(CustomMetric):
         :param labels: n_spans, n_classes
         :return: scalar
         """
+        labels = labels.long()
 
         # Turn pred logits into pred ints
         nonzero_indices = torch.sum(labels, dim=1) != 0
