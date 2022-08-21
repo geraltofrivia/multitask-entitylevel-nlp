@@ -47,7 +47,7 @@ Specifically
 5. NER onto vs Coref onto
 
 Other TODOs
-[ ] Do loss scales (defined in the task triple) change anything?
+[x] Do loss scales (defined in the task triple) change anything?
 [ ] coref num speakers variable... is it needed? it shouldn't be.
 
 # 01-08-2022
@@ -55,7 +55,7 @@ Other TODOs
 [ ] Implement domain adversarial learning thing
 [ ] Change encoder to something autoregressive
 [ ] Analyse predictions of model - look at what samples are predicted. Can we curtail spans by POS tags?
-[!] Feed spans from the data iter part instead of within the model
+[x] Feed spans from the data iter part instead of within the model
 [ ] Integrate Univ. Anaphora Scorer
 
 # 03-08-2022
@@ -73,10 +73,16 @@ Other TODOs
 
 [ ] Figure out the deal with CoNLL12
 [ ] Implement Shared Pruner (integrated in there)
-[ ] Can we make the sample stuff resample every epoch?
 
 ## Refactoring for multiple NER tags per span
 
 [ ] Figure out how loss scales work, and simplify it
-[ ] Figure out how sampling ratios work
 [ ] Recheck if tokenizer is working as intended (do we need special chars or not)
+
+# 21-08-2022
+
+[x] Fix MEMORY LEAK
+[ ] Add a POS tagging task (which is token level, for a change. yay ^^)
+[ ] Can we make the sample stuff resample every epoch?
+[ ] Figure out how sampling ratios work
+[ ] Simulate the loss thing (all entries get a 1)

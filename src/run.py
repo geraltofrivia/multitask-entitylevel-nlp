@@ -341,6 +341,13 @@ def run(
 
     tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
     config = SerializedBertConfig(dir_config)
+
+    """
+        TODO: HACK: Fix later
+    """
+    if dir_config == 'SpanBERT/spanbert-large-cased':
+        config.hidden_size = 1024
+
     config.max_span_width = max_span_width
     config.max_training_segments = max_training_segments
     config.ignore_speakers = ignore_speakers
