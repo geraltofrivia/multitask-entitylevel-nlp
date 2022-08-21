@@ -43,7 +43,7 @@ LOCATIONS: Dict[str, Path] = FancyDict(
     }
 )
 
-KNOWN_TASKS = ["coref", "ner", "pruner", "rel"]
+KNOWN_TASKS = ["coref", "ner", "pruner", "rel", "pos"]
 KNOWN_SPLITS = FancyDict({
     'scierc': FancyDict({
         'train': 'train',
@@ -97,7 +97,8 @@ def unalias_split(split: str) -> str:
 
 # LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
 # changed CNP ratio now that coref is normalised to 1
-LOSS_RATIO_CNP = [1.0, 1.0, 0.1]  # Loss ratio to use to train coref, ner and pruner
+LOSS_RATIO_CNP = [1.0, 1.0, 0.5]  # Loss ratio to use to train coref, ner and pruner
+LOSS_RATIO_CNPP = [1.0, 1.0, 1.0, 0.5]  # Loss ratio to use to train coref, ner and pruner
 LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0, 1.0]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = FancyDict({
@@ -140,14 +141,16 @@ DEFAULTS: dict = FancyDict({
 })
 LOSS_SCALES = {
     'coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
-    'coref_nermul_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),
+    'coref_ner_pos_pruner': np.exp(LOSS_RATIO_CNPP) / np.sum(np.exp(LOSS_RATIO_CNPP)),
     'coref_pruner': np.exp(LOSS_RATIO_CP) / np.sum(np.exp(LOSS_RATIO_CP)),
     'coref_ner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
-    'coref_nermul': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'coref_ner_pos': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
+    'coref_pos_pruner': np.exp(LOSS_RATIO_CN) / np.sum(np.exp(LOSS_RATIO_CN)),
     'coref': [1.0, ],
     'ner': [1.0, ],
     'nermul': [1.0, ],
     'pruner': [1.0, ],
+    'pos': [1.0, ],
 }
 SCHEDULER_CONFIG = {
     'gamma': {'decay_rate': 0.9}

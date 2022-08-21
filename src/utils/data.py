@@ -543,6 +543,17 @@ class Document:
 
 @dataclass
 class Tasks:
+    """
+        A nice object which notes down which tasks we're dealing with, given a dataset.
+        Its rather powerful but also easy to use.
+
+        The best way to use it would be to
+            tasks = Tasks.parse('ontonotes', ['pruner', 1.0, True], ['pos', 10.4, False])
+
+        After which it would be able to tell you how many POS tags does this dataset (ontonotes here) contain.
+
+    """
+
     names: List[str]
     loss_scales: List[float]
     use_class_weights: List[bool]
@@ -550,6 +561,7 @@ class Tasks:
 
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
+    n_classes_pos: Optional[int] = field(default_factory=int)
     n_speakers: Optional[int] = field(default_factory=int)
 
     @classmethod
@@ -587,10 +599,12 @@ class Tasks:
 
         n_classes_ner = 0
         n_classes_pruner = 0
+        n_classes_pos = 0
         n_speakers = 0
 
         return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights, dataset=dataset,
-                   n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_speakers=n_speakers)
+                   n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_classes_pos=n_classes_pos,
+                   n_speakers=n_speakers)
 
     def __post_init__(self, *args, **kwargs):
         self.sort()
@@ -602,6 +616,9 @@ class Tasks:
         """
         if 'ner' in self.names:
             self.n_classes_ner = self._get_n_classes_(task='ner', dataset=self.dataset)
+
+        if 'pos' in self.names:
+            self.n_classes_ner = self._get_n_classes_(task='pos', dataset=self.dataset)
 
         if 'pruner' in self.names:
             self.n_classes_pruner = 2
@@ -632,6 +649,9 @@ class Tasks:
 
     def coref_unweighted(self) -> bool:
         return self._task_unweighted_('coref')
+
+    def pos_unweighted(self) -> bool:
+        return self._task_unweighted_('pos')
 
     def pruner_unweighted(self) -> bool:
         return self._task_unweighted_('pruner')

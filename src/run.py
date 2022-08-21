@@ -198,7 +198,7 @@ def get_dataiter_partials(
               help="The name of the first (or only) dataset e.g. ontonotes etc")
 @click.option("--tasks", "-t", type=(str, float, bool), multiple=True, required=True,
               help="We are expected to have a tuple of three elements where each signifies: "
-                   "1. a string denoting task name (in coref, ner, pruner) "
+                   "1. a string denoting task name (in coref, ner, pos, pruner) "
                    "2. a float denoting loss weight. if its negative, we ignore the value "
                    "3. a bool signifying if the class should be weighted or not."
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
@@ -206,7 +206,7 @@ def get_dataiter_partials(
               help="The name of dataset e.g. ontonotes etc for a secondary task. Optional. ")
 @click.option("--tasks-2", "-t2", type=(str, float, bool), default=None, multiple=True,
               help="We are expected to have a tuple of three elements where each signifies: "
-                   "1. a string denoting task name (in coref, ner, pruner) "
+                   "1. a string denoting task name (in coref, ner, pos,  pruner) "
                    "2. a float denoting loss weight. if its negative, we ignore the value "
                    "3. a bool signifying if the class should be weighted or not."
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
