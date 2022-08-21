@@ -3,7 +3,6 @@
     Modularity is so 2021. I'll shoot myself in the foot instead thank you very much.
 """
 
-import math
 import random
 from typing import List, Iterable, Optional, Union
 
@@ -178,29 +177,29 @@ class MangoesMTL(nn.Module):
         # TODO: replace this
         # self.init_weights()
 
-    def get_gradnorm_param_group(self):
-
-        coref_params = nn.ModuleList([
-            self.span_attend_projection,
-            self.mention_scorer,
-            self.width_scores,
-            self.fast_antecedent_projection,
-            self.slow_antecedent_scorer,
-            self.slow_antecedent_projection,
-            self.distance_embeddings,
-            self.slow_distance_embeddings,
-            self.distance_projection,
-            self.span_width_embeddings,
-            self.span_width_prior_embeddings,
-            self.segment_dist_embeddings,
-        ])
-
-        ner_params = nn.ModuleList([
-            self.unary_ner
-        ])
-
-        # TODO divide pruner and coref here !
-        return nn.ModuleDict({'coref': coref_params, 'ner': ner_params})
+    # def get_gradnorm_param_group(self):
+    #
+    #     coref_params = nn.ModuleList([
+    #         self.span_attend_projection,
+    #         self.mention_scorer,
+    #         self.width_scores,
+    #         self.fast_antecedent_projection,
+    #         self.slow_antecedent_scorer,
+    #         self.slow_antecedent_projection,
+    #         self.distance_embeddings,
+    #         self.slow_distance_embeddings,
+    #         self.distance_projection,
+    #         self.span_width_embeddings,
+    #         self.span_width_prior_embeddings,
+    #         self.segment_dist_embeddings,
+    #     ])
+    #
+    #     ner_params = nn.ModuleList([
+    #         self.unary_ner
+    #     ])
+    #
+    #     # TODO divide pruner and coref here !
+    #     return nn.ModuleDict({'coref': coref_params, 'ner': ner_params})
 
     def task_separate_gradient_clipping(self):
         # noinspection PyAttributeOutsideInit
