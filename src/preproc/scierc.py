@@ -134,11 +134,13 @@ def create_label_dict():
     # Check if dump.json exists in all of these
     ner_labels = set()
     rel_labels = set()
+    pos_labels = set()
     for split in relevant_splits:
         reader = DocumentReader('scierc', split=split)
         for doc in reader:
             ner_labels = ner_labels.union(doc.ner.get_all_tags())
             rel_labels = rel_labels.union(doc.rel.tags)
+            pos_labels = pos_labels.union(set(to_toks(doc.pos)))
 
     # Turn them into dicts and dump them as json
     with (LOC.manual / 'ner_scierc_tag_dict.json').open('w+', encoding='utf8') as f:
@@ -150,6 +152,11 @@ def create_label_dict():
         rel_labels = {tag: i for i, tag in enumerate(rel_labels)}
         json.dump(rel_labels, f)
         print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_scierc_tag_dict.json')}")
+
+    with (LOC.manual / 'pos_scierc_tag_dict.json').open('w+', encoding='utf8') as f:
+        pos_labels = {tag: i for i, tag in enumerate(pos_labels)}
+        json.dump(pos_labels, f)
+        print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_scierc_tag_dict.json')}")
 
 
 @click.command()
