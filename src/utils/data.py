@@ -618,7 +618,7 @@ class Tasks:
             self.n_classes_ner = self._get_n_classes_(task='ner', dataset=self.dataset)
 
         if 'pos' in self.names:
-            self.n_classes_ner = self._get_n_classes_(task='pos', dataset=self.dataset)
+            self.n_classes_pos = self._get_n_classes_(task='pos', dataset=self.dataset)
 
         if 'pruner' in self.names:
             self.n_classes_pruner = 2

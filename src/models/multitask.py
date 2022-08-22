@@ -111,18 +111,18 @@ class MangoesMTL(nn.Module):
         # Hidden size is now compressed
         hidden_size = hidden_size // 3 if shared_compressor else hidden_size
 
-        if 'coref' in task_1 or 'coref' in task_2 or 'pruner' in task_1 or 'pruner' in task_2:
-            self.pruner = SpanPruner(
-                hidden_size=hidden_size,
-                unary_hdim=unary_hdim,
-                max_span_width=max_span_width,
-                coref_metadata_feature_size=coref_metadata_feature_size,
-                pruner_dropout=pruner_dropout,
-                pruner_use_width=pruner_use_width,
-                pruner_max_num_spans=pruner_max_num_spans,
-                pruner_top_span_ratio=pruner_top_span_ratio,
-                bias_in_last_layers=bias_in_last_layers
-            )
+        self.pruner = SpanPruner(
+            hidden_size=hidden_size,
+            unary_hdim=unary_hdim,
+            max_span_width=max_span_width,
+            coref_metadata_feature_size=coref_metadata_feature_size,
+            pruner_dropout=pruner_dropout,
+            pruner_use_width=pruner_use_width,
+            pruner_max_num_spans=pruner_max_num_spans,
+            pruner_top_span_ratio=pruner_top_span_ratio,
+            bias_in_last_layers=bias_in_last_layers
+        )
+        if 'coref' in task_1 or 'coref' in task_2:
             self.coref = CorefDecoder(
                 max_top_antecedents=max_top_antecedents,
                 unary_hdim=unary_hdim,
@@ -347,15 +347,15 @@ class MangoesMTL(nn.Module):
             hidden_states = self.bert(input_ids, attention_mask)[0]  # [num_seg, max_seg_len, emb_len]
         else:
             hidden_states = self.retriever.load(domain=domain, hash=hash)  # [num_seg, max_seg_len, emb_len]
-        num_segments, len_segment, len_embedding = hidden_states.shape
+        num_seg, len_seg, len_emb = hidden_states.shape
 
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
-        hidden_states = torch.masked_select(hidden_states.view(num_segments * len_segment, len_embedding),
+        hidden_states = torch.masked_select(hidden_states.view(num_seg * len_seg, len_emb),
                                             attention_mask.bool().view(-1, 1)).view(-1,
-                                                                                    len_embedding)  # [num_words, emb_len]
+                                                                                    len_emb)  # [num_words, emb_len]
         flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
         if speaker_ids is not None:
-            speaker_ids = torch.masked_select(speaker_ids.view(num_segments * len_segment),
+            speaker_ids = torch.masked_select(speaker_ids.view(num_seg * len_seg),
                                               attention_mask.bool().view(-1))
 
         # Note the number of words
@@ -389,8 +389,8 @@ class MangoesMTL(nn.Module):
                 pruned_span_speaker_ids=pruner_outputs['pruned_span_speaker_ids'],
                 pruned_span_emb=pruner_outputs['pruned_span_emb'],
                 num_top_mentions=pruner_outputs['num_top_mentions'],
-                num_segments=num_segments,
-                len_segment=len_segment,
+                num_segments=num_seg,
+                len_segment=len_seg,
                 domain=domain,
                 device=device
             )
@@ -412,7 +412,7 @@ class MangoesMTL(nn.Module):
 
         if 'pos' in tasks:
             # We just need token embeddings here
-            fc1 = self.token_pos_specific(hidden_states)
+            fc1 = self.token_pos_common(hidden_states)
             logits = self.token_pos_specific[domain](fc1)
             pos_specific = {"pos_logits": logits}
 
