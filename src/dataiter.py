@@ -95,7 +95,16 @@ class MultiTaskDataIter(Dataset):
                     self.rel_tag_dict = json.load(f)
             except FileNotFoundError:
                 # The tag dictionary does not exist. Report and quit.
-                raise LabelDictNotFound(f"No label dict found for ner task for {self._src_}")
+                raise LabelDictNotFound(f"No label dict found for rel task for {self._src_}")
+
+        if 'pos' in self.tasks:
+
+            try:
+                with (LOC.manual / f"pos_{self._src_}_tag_dict.json").open("r") as f:
+                    self.pos_tag_dict = json.load(f)
+            except FileNotFoundError:
+                # The tag dictionary does not exist. Report and quit.
+                raise LabelDictNotFound(f"No label dict found for pos task for {self._src_}")
 
         (self.data, flag_successfully_pulled_from_disk) = self.load_from_disk(rebuild_cache)
         self.task_weights = {}
@@ -107,7 +116,7 @@ class MultiTaskDataIter(Dataset):
 
             # Temporarily set class weights for all tasks as [0.5, 0.5]
             for task_nm in self.tasks:
-                if task_nm in ['ner', 'pruner']:
+                if task_nm in ['ner', 'pruner', 'pos']:
                     self.task_weights[task_nm] = torch.ones(2, dtype=torch.float) / 2
 
             # Process the dataset
@@ -117,7 +126,8 @@ class MultiTaskDataIter(Dataset):
             if not unalias_split(self._split_) == 'test':
                 for task_nm in self.tasks:
                     if (task_nm == 'ner' and not self.tasks.ner_unweighted()) or \
-                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted()):
+                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted()) or \
+                            (task_nm == 'pos' and not self.tasks.pos_unweighted()):
                         self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
                                                                   dtype=torch.float)
             # Update self.data with these class weights
@@ -126,6 +136,8 @@ class MultiTaskDataIter(Dataset):
                     self.data[i]['ner']['weights'] = self.task_weights['ner']
                 if item['pruner']:
                     self.data[i]['pruner']['weights'] = self.task_weights['pruner']
+                if item['pos']:
+                    self.data[i]['pos']['weights'] = self.task_weights['pos']
 
             # Write this to disk
             self.write_to_disk()
@@ -513,6 +525,28 @@ class MultiTaskDataIter(Dataset):
 
         return ner_specific
 
+    def process_pos(
+
+            self,
+            instance: Document,
+            generic_processed_stuff: dict,
+            word2subword_starts: dict,
+            word2subword_ends: dict,
+    ) -> dict:
+        """
+            POS is a token level task. That is, corresponding to every subword,
+                we generate a label which is converted using the given tag dict.
+
+        """
+
+        pos_ids = torch.tensor([self.pos_tag_dict[tag] for tag in to_toks(instance.pos)], dtype=torch.long)
+        pos_tensor = pos_ids[generic_processed_stuff['word_map']]
+
+        return {
+            'gold_label_values': pos_tensor,
+            "weights": self.task_weights['pos']
+        }
+
     def process_document_generic(self, instance: Document) -> dict:
         """
         PSA:
@@ -722,6 +756,11 @@ class MultiTaskDataIter(Dataset):
                 instance, return_dict, word2subword_starts, word2subword_ends
             )
 
+        if "pos" in self.tasks:
+            return_dict["pos"] = self.process_pos(
+                instance, return_dict, word2subword_starts, word2subword_ends
+            )
+
         return return_dict
 
 
@@ -805,6 +844,9 @@ class DocumentReader(Dataset):
                     continue
 
                 if "rel" in self._tasks and instance.rel.isempty:
+                    continue
+
+                if "pos" in self._tasks and not instance.pos:
                     continue
 
                 self.data.append(instance)
