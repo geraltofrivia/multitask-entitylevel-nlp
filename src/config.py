@@ -109,6 +109,7 @@ DEFAULTS: dict = FancyDict({
     'coref_dropout': 0.3,
     'pruner_dropout': 0.3,
     'ner_dropout': 0.3,
+    'pos_dropout': 0.3,
     'encoder_dropout': 0.3,
     'unary_hdim': 1500,
     'dense_layers': 1,  # Dense layers are parameterized transformation right after encoder in mtl model.

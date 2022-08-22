@@ -62,6 +62,12 @@ class MangoesMTL(nn.Module):
             coref_higher_order: int,
             coref_metadata_feature_size: int,
 
+            # NER specific Params
+            ner_dropout: float,
+
+            # POS specific Params
+            pos_dropout: float,
+
             bias_in_last_layers: bool,
             skip_instance_after_nspan: int,
             coref_num_speakers: int,
@@ -105,54 +111,69 @@ class MangoesMTL(nn.Module):
         # Hidden size is now compressed
         hidden_size = hidden_size // 3 if shared_compressor else hidden_size
 
-        self.pruner = SpanPruner(
-            hidden_size=hidden_size,
-            unary_hdim=unary_hdim,
-            max_span_width=max_span_width,
-            coref_metadata_feature_size=coref_metadata_feature_size,
-            pruner_dropout=pruner_dropout,
-            pruner_use_width=pruner_use_width,
-            pruner_max_num_spans=pruner_max_num_spans,
-            pruner_top_span_ratio=pruner_top_span_ratio,
-            bias_in_last_layers=bias_in_last_layers
-        )
-        self.coref = CorefDecoder(
-            max_top_antecedents=max_top_antecedents,
-            unary_hdim=unary_hdim,
-            hidden_size=hidden_size,
-            ignore_speakers=ignore_speakers,
-            max_training_segments=max_training_segments,
-            coref_metadata_feature_size=coref_metadata_feature_size,
-            coref_dropout=coref_dropout,
-            coref_higher_order=coref_higher_order,
-            coref_num_speakers=coref_num_speakers,
-            bias_in_last_layers=bias_in_last_layers
-        )
-        # self.bert = BertModel.from_pretrained(enc_nm, add_pooling_layer=False)
+        if 'coref' in task_1 or 'coref' in task_2 or 'pruner' in task_1 or 'pruner' in task_2:
+            self.pruner = SpanPruner(
+                hidden_size=hidden_size,
+                unary_hdim=unary_hdim,
+                max_span_width=max_span_width,
+                coref_metadata_feature_size=coref_metadata_feature_size,
+                pruner_dropout=pruner_dropout,
+                pruner_use_width=pruner_use_width,
+                pruner_max_num_spans=pruner_max_num_spans,
+                pruner_top_span_ratio=pruner_top_span_ratio,
+                bias_in_last_layers=bias_in_last_layers
+            )
+            self.coref = CorefDecoder(
+                max_top_antecedents=max_top_antecedents,
+                unary_hdim=unary_hdim,
+                hidden_size=hidden_size,
+                ignore_speakers=ignore_speakers,
+                max_training_segments=max_training_segments,
+                coref_metadata_feature_size=coref_metadata_feature_size,
+                coref_dropout=coref_dropout,
+                coref_higher_order=coref_higher_order,
+                coref_num_speakers=coref_num_speakers,
+                bias_in_last_layers=bias_in_last_layers
+            )
 
-        ffnn_hidden_size = unary_hdim
-        bert_hidden_size = hidden_size
         span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
 
-        """
-            NER Stuff is domain specific.
-            Corresponding to domain, we will have individual "final" classifiers for NER.
-            
-            This of course because the final classes for NERs differ from each other.
-            However, this will be done in a two step process.
-            
-            The two layers of NER will be broken down into a common, and domain specific variant.
-        """
-        self.unary_ner_common = nn.Sequential(
-            nn.Linear(span_embedding_dim, ffnn_hidden_size),
-            nn.ReLU(),
-            nn.Dropout(coref_dropout),
-            # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
-        )
-        self.unary_ner_specific = nn.ModuleDict({
-            task.dataset: nn.Linear(ffnn_hidden_size, task.n_classes_ner + 1, bias=bias_in_last_layers)
-            for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
-        })
+        if 'ner' in task_1 or 'ner' in task_2:
+            """
+                NER Stuff is domain specific.
+                Corresponding to domain, we will have individual "final" classifiers for NER.
+                
+                This of course because the final classes for NERs differ from each other.
+                However, this will be done in a two step process.
+                
+                The two layers of NER will be broken down into a common, and domain specific variant.
+            """
+            self.unary_ner_common = nn.Sequential(
+                nn.Linear(span_embedding_dim, unary_hdim),
+                nn.ReLU(),
+                nn.Dropout(ner_dropout),
+                # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
+            )
+            self.unary_ner_specific = nn.ModuleDict({
+                task.dataset: nn.Linear(unary_hdim, task.n_classes_ner + 1, bias=bias_in_last_layers)
+                for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
+            })  # classes + 1 -> not an entity (class zero)
+
+        if 'pos' in task_1 or 'pos' in task_2:
+            """
+                Like NER, POS too is task specific. 
+                Corresponding to domain, we will have individual "final" classifiers since POS tags may differ 
+                    from dataset to dataset.
+            """
+            self.token_pos_common = nn.Sequential(
+                nn.Linear(hidden_size, hidden_size // 2),
+                nn.ReLU(),
+                nn.Dropout(pos_dropout)
+            )
+            self.token_pos_specific = nn.ModuleDict({
+                task.dataset: nn.Linear(hidden_size // 2, task.n_classes_pos, bias=bias_in_last_layers)
+                for task in [task_1, task_2] if (not task.isempty() and 'pos' in task)
+            })  # every token must have a pos tag and so we don't add a faux class here
 
         # Loss management for pruner
         self.pruner_loss = self._rescaling_weights_bce_loss_
@@ -162,6 +183,7 @@ class MangoesMTL(nn.Module):
                 self.ner_loss[task.dataset] = nn.functional.binary_cross_entropy_with_logits
             else:
                 self.ner_loss[task.dataset] = nn.functional.cross_entropy
+        self.pos_loss = nn.functional.cross_entropy
 
         self.max_span_width = max_span_width
         self.max_top_antecedents = max_top_antecedents
@@ -388,13 +410,20 @@ class MangoesMTL(nn.Module):
         else:
             ner_specific = {}
 
+        if 'pos' in tasks:
+            # We just need token embeddings here
+            fc1 = self.token_pos_specific(hidden_states)
+            logits = self.token_pos_specific[domain](fc1)
+            pos_specific = {"pos_logits": logits}
+
         # noinspection PyUnboundLocalVariable
         return {
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
             "flattened_ids": flattened_ids,
             **coref_specific,
-            **ner_specific
+            **ner_specific,
+            **pos_specific
         }
 
     def pred_with_labels(
@@ -415,6 +444,7 @@ class MangoesMTL(nn.Module):
             coref: dict = None,
             ner: dict = None,
             pruner: dict = None,
+            pos: dict = None,
             *args, **kwargs
     ):
 
@@ -603,6 +633,23 @@ class MangoesMTL(nn.Module):
             outputs["loss"]["coref"] = coref_loss
             outputs["coref"] = coref_eval
 
+        if "pos" in tasks:
+            pos_logits = predictions["pos_logits"]
+            pos_labels = pos["gold_label_values"]
+            if self.is_unweighted(task="pos", domain=domain):
+                pos_loss = self.pos_loss(pos_logits, pos_labels)
+            else:
+                pos_loss = self.pos_loss(pos_logits, pos_labels, weight=pos["weights"])
+
+            if torch.isnan(pos_loss):
+                raise NANsFound(
+                    f"Found nan in POS loss. Here are some details - \n\tLogits shape: {pos_logits.shape}, "
+                    f"\n\tLabels shape: {pos_labels.shape}, "
+                )
+
+            outputs["loss"]["pos"] = pos_loss
+            outputs["pos"] = {"logits": pos_logits, "labels": pos_labels}
+
         if "ner" in tasks:
             ner_gold_starts = ner["gold_starts"]
             ner_gold_ends = ner["gold_ends"]
@@ -635,7 +682,7 @@ class MangoesMTL(nn.Module):
 
             if torch.isnan(ner_loss):
                 raise NANsFound(
-                    f"Found nan in loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, "
+                    f"Found nan in NER loss. Here are some details - \n\tLogits shape: {ner_logits.shape}, "
                     f"\n\tLabels shape: {ner_labels.shape}, "
                     f"\n\tNonZero lbls: {ner_labels[ner_labels != 0].shape}"
                 )

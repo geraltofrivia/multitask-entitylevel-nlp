@@ -320,6 +320,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'encoder_dropout',
         'pruner_dropout',
         'ner_dropout',
+        'pos_dropout',
         'pruner_top_span_ratio',
         'pruner_max_num_spans',
         'pruner_use_width',
