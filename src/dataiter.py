@@ -526,12 +526,9 @@ class MultiTaskDataIter(Dataset):
         return ner_specific
 
     def process_pos(
-
             self,
             instance: Document,
             generic_processed_stuff: dict,
-            word2subword_starts: dict,
-            word2subword_ends: dict,
     ) -> dict:
         """
             POS is a token level task. That is, corresponding to every subword,
@@ -734,7 +731,8 @@ class MultiTaskDataIter(Dataset):
             "hash": deterministic_hash(instance.document),  # dump and retrieve tensors to and from disk
             "coref": {},
             "ner": {},
-            "pruner": {}
+            "pruner": {},
+            "pos": {}
         }
 
         if "coref" in self.tasks or "pruner" in self.tasks:
@@ -758,7 +756,7 @@ class MultiTaskDataIter(Dataset):
 
         if "pos" in self.tasks:
             return_dict["pos"] = self.process_pos(
-                instance, return_dict, word2subword_starts, word2subword_ends
+                instance, return_dict
             )
 
         return return_dict
