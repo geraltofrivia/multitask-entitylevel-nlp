@@ -45,7 +45,8 @@ class MultiTaskDataIter(Dataset):
             config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
             allow_speaker_ids: bool = True,
-            rebuild_cache: bool = False
+            rebuild_cache: bool = False,
+            shuffle: bool = False
     ):
         """
             Important thing to note is:

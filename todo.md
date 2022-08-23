@@ -76,13 +76,19 @@ Other TODOs
 
 ## Refactoring for multiple NER tags per span
 
-[ ] Figure out how loss scales work, and simplify it
+[ ] Figure out how loss scales work, and simplify it\
 [ ] Recheck if tokenizer is working as intended (do we need special chars or not)
 
 # 21-08-2022
 
 [x] Fix MEMORY LEAK
-[ ] Add a POS tagging task (which is token level, for a change. yay ^^)
-[ ] Can we make the sample stuff resample every epoch?
-[ ] Figure out how sampling ratios work
+[x] Add a POS tagging task (which is token level, for a change. yay ^^)
+[x] Can we make the sample stuff resample every epoch?
+[x] Figure out how sampling ratios work
 [ ] Simulate the loss thing (all entries get a 1)
+[.] dwie baselines
+[x] Check if ON works better with SpanBERT base or large
+
+# 23-08-2022
+
+[!] figure out whats going wrong with NER eval (acc stuff)
