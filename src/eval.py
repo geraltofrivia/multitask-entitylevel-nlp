@@ -432,6 +432,41 @@ class TraceCandidates(Trace):
             self.logs[k] = self.logs.get(k, []) + [v]
 
 
+class POSAcc(CustomMetric):
+
+    def __init__(self, debug: bool = True):
+        super().__init__(debug=debug)
+        self.values = ['acc']
+        self.task = 'pos'
+        self.prefix = None
+
+    def update(self, logits, labels, *args, **kwargs):
+        """
+            Does not distinguish b/w invalid spans, and actually annotated spans.
+        :param logits: n_spans, n_classes
+        :param labels: n_spans
+        :return: scalar
+        """
+        op = {
+            'acc': torch.mean((torch.argmax(logits, dim=1) == labels).float()),
+        }
+
+        for k, v in op.items():
+            self.logs[k] = self.logs.get(k, []) + [v.item()]
+
+
+class POSPRMicro(PRF1MicroBinary):
+
+    def __init__(self, n_classes: int, debug: bool = True, device: str = 'cpu'):
+        super().__init__(debug=debug, device=device)
+        self.task = 'pos'
+        self.prefix = 'micro'
+        self._p = Precision(num_classes=n_classes, average='micro').to(device)
+        self._r = Recall(num_classes=n_classes, average='micro').to(device)
+        self._f1 = F1Score(num_classes=n_classes, average='micro').to(device)
+        self.values = ['p', 'r', 'f1']
+
+
 class NERSpanRecognitionMicro(PRF1MicroBinary):
 
     def __init__(self, device: str = 'cpu', debug: bool = True):
