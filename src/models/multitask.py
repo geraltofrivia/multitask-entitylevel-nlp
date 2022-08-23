@@ -415,6 +415,8 @@ class MangoesMTL(nn.Module):
             fc1 = self.token_pos_common(hidden_states)
             logits = self.token_pos_specific[domain](fc1)
             pos_specific = {"pos_logits": logits}
+        else:
+            pos_specific = {}
 
         # noinspection PyUnboundLocalVariable
         return {
