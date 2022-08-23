@@ -25,7 +25,7 @@ from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, NER_IS_MULTILABEL
 from utils.exceptions import ImproperDumpDir, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
-    TraceCandidates, NERSpanRecognitionMicroMultiLabel, NERMultiLabelAcc, POSPRMicro, POSAcc
+    TraceCandidates, NERSpanRecognitionMicroMultiLabel, NERMultiLabelAcc, POSPRMacro, POSAcc
 
 random.seed(SEED)
 np.random.seed(SEED)
@@ -517,7 +517,7 @@ def train(ctx):
         if 'coref' in task:
             metrics[task.dataset] += [CorefBCubed, CorefMUC, CorefCeafe]
         if 'pos' in task:
-            metrics[task.dataset] += [partial(POSPRMicro, n_classes=task.n_classes_pos), POSAcc]
+            metrics[task.dataset] += [partial(POSPRMacro, n_classes=task.n_classes_pos), POSAcc]
 
     # Make evaluators
     train_eval = Evaluator(

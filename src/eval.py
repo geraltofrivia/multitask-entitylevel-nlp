@@ -128,9 +128,9 @@ class PRF1Macro(CustomMetric):
 
     def __init__(self, n_classes: int, debug: bool, device: str):
         super().__init__(debug=debug)
-        self._p = Precision(average='macro', num_classes=n_classes + 1).to(device)
-        self._r = Recall(average='macro', num_classes=n_classes + 1).to(device)
-        self._f1 = F1Score(average='macro', num_classes=n_classes + 1).to(device)
+        self._p = Precision(average='macro', num_classes=n_classes).to(device)
+        self._r = Recall(average='macro', num_classes=n_classes).to(device)
+        self._f1 = F1Score(average='macro', num_classes=n_classes).to(device)
         self.values = ['p', 'r', 'f1']
 
     def update(self, logits, labels, *args, **kwargs):
@@ -455,15 +455,15 @@ class POSAcc(CustomMetric):
             self.logs[k] = self.logs.get(k, []) + [v.item()]
 
 
-class POSPRMicro(PRF1MicroBinary):
+class POSPRMacro(PRF1Macro):
 
     def __init__(self, n_classes: int, debug: bool = True, device: str = 'cpu'):
-        super().__init__(debug=debug, device=device)
+        super().__init__(n_classes=n_classes, debug=debug, device=device)
         self.task = 'pos'
-        self.prefix = 'micro'
-        self._p = Precision(num_classes=n_classes, average='micro').to(device)
-        self._r = Recall(num_classes=n_classes, average='micro').to(device)
-        self._f1 = F1Score(num_classes=n_classes, average='micro').to(device)
+        self.prefix = 'macro'
+        # self._p = Precision(num_classes=n_classes, average='macro').to(device)
+        # self._r = Recall(num_classes=n_classes, average='macro').to(device)
+        # self._f1 = F1Score(num_classes=n_classes, average='macro').to(device)
         self.values = ['p', 'r', 'f1']
 
 
@@ -510,7 +510,7 @@ class NERSpanRecognitionMicroMultiLabel(PRF1MicroBinary):
 class NERSpanRecognitionMacro(PRF1Macro):
 
     def __init__(self, n_classes: int, device: str = 'cpu', debug: bool = True):
-        super().__init__(debug=debug, device=device, n_classes=n_classes)
+        super().__init__(debug=debug, device=device, n_classes=n_classes + 1)
         self.task = 'ner'
         self.prefix = 'spanrec_macro'
 
@@ -588,7 +588,7 @@ class NERMultiLabelAcc(CustomMetric):
 class PrunerPRMacro(PRF1Macro):
 
     def __init__(self, n_classes: int, debug: bool = True, device: str = 'cpu'):
-        super().__init__(debug=debug, n_classes=n_classes, device=device)
+        super().__init__(debug=debug, n_classes=n_classes + 1, device=device)
         self.task = 'pruner'
         self.prefix = 'macro'
 
