@@ -536,7 +536,7 @@ class DWIEParser(GenericParser):
             print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ner_tag_dict.json')}")
 
         with (LOC.manual / 'pos_dwie_tag_dict.json').open('w+', encoding='utf8') as f:
-            po = {tag: i for i, tag in enumerate(sorted(pos_labels))}
+            pos_labels = {tag: i for i, tag in enumerate(sorted(pos_labels))}
             json.dump(pos_labels, f)
             print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ner_tag_dict.json')}")
 
