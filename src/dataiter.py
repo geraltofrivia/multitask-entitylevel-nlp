@@ -45,7 +45,6 @@ class MultiTaskDataIter(Dataset):
             config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
             allow_speaker_ids: bool = True,
-            shuffle: bool = False,
             rebuild_cache: bool = False
     ):
         """
@@ -56,7 +55,6 @@ class MultiTaskDataIter(Dataset):
         :param split: the name of the dataset split (e.g. 'train', or 'development')
         :param config: the config dict (SerializedBertConfig + required params)
         :param tokenizer: a pretrained BertTokenizer
-        :param shuffle: a flag which if true would shuffle instances within one batch. Should be turned on.
         :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
         :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
         :param allow_speaker_ids: a bool which if turned to False will hide the speaker ID from __getitem__.
@@ -65,7 +63,6 @@ class MultiTaskDataIter(Dataset):
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
-        self._shuffle_ = shuffle
         self.tasks: Tasks = tasks
         self.tokenizer = tokenizer
         self.config = config
@@ -761,6 +758,9 @@ class MultiTaskDataIter(Dataset):
 
         return return_dict
 
+    def shuffle(self):
+        """ WARNING: probably a bad idea to call this midway through an epoch but do what you will, yeah?"""
+        np.random.shuffle(self.data)
 
 class DocumentReader(Dataset):
     def __init__(
@@ -905,6 +905,7 @@ class MultiDomainDataCombiner(Dataset):
             srcs: List[Callable],
             sampling_ratio: Optional[Iterable[float]] = None,
             speaker_offsets: Optional[List[int]] = None,
+            deterministic: bool = False
     ):
         """
             A data iter that should be given multiple data iter callables.
@@ -924,12 +925,18 @@ class MultiDomainDataCombiner(Dataset):
 
         :param srcs: partials set up to init a dataiter whenever needed
         :param sampling_ratio: list of weights for each dataiter. e.g. [0.5, 0.5] implies we sample equally from both.
+        :param deterministic: if True, no matter how many times you run an iterator,
+            it will always give the same instances (deterministic in sample space),
+            in the same order (deterministic in sample order)
+            If False, it will shuffle both space and order. That is, even if we're going though every instance in a ds,
+                 we will shuffle both things, order and space.
         """
 
         # Init all data iterators.
         self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
         self.tasks: List[Tasks] = [dataiter.tasks for dataiter in self.dataiters]
         self._speaker_offsets = speaker_offsets if speaker_offsets is not None else [0] * len(self.tasks)
+        self._deterministic = deterministic
         """
             Set dataset sampling indices.
             The list should be roughly the same size as combined length of all dataiters.
@@ -951,6 +958,9 @@ class MultiDomainDataCombiner(Dataset):
 
         # Now shuffle these
         np.random.shuffle(self.source_indices)
+        if self._deterministic:
+            for di in self.dataiters:
+                di.shuffle()
 
         # Maintain a history so __getitem__ is deterministic
         # ie. {0: [0, 0], 1: [1,0]} -> combined_ds[0] -> data source 0, item 0; combined_ds[1] -> data source 1, item 0
@@ -964,6 +974,15 @@ class MultiDomainDataCombiner(Dataset):
     #         self.source_pointers[dataiter_index] += 1
     #         di = self.dataiters[dataiter_index]
     #         yield di[self.source_pointers[dataiter_index] % len(di)]
+
+    def reset(self):
+        """ To be called at the end of every epoch """
+        if not self._deterministic:
+            np.random.shuffle(self.source_indices)
+            for di in self.dataiters:
+                di.shuffle()
+
+            self.history = {}
 
     def __getitem__(self, i) -> dict:
 

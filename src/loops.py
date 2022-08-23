@@ -193,6 +193,7 @@ def training_loop(
 
         # Reset eval benches
         train_eval.reset()
+        trn_dataset.reset()
         dev_eval.reset()
 
     return train_metrics, dev_metrics, train_loss
