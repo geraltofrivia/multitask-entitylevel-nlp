@@ -228,9 +228,9 @@ def get_dataiter_partials(
                    "if d1, d2 are both provided, documents are trimmed for both.")
 @click.option('--debug', is_flag=True,
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
-@click.option('--train-encoder', is_flag=True, default=False,
+@click.option('--train-encoder', type=bool, default=False,
               help="If enabled, the BERTish encoder is not frozen but trains also.")
-@click.option('--filter-candidates-pos', '-filtercp', is_flag=True, default=False,
+@click.option('--filter-candidates-pos', '-filtercp', type=bool, default=False,
               help="If true, dataiter ignores those candidates which have verbs in them "
                    "IF the doc has more than 10k candidates.")
 @click.option('--max-training-segments', '-mts', type=int, default=DEFAULTS['max_training_segments'],
@@ -243,15 +243,19 @@ def get_dataiter_partials(
                    "/models/trained/<dataset combination>/<task combination>/<resume_dir>/model.torch.")
 @click.option('--max-span-width', '-msw', type=int, default=DEFAULTS['max_span_width'],
               help="Max subwords to consider when making span. Use carefully. 5 already is too high.")
-@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'], is_flag=True,
+@click.option('--pruner_top_span_ratio', '-ptsr', type=float, default=DEFAULTS['pruner_top_span_ratio'],
+              help="A float b/w 0 and 1 which may help decide how many spans to keep post pruning depending also"
+                   "on pruner_max_num_spans")
+@click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'],
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
               help='Number of times we run the higher order loop. ')
-@click.option('--ignore-speakers', is_flag=True, help="If True, we ignore speaker ID info even if we have access to it")
+@click.option('--ignore-speakers', type=bool, default=False,
+              help="If True, we ignore speaker ID info even if we have access to it")
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
-@click.option('--shared-compressor', '-sc', is_flag=True,
+@click.option('--shared-compressor', '-sc', type=bool, default=False,
               help="If true, the hidden layers turn BERT's hidden embeddings down to 1/3 its size and "
                    "also decreases the unary hdim by a third. "
                    "If this flag is enabled but dense layers are zero, we raise an error.")
@@ -291,6 +295,7 @@ def run(
         max_training_segments: int,
         coref_loss_mean: bool,
         coref_higher_order: int,
+        pruner_top_span_ratio: float
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: implement soft loading the model parameters somehow.
@@ -364,6 +369,7 @@ def run(
     config.shared_compressor = shared_compressor
     config.uncased = encoder.endswith('uncased')
     config.curdir = str(Path('.').absolute())
+    config.pruner_top_span_ratio = pruner_top_span_ratio
     config.coref_higher_order = coref_higher_order
     config.coref_num_speakers = 0 if config.ignore_speakers else tasks.n_speakers + tasks_2.n_speakers
     config.vocab_size = tokenizer.get_vocab().__len__()

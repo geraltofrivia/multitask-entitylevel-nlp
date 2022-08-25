@@ -1,0 +1,18 @@
+method: bayes
+metric:
+  goal: minimize
+  name: Step
+parameters:
+  dense-layers:
+    distribution: uniform
+    max: 3
+    min: 0
+  lr:
+    distribution: uniform
+    max: 0.001
+    min: 0.0005
+  pruner_top_span_ratio:
+    distribution: uniform
+    max: 0.6
+    min: 0.2
+program: src/run.py
