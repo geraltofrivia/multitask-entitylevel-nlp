@@ -78,7 +78,7 @@ class MangoesCorefWrapper():
             for mention in c:
                 mention_to_gold[mention] = c
 
-        top_indices = torch.argmax(outputs["top_antecedent_scores"], dim=-1, keepdim=False)
+        top_indices = torch.argmax(outputs["top_antecedents_score"], dim=-1, keepdim=False)
         ids = outputs["flattened_ids"]
         top_span_starts = outputs["top_span_starts"]
         top_span_ends = outputs["top_span_ends"]

@@ -271,10 +271,10 @@ class MangoesMTL(nn.Module):
         return predicted_antecedents
 
     def todel_get_predicted_clusters(self, pruned_span_starts, pruned_span_ends, coref_top_antecedents,
-                                     coref_top_antecedent_scores):
+                                     coref_top_antecedents_score):
         """ CPU list input """
         # Get predicted antecedents
-        predicted_antecedents = self.todel_get_predicted_antecedents(coref_top_antecedents, coref_top_antecedent_scores)
+        predicted_antecedents = self.todel_get_predicted_antecedents(coref_top_antecedents, coref_top_antecedents_score)
 
         # Get predicted clusters
         mention_to_cluster_id = {}
@@ -319,6 +319,42 @@ class MangoesMTL(nn.Module):
         marginalized_gold_scores = torch.logsumexp(gold_scores, 1)  # [top_cand]
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]
+
+    def get_coref_loss(
+            self,
+            candidate_starts: torch.tensor,
+            candidate_ends: torch.tensor,
+            gold_starts: torch.tensor,
+            gold_ends: torch.tensor,
+            gold_cluster_ids: torch.tensor,
+            top_span_indices: torch.tensor,
+            top_antecedents: torch.tensor,
+            top_antecedents_mask: torch.tensor,
+            top_antecedents_score: torch.tensor,
+    ) -> torch.tensor:
+        gold_candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
+                                                               gold_starts, gold_ends,
+                                                               gold_cluster_ids)
+        top_span_cluster_ids = gold_candidate_cluster_ids[top_span_indices]
+
+        # Unpack everything we need
+        top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents]  # [top_cand, top_ant]
+        top_antecedent_cluster_ids += torch.log(top_antecedents_mask.float()).int()  # [top_cand, top_ant]
+        same_cluster_indicator = torch.eq(top_antecedent_cluster_ids,
+                                          top_span_cluster_ids.unsqueeze(1))  # [top_cand, top_ant]
+        non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
+        pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
+        # noinspection PyArgumentList
+        dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
+        top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
+        coref_loss = self.coref_loss(top_antecedents_score, top_antecedent_labels)  # [top_cand]
+
+        if self.coref_loss_mean:
+            coref_loss = torch.mean(coref_loss)
+        else:
+            coref_loss = torch.sum(coref_loss)
+
+        return coref_loss
 
     def forward(
             self,
@@ -527,32 +563,18 @@ class MangoesMTL(nn.Module):
 
         if "coref" in tasks:
 
-            # top_span_cluster_ids = predictions["coref_top_span_cluster_ids"]
-            top_antecedents = predictions["coref_top_antecedents"]
-            top_antecedents_mask = predictions["coref_top_antecedents_mask"]
-            top_antecedent_scores = predictions["coref_top_antecedent_scores"]
-            top_span_indices = predictions["pruned_span_indices"]
-
-            gold_starts = coref["gold_starts"]
-            gold_ends = coref["gold_ends"]
-            gold_cluster_ids = coref["gold_label_values"]
-
-            gold_candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
-                                                                   gold_starts, gold_ends,
-                                                                   gold_cluster_ids)
-            top_span_cluster_ids = gold_candidate_cluster_ids[top_span_indices]
-
-            # Unpack everything we need
-            top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents]  # [top_cand, top_ant]
-            top_antecedent_cluster_ids += torch.log(top_antecedents_mask.float()).int()  # [top_cand, top_ant]
-            same_cluster_indicator = torch.eq(top_antecedent_cluster_ids,
-                                              top_span_cluster_ids.unsqueeze(1))  # [top_cand, top_ant]
-            non_dummy_indicator = (top_span_cluster_ids > 0).unsqueeze(1)  # [top_cand, 1]
-            pairwise_labels = torch.logical_and(same_cluster_indicator, non_dummy_indicator)  # [top_cand, top_ant]
-            # noinspection PyArgumentList
-            dummy_labels = torch.logical_not(pairwise_labels.any(1, keepdims=True))  # [top_cand, 1]
-            top_antecedent_labels = torch.cat([dummy_labels, pairwise_labels], 1)  # [top_cand, top_ant + 1]
-            coref_loss = self.coref_loss(top_antecedent_scores, top_antecedent_labels)  # [top_cand]
+            # Compute Loss
+            coref_loss = self.get_coref_loss(
+                candidate_starts=predictions['candidate_starts'],
+                candidate_ends=predictions['candidate_ends'],
+                gold_starts=coref['gold_starts'],
+                gold_ends=coref['gold_ends'],
+                gold_cluster_ids=coref['gold_label_values'],
+                top_span_indices=predictions['pruned_span_indices'],
+                top_antecedents=predictions['coref_top_antecedents'],
+                top_antecedents_mask=predictions['coref_top_antecedents_mask'],
+                top_antecedents_score=predictions['coref_top_antecedents_score']
+            )
 
             if self.coref_loss_mean:
                 coref_loss = torch.mean(coref_loss)
@@ -585,7 +607,7 @@ class MangoesMTL(nn.Module):
                 for mention in c:
                     mention_to_gold[mention] = c
 
-            top_indices = torch.argmax(top_antecedent_scores, dim=-1, keepdim=False)
+            top_indices = torch.argmax(predictions['coref_top_antecedents_score'], dim=-1, keepdim=False)
             mention_indices = []
             antecedent_indices = []
             predicted_antecedents = []

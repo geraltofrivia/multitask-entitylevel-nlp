@@ -588,7 +588,7 @@ class CorefDecoder(torch.nn.Module):
 
         return {
             "coref_top_antecedents": top_ante,
-            "coref_top_antecedent_scores": top_ante_scores,
+            "coref_top_antecedents_score": top_ante_scores,
             "coref_top_antecedents_mask": top_ante_mask,
             "pruned_candidate_mention_scores": pruned_span_scores,
             "pruned_span_starts": pruned_span_starts,
