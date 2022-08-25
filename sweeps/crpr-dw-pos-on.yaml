@@ -4,7 +4,7 @@ metric:
   name: Step
 parameters:
   dense-layers:
-    distribution: uniform
+    distribution: int_uniform
     max: 3
     min: 0
   lr:
@@ -12,7 +12,11 @@ parameters:
     max: 0.001
     min: 0.0005
   pruner_top_span_ratio:
-    distribution: uniform
+    distribution: int_uniform
     max: 0.6
     min: 0.2
+  max-span-width:
+    distribution: int_uniform
+    min: 3
+    max: 8
 program: src/run.py
