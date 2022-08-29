@@ -2,15 +2,15 @@
 
 ## 08-07-2022
 
-[ ] Run baseline with more CRAC things
-[ ] Why is TRIM not working
-[ ] Effects of scheduling. Try with different schedules
-[ ] Run a grid of scheduling experiments - wire it up
-[ ]
+- [x] Run baseline with more CRAC things
+- [x] Why is TRIM not working
+- [x] Effects of scheduling. Try with different schedules
+- [x] Run a grid of scheduling experiments - wire it up
+- [x]
 
 ## 18-07-2022
 
-[ ] Talking about **speaker_ids**
+- [x] Talking about **speaker_ids**
 
 - Embeddings be domain specific
 - So its possible that in some domain, we have contatenated this, and not in some other domains
@@ -21,7 +21,7 @@
     - alternatively just put [0,0,0...] everywhere.
     - THIS NEEDS TO BE DONE TO MAKE THE MODEL WORK WITH SPEAKERS **ded**
 
-# 20-07-2022
+## 20-07-2022
 
 So that seems to be done. Now there are two bugs that we need to fix. Urgently.
 
@@ -34,7 +34,7 @@ So that seems to be done. Now there are two bugs that we need to fix. Urgently.
    We really do need to move to the HOI way of doing things.
    Shall we just do that hereon?
 
-# 22-07-2022
+## 22-07-2022
 
 So after three days, the bug is fixed. And what a bug fix wow fuck me sideways. Anyway.
 We'll be running a few more experiments. All on persuasion (or light) and trying to maximize the numbers we're getting
@@ -47,48 +47,64 @@ Specifically
 5. NER onto vs Coref onto
 
 Other TODOs
-[x] Do loss scales (defined in the task triple) change anything?
-[ ] coref num speakers variable... is it needed? it shouldn't be.
 
-# 01-08-2022
+- [x] Do loss scales (defined in the task triple) change anything?
+- [x] coref num speakers variable... is it needed? it shouldn't be.
 
-[ ] Implement domain adversarial learning thing
-[ ] Change encoder to something autoregressive
-[ ] Analyse predictions of model - look at what samples are predicted. Can we curtail spans by POS tags?
-[x] Feed spans from the data iter part instead of within the model
-[ ] Integrate Univ. Anaphora Scorer
+## 01-08-2022
 
-# 03-08-2022
+- [x] Implement domain adversarial learning thing
+- [x] Change encoder to something autoregressive
+- [x] Analyse predictions of model - look at what samples are predicted. Can we curtail spans by POS tags?
+- [x] Feed spans from the data iter part instead of within the model
+- [x] Integrate Univ. Anaphora Scorer
 
-[x] Make different chunks of the MTL model
-[x] Encoder chunk (that extends Tranformers sure)
-[x] NER chunk
-[x] Coref Chunk
-[x] Integration Logic remains in MTL but modules do their job well.
+## 03-08-2022
+
+- [x] Make different chunks of the MTL model
+- [x] Encoder chunk (that extends Tranformers sure)
+- [x] NER chunk
+- [x] Coref Chunk
+- [x] Integration Logic remains in MTL but modules do their job well.
+
 --------    
-[x] Compute Baseline Results
-[x] Implement Shared Dense Layers (2 layer dense net with same or half dimensionality)
 
-# 16-08-2022
+- [x] Compute Baseline Results
+- [x] Implement Shared Dense Layers (2 layer dense net with same or half dimensionality)
 
-[ ] Figure out the deal with CoNLL12
-[ ] Implement Shared Pruner (integrated in there)
+## 16-08-2022
 
-## Refactoring for multiple NER tags per span
+- [x] Figure out the deal with CoNLL12
+- [ ] Implement Shared Pruner (integrated in there)
 
-[ ] Figure out how loss scales work, and simplify it\
-[ ] Recheck if tokenizer is working as intended (do we need special chars or not)
+### Refactoring for multiple NER tags per span
 
-# 21-08-2022
+- [x] Figure out how loss scales work, and simplify it\
+- [ ] Recheck if tokenizer is working as intended (do we need special chars or not)
 
-[x] Fix MEMORY LEAK
-[x] Add a POS tagging task (which is token level, for a change. yay ^^)
-[x] Can we make the sample stuff resample every epoch?
-[x] Figure out how sampling ratios work
-[ ] Simulate the loss thing (all entries get a 1)
-[.] dwie baselines
-[x] Check if ON works better with SpanBERT base or large
+## 21-08-2022
 
-# 23-08-2022
+- [x] Fix MEMORY LEAK
+- [x] Add a POS tagging task (which is token level, for a change. yay ^^)
+- [x] Can we make the sample stuff resample every epoch?
+- [x] Figure out how sampling ratios work
+- [x] Simulate the loss thing (all entries get a 1)
+- [x] dwie baselines
+- [x] Check if ON works better with SpanBERT base or large
 
-[!] figure out whats going wrong with NER eval (acc stuff)
+## 23-08-2022
+
+- [ ] figure out whats going wrong with NER eval (acc stuff)
+
+-------
+
+# Leftovers
+
+- [ ] Implement Shared Pruner (integrated in there)
+- [ ] Recheck if tokenizer is working as intended (do we need special chars or not)
+- [!] figure out whats going wrong with NER eval (acc stuff)
+
+## 29-08-2022
+
+- [ ] Should we make a new repo for preproc data management?
+- [ ] Make setup.sh conditioned and verbose

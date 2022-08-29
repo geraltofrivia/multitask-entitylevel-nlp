@@ -1,4 +1,4 @@
-echo "This script can't download CODICRAC datasets for you. Please see src/playing-with-data-codicrac.ipynb to see what they should be arranged like."
+echo "This script can't download CODICRAC/Ontonotes or ACE datasets for you. Please see src/playing-with-data-codicrac.ipynb to see what they should be arranged like."
 
 mkdir data
 mkdir data/raw
@@ -14,6 +14,8 @@ mkdir data/raw/codicrac-arrau-t93
 mkdir data/raw/codicrac-arrau-rst
 mkdir data/raw/codicrac-arrau-gnome
 mkdir data/raw/codicrac-arrau-pear
+mkdir data/raw/ace
+mkdir data/raw/dwie
 mkdir data/parsed
 mkdir data/parsed/ontonotes
 mkdir data/runs
@@ -43,6 +45,9 @@ src/preproc/conll-2012/v3/scripts/skeleton2conll.sh -D data/raw/ontonotes/ontono
 # Installing dependencies
 pip install -r requirements.txt
 
+# Get all submodules running
+git submodule update --init --recursive
+
 # Downloading the spacy model
 python -m spacy download en_core_web_sm-3.1.0 --direct
 
@@ -51,11 +56,22 @@ wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
 unzip models/glove/glove.6B.zip -d models/glove/
 
 # For DWIE corpora
-git submodule update --init --recursive
 cd modules/dwie
 python src/dwie_download.py
 cd ../..
 # now move the raw data far from the `modules` dir, into the `raw` dir
 mkdir -pv data/raw/dwie
-mv modules/dwie/data/annos_with_content/* data/raw/dwie
+mv modules/dwie/data/annos_with_content/* data/raw/
+
+# For ACE 2005 Corpora
+mkdir modules/ace2005-toolkit/ace_2005
+tar zxvf data/raw/ace/ace_2005_td_v7_LDC2006T06.tgz -C modules/ace2005-toolkit/ace_2005/
+mv modules/ace2005-toolkit/ace_2005_td_v7/* modules/ace2005-toolkit/
+rm -r modules/ace2005-toolkit/ace_2005_td_v7/
+cd modules/ace2005-toolkit/
+pip install -r requirements.
+chmod +x run.sh
+./run.sh en     # Now we need a user prompt. Say 'y' for yes at the time.
+cd ../..
+cp -r modules/ace2005-toolkit/cache_data/English/* data/raw/ace
 ./preproc.sh

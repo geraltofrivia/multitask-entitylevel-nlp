@@ -92,11 +92,12 @@ we'll download these automatically.
 1. Get access to `ontonotes-release-5.0` somehow from LDC (I still hate them to make a common dataset propriotary but what can I do). And put it inside `data/raw/ontonotes`. See tree above to figure out the 'right' way
    to arrange ontonotes.
 2. Similarly get access to ACE 2005 (https://catalog.ldc.upenn.edu/LDC2006T06).
-2. Get access to CODI CRAC 2022 datasets (IDK how, again, sorry).
-3. Download the `conll-2012-scripts.v3.tar.gz` scripts (find the name in page) from [this page](https://cemantix.org/conll/2012/data.html) and extract them to `src/preproc/`
-4. Run `setup.sh` to download, untar and process the conll-2012 skeleton files into conll formatted files. This might take some time.
-5. This will also make multple changes including downloading some downloadable stuff, installing dependencies etc.
-6. Run `./preproc.sh` to convert RAW datasets into a consistent format (outputs would be saved in `~/data/parsed`).
+3. Get access to CODI CRAC 2022 datasets (IDK how, again, sorry).
+4. Download the `conll-2012-scripts.v3.tar.gz` scripts (find the name in page) from [this page](https://cemantix.org/conll/2012/data.html) and extract them to `src/preproc/`
+5. Run `setup.sh` to download, untar and process the conll-2012 skeleton files into conll formatted files. This might take some time.
+   1. At some point you would be asked for a prompt about BIO tags. Enter 'y'.
+6. This will also make multple changes including downloading some downloadable stuff, installing dependencies etc.
+7. Run `./preproc.sh` to convert RAW datasets into a consistent format (outputs would be saved in `~/data/parsed`).
 
 ### Running Experiments
 
