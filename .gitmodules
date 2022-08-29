@@ -1,3 +1,6 @@
 [submodule "modules/dwie"]
 	path = modules/dwie
 	url = git@github.com:klimzaporojets/DWIE.git
+[submodule "modules/ace2005-toolkit"]
+	path = modules/ace2005-toolkit
+	url = git@github.com:Clearailhc/ACE2005-toolkit.git
