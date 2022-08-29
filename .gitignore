@@ -186,3 +186,5 @@ cython_debug/
 !/data/raw/codicrac-switchboard/Switchboard_train.2022.CONLLUA
 /data/manual/speaker*tag_dict.json
 /src/wandb/
+/data/raw/ace/
+/data/raw/dwie/

@@ -14,7 +14,7 @@ mkdir data/raw/codicrac-arrau-t93
 mkdir data/raw/codicrac-arrau-rst
 mkdir data/raw/codicrac-arrau-gnome
 mkdir data/raw/codicrac-arrau-pear
-mkdir data/raw/ace
+mkdir data/raw/ace2005
 mkdir data/raw/dwie
 mkdir data/parsed
 mkdir data/parsed/ontonotes
@@ -65,7 +65,7 @@ mv modules/dwie/data/annos_with_content/* data/raw/
 
 # For ACE 2005 Corpora
 mkdir modules/ace2005-toolkit/ace_2005
-tar zxvf data/raw/ace/ace_2005_td_v7_LDC2006T06.tgz -C modules/ace2005-toolkit/ace_2005/
+tar zxvf data/raw/ace2005/ace_2005_td_v7_LDC2006T06.tgz -C modules/ace2005-toolkit/ace_2005/
 mv modules/ace2005-toolkit/ace_2005_td_v7/* modules/ace2005-toolkit/
 rm -r modules/ace2005-toolkit/ace_2005_td_v7/
 cd modules/ace2005-toolkit/
@@ -73,5 +73,5 @@ pip install -r requirements.
 chmod +x run.sh
 ./run.sh en     # Now we need a user prompt. Say 'y' for yes at the time.
 cd ../..
-cp -r modules/ace2005-toolkit/cache_data/English/* data/raw/ace
+cp -r modules/ace2005-toolkit/cache_data/English/* data/raw/ace2005
 ./preproc.sh

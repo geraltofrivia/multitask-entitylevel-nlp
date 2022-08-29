@@ -32,7 +32,7 @@ priyansh@priyansh-ele:~/Dev/research/coref/mtl$ tree -L 4
 │   │   │   ├── ontonotes-release-5.0
 │   │   │   ├── ontonotes-release-5.0_LDC2013T19.tgz
 │   │   │   └── v12.tar.gz
-│   │   ├── ace
+│   │   ├── ace2005
 │   │   │   └──ace_2005_td_v7_LDC2006T06.tgz
 │   │   └── scierc
 │   │       ├── dev.json
