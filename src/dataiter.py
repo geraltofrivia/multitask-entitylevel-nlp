@@ -69,6 +69,7 @@ class MultiTaskDataIter(Dataset):
         self.config = config
         self.uncased = config.uncased
         self._flag_allow_speaker_ids = allow_speaker_ids
+        self._do_shuffle: bool = shuffle
 
         self.loss_scales = torch.tensor(tasks.loss_scales, dtype=torch.float)
 
@@ -254,6 +255,10 @@ class MultiTaskDataIter(Dataset):
 
     def __setitem__(self, i, item):
         self.data[i] = item
+
+    def reset(self):
+        if self._do_shuffle:
+            self.shuffle()
 
     def process(self):
         self.data = []
@@ -762,6 +767,7 @@ class MultiTaskDataIter(Dataset):
     def shuffle(self):
         """ WARNING: probably a bad idea to call this midway through an epoch but do what you will, yeah?"""
         np.random.shuffle(self.data)
+
 
 class DocumentReader(Dataset):
     def __init__(
