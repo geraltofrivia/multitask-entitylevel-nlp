@@ -73,5 +73,5 @@ pip install -r requirements.
 chmod +x run.sh
 ./run.sh en     # Now we need a user prompt. Say 'y' for yes at the time.
 cd ../..
-cp -r modules/ace2005-toolkit/cache_data/English/* data/raw/ace2005
+mv modules/ace2005-toolkit/cache_data/English/* data/raw/ace2005
 ./preproc.sh

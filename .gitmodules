@@ -3,4 +3,4 @@
 	url = git@github.com:klimzaporojets/DWIE.git
 [submodule "modules/ace2005-toolkit"]
 	path = modules/ace2005-toolkit
-	url = git@github.com:Clearailhc/ACE2005-toolkit.git
+	url = git@github.com:geraltofrivia/ACE2005-toolkit.git

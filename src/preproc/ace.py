@@ -38,7 +38,7 @@ class ACE2005Parser(GenericParser):
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
 
         outputs: List[Document] = []
-        filenames: Iterable[Path] = (self.dir / split_nm).glob('*.json')
+        filenames: Iterable[Path] = list((self.dir / split_nm).glob('*.json'))
 
         # TODO:test this stuff out
         for filename in filenames:

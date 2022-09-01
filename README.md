@@ -95,7 +95,9 @@ we'll download these automatically.
 3. Get access to CODI CRAC 2022 datasets (IDK how, again, sorry).
 4. Download the `conll-2012-scripts.v3.tar.gz` scripts (find the name in page) from [this page](https://cemantix.org/conll/2012/data.html) and extract them to `src/preproc/`
 5. Run `setup.sh` to download, untar and process the conll-2012 skeleton files into conll formatted files. This might take some time.
-   1. At some point you would be asked for a prompt about BIO tags. Enter 'y'.
+   1. At some point you would be asked for something (ACE dataset) to be divided by sentence level. Enter 'y'.
+   2. It will ask for train dev test ratios: enter TODO (tentatively: `0.7 0.15 0.15`)
+   3. It will then ask to transform BIO tags or not: enter y (TODO: you sure?)
 6. This will also make multple changes including downloading some downloadable stuff, installing dependencies etc.
 7. Run `./preproc.sh` to convert RAW datasets into a consistent format (outputs would be saved in `~/data/parsed`).
 
