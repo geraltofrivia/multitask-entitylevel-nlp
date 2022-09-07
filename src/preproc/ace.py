@@ -38,7 +38,7 @@ class ACE2005Parser(GenericParser):
     def parse(self, split_nm: Union[Path, str]) -> List[Document]:
 
         outputs: List[Document] = []
-        filenames: Iterable[Path] = list((self.dir / split_nm).glob('*.json'))
+        filenames: Iterable[Path] = list((self.dir / split_nm).glob('*v2.json'))
 
         # TODO:test this stuff out
         for filename in filenames:
@@ -51,6 +51,8 @@ class ACE2005Parser(GenericParser):
 
         with filename.open('r') as f:
             raw = json.load(f)
+
+        doc_sents = [x['word'] for x in raw['sentences']]
 
         print(raw[:10])
         return ''

@@ -66,10 +66,10 @@ mv modules/dwie/data/annos_with_content/* data/raw/
 # For ACE 2005 Corpora
 mkdir modules/ace2005-toolkit/ace_2005
 tar zxvf data/raw/ace2005/ace_2005_td_v7_LDC2006T06.tgz -C modules/ace2005-toolkit/ace_2005/
-mv modules/ace2005-toolkit/ace_2005_td_v7/* modules/ace2005-toolkit/
-rm -r modules/ace2005-toolkit/ace_2005_td_v7/
+mv modules/ace2005-toolkit/ace_2005/ace_2005_td_v7/* modules/ace2005-toolkit/ace_2005
+rm -r modules/ace2005-toolkit/ace_2005/ace_2005_td_v7/
 cd modules/ace2005-toolkit/
-pip install -r requirements.
+pip install -r requirements.txt
 chmod +x run.sh
 ./run.sh en     # Now we need a user prompt. Say 'y' for yes at the time.
 cd ../..
