@@ -91,11 +91,14 @@ class Clusters:
         clusters_, clusters_h_ = [], []
         f_doc = to_toks(doc)
 
-        for i, (cluster, cluster_h) in enumerate(zip(self.spans, self.spans_head)):
+        for i, cluster in enumerate(self.spans):
             clusters_.append([])
-            clusters_h_.append([])
-            for span, span_h in zip(cluster, cluster_h):
+            for span in cluster:
                 clusters_[-1].append(f_doc[span[0]: span[1]])
+
+        for i, cluster_h in enumerate(self.spans_head):
+            clusters_h_.append([])
+            for span_h in cluster_h:
                 clusters_h_[-1].append(f_doc[span_h[0]: span_h[1]])
 
         self.words = clusters_
@@ -108,11 +111,14 @@ class Clusters:
         clusters_pos, clusters_h_pos = [], []
         f_pos = to_toks(pos)
 
-        for i, (cluster, cluster_h) in enumerate(zip(self.spans, self.spans_head)):
+        for i, cluster in enumerate(self.spans):
             clusters_pos.append([])
-            clusters_h_pos.append([])
-            for span, span_h in zip(cluster, cluster_h):
+            for span in cluster:
                 clusters_pos[-1].append(f_pos[span[0]: span[1]])
+
+        for i, cluster_h in enumerate(self.spans_head):
+            clusters_h_pos.append([])
+            for span_h in cluster_h:
                 clusters_h_pos[-1].append(f_pos[span_h[0]: span_h[1]])
 
         self.pos = clusters_pos
@@ -201,14 +207,18 @@ class BinaryLinks:
         words, words_head = [], []
         f_doc = to_toks(doc)
 
-        for pair, pair_h in zip(self.spans, self.spans_head):
-            pair_words, pair_words_head = [], []
-            for span, span_h in zip(pair, pair_h):
-                pair_words.append(f_doc[span[0]: span[1]])
+        for pair_h in self.spans_head:
+            pair_words_head = []
+            for span_h in pair_h:
                 pair_words_head.append(f_doc[span_h[0]: span_h[1]])
+            words_head.append(pair_words_head)
+
+        for pair in self.spans:
+            pair_words = [], []
+            for span in pair:
+                pair_words.append(f_doc[span[0]: span[1]])
 
             words.append(pair_words)
-            words_head.append(pair_words_head)
 
         self.words = words
         self.words_head = words_head
@@ -222,13 +232,16 @@ class BinaryLinks:
         pos, pos_head = [], []
         f_doc = to_toks(doc)
 
-        for pair, pair_h in zip(self.spans, self.spans_head):
-            pair_pos, pair_pos_head = [], []
-            for span, span_h in zip(pair, pair_h):
+        for pair in self.spans:
+            pair_pos = []
+            for span in pair:
                 pair_pos.append(f_doc[span[0]: span[1]])
-                pair_pos_head.append(f_doc[span_h[0]: span_h[1]])
-
             pos.append(pair_pos)
+
+        for pair_h in self.spans_head:
+            pair_pos_head = []
+            for span_h in pair_h:
+                pair_pos_head.append(f_doc[span_h[0]: span_h[1]])
             pos_head.append(pair_pos_head)
 
         self.pos = pos
@@ -341,8 +354,10 @@ class NamedEntities:
         words, words_head = [], []
         f_doc = to_toks(doc)
 
-        for span, span_h in zip(self.spans, self.spans_head):
+        for span in self.spans:
             words.append(f_doc[span[0]: span[1]])
+
+        for span_h in self.spans_head:
             words_head.append(f_doc[span_h[0]: span_h[1]])
 
         self.words = words
@@ -353,8 +368,10 @@ class NamedEntities:
         temp_pos, temp_pos_head = [], []
         f_pos = to_toks(pos)
 
-        for span, span_h in zip(self.spans, self.spans_head):
+        for span in self.spans:
             temp_pos.append(f_pos[span[0]: span[1]])
+
+        for span_h in self.spans_head:
             temp_pos_head.append(f_pos[span_h[0]: span_h[1]])
 
         self.pos = temp_pos

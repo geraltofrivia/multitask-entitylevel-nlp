@@ -13,7 +13,7 @@ except ImportError:
     from . import _pathfix
 from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
-from utils.data import Document
+from utils.data import Document, Clusters, TypedRelations, NamedEntities
 
 class ACE2005Parser(GenericParser):
 
@@ -53,10 +53,51 @@ class ACE2005Parser(GenericParser):
             raw = json.load(f)
 
         doc_sents = [x['word'] for x in raw['sentences']]
+        doc_spacy = self.nlp(doc_sents)
+        # doc = self._get_spacy_doc_(doc_text)
+        doc_pos = self.get_pos_tags(doc_spacy)
+        doc_name = filename.name
+        speakers = [0] * len(doc_sents)
+        coref = Clusters([])
+        ner = self.get_ner_obj(raw, doc_sents, doc_pos)
+        rel = self.get_rel_obj(raw, doc_sents, doc_pos)
 
         print(raw[:10])
         return ''
 
+    def get_ner_obj(self, raw: dict, doc: List[List[str]], pos: List[List[str]]) -> NamedEntities:
+        """ We need ner_spans, and ner_tags"""
+
+        ner_spans = [x['position'] for x in raw['entities']]
+        for span in ner_spans:
+            span[1] = span[1] + 1
+
+        ner_tags = [x['entity-type'] for x in raw['entities']]
+
+        ner_obj = NamedEntities(spans=ner_spans, tags=ner_tags)
+        ner_obj.add_words(doc)
+        ner_obj.add_pos(pos)
+
+        return ner_obj
+
+    def get_rel_obj(self, raw: dict, doc: List[List[str]], pos: List[List[str]]) -> TypedRelations:
+        """ Same, we need rel_spans, and tags to create object and can add words and pos later """
+        spans = []
+        tags = []
+
+        for rel in raw['relations']:
+            tags.append(rel['relation-type'])
+            spans_this_rel = []  # list of two span objs e.g. [ [ 2, 3], [10, 13] ]
+            for arg in rel['arguments']:
+                spans_this_rel.append(arg['position'])
+
+            spans.append(spans_this_rel)
+
+        rel_obj = TypedRelations(spans=spans, tags=tags)
+        rel_obj.add_words(doc)
+        rel_obj.add_pos(pos)
+
+        return rel_obj
 
 if __name__ == '__main__':
     parser = ACE2005Parser(LOC.ace, ['train'])
