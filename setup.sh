@@ -76,3 +76,7 @@ chmod +x run.sh
 cd ../..
 mv modules/ace2005-toolkit/cache_data/English/* data/raw/ace2005
 ./preproc.sh
+
+# ###### Stuff to update submodules
+# git pull --recurse-submodules
+# ######

@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from typing import Iterable, Union, List
 
+from tqdm.auto import tqdm
+
 # Local imports
 try:
     import _pathfix
@@ -14,7 +16,8 @@ except ImportError:
 from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
 from utils.nlp import to_toks
-from utils.data import Document, Clusters, TypedRelations, NamedEntities
+from dataiter import DocumentReader
+from utils.data import Document, Clusters, TypedRelations, NamedEntities, BridgingAnaphors
 
 
 class ACE2005Parser(GenericParser):
@@ -42,8 +45,7 @@ class ACE2005Parser(GenericParser):
         outputs: List[Document] = []
         filenames: Iterable[Path] = list((self.dir / split_nm).glob('*v2.json'))
 
-        # TODO:test this stuff out
-        for filename in filenames:
+        for filename in tqdm(filenames):
             document = self._parse_document_(filename)
             outputs.append(document)
 
@@ -63,9 +65,20 @@ class ACE2005Parser(GenericParser):
         coref = Clusters([])
         ner = self.get_ner_obj(raw, doc_sents, doc_pos)
         rel = self.get_rel_obj(raw, doc_sents, doc_pos)
+        bridging = BridgingAnaphors.new()
 
-        print(raw[:10])
-        return ''
+        document = Document(
+            document=doc_sents,
+            pos=doc_pos,
+            docname=doc_name,
+            speakers=[0] * len(doc_sents),
+            coref=coref,
+            ner=ner,
+            rel=rel,
+            bridging=bridging
+        )
+
+        return document
 
     def get_ner_obj(self, raw: dict, doc: List[List[str]], pos: List[List[str]]) -> NamedEntities:
         """ We need ner_spans, and ner_tags"""
@@ -94,11 +107,12 @@ class ACE2005Parser(GenericParser):
         ner_obj.add_pos(pos)
 
         # Compare span heads
-        for i, head in enumerate(ner_obj.words_head):
-            raw_head = ner_words_head[i]
-            if not (''.join(head) == raw_head or ' '.join(head) == raw_head):
-                raise AssertionError(f'There was a problem mapping spans as the {i}th span head is originally:\n'
-                                     f'\t`{raw_head}` \n but we inferred it to be \n\t`{head}`')
+        # for i, head in enumerate(ner_obj.words_head):
+        #     raw_head = ner_words_head[i]
+        #     if not (''.join(head) == raw_head or ' '.join(head) == raw_head or '\n'.join(head) == raw_head or
+        #     ''.join(head)[:-1] == raw_head):
+        #         raise AssertionError(f'There was a problem mapping spans as the {i}th span head is originally:\n'
+        #                              f'\t`{raw_head}` \n but we inferred it to be \n\t`{head}`')
         return ner_obj
 
     def get_rel_obj(self, raw: dict, doc: List[List[str]], pos: List[List[str]]) -> TypedRelations:
@@ -127,18 +141,68 @@ class ACE2005Parser(GenericParser):
         rel_obj.add_pos(pos)
 
         # Verify the texts time
-        for i, word_pairs in enumerate(rel_obj.words):
-            if not (' '.join(word_pairs[0]) == words[i][0] or ''.join(word_pairs[0]) == words[i][0]) and \
-                    (' '.join(word_pairs[1]) == words[i][1] or ''.join(word_pairs[1]) == words[i][1]):
-                raise AssertionError(f"There is a problem with span {i}.\n"
-                                     f"Expected text:\n"
-                                     f"\t`{words[i][0]}` || `{words[i][1]}`"
-                                     f"What we got:\n"
-                                     f"\t`{word_pairs[0]}`, `{word_pairs[1]}`")
+        # PS: in the future if this is creating problems, just comment this out. It serves no actual purpose but
+        # just idiot proofs the code above.
+        # for i, word_pairs in enumerate(rel_obj.words):
+        #     if not (' '.join(word_pairs[0]) == words[i][0] or
+        #             ''.join(word_pairs[0]) == words[i][0] or
+        #             ''.join(word_pairs[0])+'.' == words[i][0].replace(' ', '').replace('\n', '') or
+        #             ''.join(word_pairs[0]) == words[i][0].replace(' ', '').replace('\n','')) and \
+        #             (' '.join(word_pairs[1]) == words[i][1] or
+        #              ''.join(word_pairs[1]) == words[i][1]):
+        #         raise AssertionError(f"There is a problem with span {i}.\n"
+        #                              f"Expected text:\n"
+        #                              f"\t`{words[i][0]}` || `{words[i][1]}`\n"
+        #                              f"What we got:\n"
+        #                              f"\t`{word_pairs[0]}`, `{word_pairs[1]}`")
 
         return rel_obj
+
+
+def create_label_dict():
+    """
+        Check if two trainable splits of ace2005 - train, and dev are already processed or not.
+        If not, return error.
+
+        If yes, go through all of them and find all unique output labels to encode them in a particular fashion.
+    :return: None
+    """
+    relevant_splits: List[str] = ['train', 'dev']
+
+    # Check if dump.json exists in all of these
+    ner_labels = set()
+    rel_labels = set()
+    pos_labels = set()
+    for split in relevant_splits:
+        reader = DocumentReader('ace2005', split=split)
+        for doc in reader:
+            ner_labels = ner_labels.union(doc.ner.get_all_tags())
+            rel_labels = rel_labels.union(doc.rel.tags)
+            pos_labels = pos_labels.union(set(to_toks(doc.pos)))
+
+    # Turn them into dicts and dump them as json
+    with (LOC.manual / 'ner_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
+        ner_labels = {tag: i for i, tag in enumerate(ner_labels)}
+        json.dump(ner_labels, f)
+        print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ace2005_tag_dict.json')}")
+
+    with (LOC.manual / 'rel_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
+        rel_labels = {tag: i for i, tag in enumerate(rel_labels)}
+        json.dump(rel_labels, f)
+        print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ace2005_tag_dict.json')}")
+
+    with (LOC.manual / 'pos_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
+        pos_labels = {tag: i for i, tag in enumerate(pos_labels)}
+        json.dump(pos_labels, f)
+        print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ace2005_tag_dict.json')}")
 
 
 if __name__ == '__main__':
     parser = ACE2005Parser(LOC.ace, ['train'])
     parser.run()
+    parser = ACE2005Parser(LOC.ace, ['dev'])
+    parser.run()
+    parser = ACE2005Parser(LOC.ace, ['test'])
+    parser.run()
+
+    create_label_dict()
