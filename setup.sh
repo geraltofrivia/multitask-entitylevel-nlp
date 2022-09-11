@@ -65,6 +65,7 @@ mv modules/dwie/data/annos_with_content/* data/raw/
 
 # For ACE 2005 Corpora
 mkdir modules/ace2005-toolkit/ace_2005
+mkdir modules/ace2005-toolkit/output
 tar zxvf data/raw/ace2005/ace_2005_td_v7_LDC2006T06.tgz -C modules/ace2005-toolkit/ace_2005/
 mv modules/ace2005-toolkit/ace_2005/ace_2005_td_v7/* modules/ace2005-toolkit/ace_2005
 rm -r modules/ace2005-toolkit/ace_2005/ace_2005_td_v7/

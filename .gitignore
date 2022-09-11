@@ -188,4 +188,5 @@ cython_debug/
 /src/wandb/
 /data/raw/ace2005/
 /data/raw/dwie/
+/data/raw/codicrac*
 /data/manual/*tag_dict.json
