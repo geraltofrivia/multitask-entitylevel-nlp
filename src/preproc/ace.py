@@ -13,7 +13,9 @@ except ImportError:
     from . import _pathfix
 from config import LOCATIONS as LOC
 from preproc.commons import GenericParser
+from utils.nlp import to_toks
 from utils.data import Document, Clusters, TypedRelations, NamedEntities
+
 
 class ACE2005Parser(GenericParser):
 
@@ -68,16 +70,35 @@ class ACE2005Parser(GenericParser):
     def get_ner_obj(self, raw: dict, doc: List[List[str]], pos: List[List[str]]) -> NamedEntities:
         """ We need ner_spans, and ner_tags"""
 
-        ner_spans = [x['position'] for x in raw['entities']]
-        for span in ner_spans:
-            span[1] = span[1] + 1
+        sentlen_offsets = [to_toks(doc[:i]).__len__() for i, sent in enumerate(doc)]
+        ner_spans, ner_spans_head = [], []
+        ner_words_head = []  # We note down what the raw says and compare to what we infer to assure we infer correctly
+
+        for ent in raw['entities']:
+            # Find sentence offsets and add the positions after that
+            sentlen_offset = sentlen_offsets[int(ent['sent_id']) - 1]
+            ner_span = [sentlen_offset + ent['position'][0],
+                        sentlen_offset + ent['position'][1] + 1]
+            ner_span_head = [sentlen_offset + ent['head']['position'][0],
+                             sentlen_offset + ent['head']['position'][1] + 1]
+            ner_word_head = ent['head']['text']
+
+            ner_spans.append(ner_span)
+            ner_spans_head.append(ner_span_head)
+            ner_words_head.append(ner_word_head)
 
         ner_tags = [x['entity-type'] for x in raw['entities']]
 
-        ner_obj = NamedEntities(spans=ner_spans, tags=ner_tags)
+        ner_obj = NamedEntities(spans=ner_spans, tags=ner_tags, spans_head=ner_spans_head)
         ner_obj.add_words(doc)
         ner_obj.add_pos(pos)
 
+        # Compare span heads
+        for i, head in enumerate(ner_obj.words_head):
+            raw_head = ner_words_head[i]
+            if not (''.join(head) == raw_head or ' '.join(head) == raw_head):
+                raise AssertionError(f'There was a problem mapping spans as the {i}th span head is originally:\n'
+                                     f'\t`{raw_head}` \n but we inferred it to be \n\t`{head}`')
         return ner_obj
 
     def get_rel_obj(self, raw: dict, doc: List[List[str]], pos: List[List[str]]) -> TypedRelations:
@@ -85,19 +106,38 @@ class ACE2005Parser(GenericParser):
         spans = []
         tags = []
 
+        words = []
+        sentlen_offsets = [to_toks(doc[:i]).__len__() for i, sent in enumerate(doc)]
+
         for rel in raw['relations']:
             tags.append(rel['relation-type'])
             spans_this_rel = []  # list of two span objs e.g. [ [ 2, 3], [10, 13] ]
+            span_offset = sentlen_offsets[int(rel['sent_id']) - 1]
+            words_this_rel = []
             for arg in rel['arguments']:
-                spans_this_rel.append(arg['position'])
+                spans_this_rel.append([arg['position'][0] + span_offset,
+                                       arg['position'][1] + span_offset + 1])
+                words_this_rel.append(arg['text'])
 
             spans.append(spans_this_rel)
+            words.append(words_this_rel)
 
         rel_obj = TypedRelations(spans=spans, tags=tags)
         rel_obj.add_words(doc)
         rel_obj.add_pos(pos)
 
+        # Verify the texts time
+        for i, word_pairs in enumerate(rel_obj.words):
+            if not (' '.join(word_pairs[0]) == words[i][0] or ''.join(word_pairs[0]) == words[i][0]) and \
+                    (' '.join(word_pairs[1]) == words[i][1] or ''.join(word_pairs[1]) == words[i][1]):
+                raise AssertionError(f"There is a problem with span {i}.\n"
+                                     f"Expected text:\n"
+                                     f"\t`{words[i][0]}` || `{words[i][1]}`"
+                                     f"What we got:\n"
+                                     f"\t`{word_pairs[0]}`, `{word_pairs[1]}`")
+
         return rel_obj
+
 
 if __name__ == '__main__':
     parser = ACE2005Parser(LOC.ace, ['train'])

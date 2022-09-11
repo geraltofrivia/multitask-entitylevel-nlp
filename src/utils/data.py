@@ -214,7 +214,7 @@ class BinaryLinks:
             words_head.append(pair_words_head)
 
         for pair in self.spans:
-            pair_words = [], []
+            pair_words = []
             for span in pair:
                 pair_words.append(f_doc[span[0]: span[1]])
 
