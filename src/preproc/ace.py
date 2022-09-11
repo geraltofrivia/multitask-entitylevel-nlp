@@ -198,11 +198,11 @@ def create_label_dict():
 
 
 if __name__ == '__main__':
-    parser = ACE2005Parser(LOC.ace, ['train'])
+    parser = ACE2005Parser(LOC.ace2005, ['train'])
     parser.run()
-    parser = ACE2005Parser(LOC.ace, ['dev'])
+    parser = ACE2005Parser(LOC.ace2005, ['dev'])
     parser.run()
-    parser = ACE2005Parser(LOC.ace, ['test'])
+    parser = ACE2005Parser(LOC.ace2005, ['test'])
     parser.run()
 
     create_label_dict()
