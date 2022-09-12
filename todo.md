@@ -96,15 +96,17 @@ Other TODOs
 
 - [ ] figure out whats going wrong with NER eval (acc stuff)
 
--------
+-----
 
 # Leftovers
 
 - [ ] Implement Shared Pruner (integrated in there)
 - [ ] Recheck if tokenizer is working as intended (do we need special chars or not)
-- [!] figure out whats going wrong with NER eval (acc stuff)
-
-## 29-08-2022
-
-- [ ] Should we make a new repo for preproc data management?
 - [ ] Make setup.sh conditioned and verbose
+- [ ] Should we make a new repo for preproc data management?
+
+## 12-09-2022
+
+- [ ] Get ACE baselines
+- [ ] Get ACE Sweep Started
+- [ ] Find a place to note down important experiment results

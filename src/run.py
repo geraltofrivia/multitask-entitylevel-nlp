@@ -329,7 +329,7 @@ def run(
     if (not tasks_2 and dataset_2) or (tasks_2 and not dataset_2):
         raise BadParameters(f"Either one of dataset or task is not provided for the second domain")
     if dataset not in KNOWN_SPLITS:
-        raise BadParameters(f"Unknown dataset: {dataset}.")
+        raise BadParameters(f"Unknown dataset: {dataset}")
     if dataset_2 not in list(KNOWN_SPLITS.keys()) + [None]:
         raise BadParameters(f"Unknown dataset: {dataset_2}")
 
