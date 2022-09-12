@@ -100,7 +100,7 @@ class ACE2005Parser(GenericParser):
             ner_spans_head.append(ner_span_head)
             ner_words_head.append(ner_word_head)
 
-        ner_tags = [x['entity-type'] for x in raw['entities']]
+        ner_tags = [[x['entity-type']] for x in raw['entities']]
 
         ner_obj = NamedEntities(spans=ner_spans, tags=ner_tags, spans_head=ner_spans_head)
         ner_obj.add_words(doc)
