@@ -702,7 +702,14 @@ class MangoesMTL(nn.Module):
             if self.is_unweighted(task='ner', domain=domain):
                 ner_loss = self.ner_loss[domain](ner_logits, ner_labels)
             else:
-                ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner["weights"])
+                try:
+                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner["weights"])
+                except IndexError as e:
+                    print(ner_logits)
+                    print(ner_logits.shape)
+                    print(ner_labels)
+                    print(ner_labels.max())
+                    raise e
 
             if torch.isnan(ner_loss):
                 raise NANsFound(

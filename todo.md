@@ -110,3 +110,7 @@ Other TODOs
 - [ ] Get ACE baselines
 - [ ] Get ACE Sweep Started
 - [ ] Find a place to note down important experiment results
+
+## 13-09-2022
+
+So I'm still short of the baseline.

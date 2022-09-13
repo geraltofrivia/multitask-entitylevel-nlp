@@ -86,21 +86,32 @@ class ACE2005Parser(GenericParser):
         sentlen_offsets = [to_toks(doc[:i]).__len__() for i, sent in enumerate(doc)]
         ner_spans, ner_spans_head = [], []
         ner_words_head = []  # We note down what the raw says and compare to what we infer to assure we infer correctly
+        ner_tags = []
 
-        for ent in raw['entities']:
+        for i, ent in enumerate(raw['entities']):
             # Find sentence offsets and add the positions after that
             sentlen_offset = sentlen_offsets[int(ent['sent_id']) - 1]
-            ner_span = [sentlen_offset + ent['position'][0],
-                        sentlen_offset + ent['position'][1] + 1]
+            ner_span = (sentlen_offset + ent['position'][0],
+                        sentlen_offset + ent['position'][1] + 1)
             ner_span_head = [sentlen_offset + ent['head']['position'][0],
                              sentlen_offset + ent['head']['position'][1] + 1]
             ner_word_head = ent['head']['text']
 
+            # If the span already exists, append the current tag to it.
+            if ner_span in ner_spans:
+                span_index = ner_spans.index(ner_span)
+                ner_tags[span_index].append(ent['entity-type'])
+
+                # PS: yeah we do not append anything to spans, words, spans_head or words_head
+                # because all these properties are technically based on spans. not tags.
+                continue
+
             ner_spans.append(ner_span)
+            ner_tags.append([ent['entity-type']])
             ner_spans_head.append(ner_span_head)
             ner_words_head.append(ner_word_head)
 
-        ner_tags = [[x['entity-type']] for x in raw['entities']]
+        ner_spans = [list(x) for x in ner_spans]
 
         ner_obj = NamedEntities(spans=ner_spans, tags=ner_tags, spans_head=ner_spans_head)
         ner_obj.add_words(doc)

@@ -437,3 +437,36 @@ def deterministic_hash(obj: Any) -> str:
         obj = type(obj)(**{k: obj[k] for k in sorted(obj.keys())})
 
     return hashlib.md5(json.dumps(obj).encode()).hexdigest()
+
+
+def get_duplicates_format_listoflist(spans: List[List[int]]) -> (dict, list):
+    """ Return a dict of {(spstart, spend): n,..} and duplicate indices (every occurance of a span after the first)"""
+    return _get_duplicates_([tuple(span) for span in spans])
+
+
+def get_duplicates_format_startend(start: Union[list, torch.tensor], end: Union[list, torch.tensor]) -> (dict, list):
+    """ Return a dict of {(spstart, spend): n,..} and duplicate indices (every occurance of a span after the first)"""
+
+    if isinstance(start, torch.Tensor):
+        start = start.tolist()
+    if isinstance(end, torch.Tensor):
+        end = end.tolist()
+
+    if not len(start) == len(end):
+        raise AssertionError(f"Span lengths are not equal. Start: {len(start)}. End: {len(end)}.")
+
+    return _get_duplicates_([tup for tup in zip(start, end)])
+
+
+def _get_duplicates_(spantuples: List[tuple]) -> (dict, list):
+    counter = {}
+    dupls = []
+    for i, tup in enumerate(spantuples):
+        counter[tup] = counter.get(tup, 0) + 1
+
+    duplicates = {k: v for k, v in counter.items() if v > 1}
+    indices = []
+    for i, tup in enumerate(duplicates.keys()):
+        ind_occ = [i for i in range(len(spantuples)) if spantuples[i] == tup]
+        indices.append(ind_occ)
+    return duplicates, indices

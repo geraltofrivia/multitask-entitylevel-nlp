@@ -9,7 +9,7 @@ from typing import List, Optional, Tuple, Union
 
 from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
 from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
-from utils.misc import argsort, load_speaker_tag_dict
+from utils.misc import argsort, load_speaker_tag_dict, get_duplicates_format_listoflist as get_duplicates
 from utils.nlp import to_toks
 
 
@@ -318,6 +318,20 @@ class NamedEntities:
     spans_head: List[List[int]] = field(default_factory=list)
     words_head: List[List[str]] = field(default_factory=list)
     pos_head: List[List[str]] = field(default_factory=list)
+
+    def __post_init__(self):
+        """ Check for duplicates """
+        duplicates_dict, duplicates_indices = get_duplicates(self.spans)
+        if duplicates_indices:
+            duplicates_tags = []
+            for duplicate_pair_index in duplicates_indices:
+                tags = [self.tags[i] for i in duplicate_pair_index]
+                duplicates_tags.append(tags)
+
+            raise AssertionError(f"There are duplicate spans - \n\t{duplicates_dict}: {duplicates_tags}\n "
+                                 f"If needed, you should collapse multiple spans together by changing the tags.\n "
+                                 f"E.g. instead of: \n\tspans = [(1, 1), (1, 1)]\n\ttags=[['place'], ['time']]\n"
+                                 f"write: \n\tspans = [(1,1)]\n\ttags=[['place', 'time']]")
 
     def __len__(self):
         return len(self.spans)

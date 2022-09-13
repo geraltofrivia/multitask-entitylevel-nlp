@@ -6,8 +6,6 @@ from mytorch.utils.goodies import FancyDict
 
 from utils.exceptions import UnknownDataSplitException
 
-# No local imports (is a good idea)
-
 # Random seeds
 _SEED_ = 42
 NPRSEED: int = _SEED_
@@ -84,7 +82,7 @@ KNOWN_SPLITS = FancyDict({
     })
 })
 KNOWN_HAS_SPEAKERS = [key for key in KNOWN_SPLITS.keys() if key.startswith('codicrac')]
-NER_IS_MULTILABEL = ['dwie']  # Refer to this to know which datasets have mutlilabel NER targets
+NER_IS_MULTILABEL = ['dwie', 'ace2005']  # Refer to this to know which datasets have mutlilabel NER targets
 
 
 def is_split_train(dataset: str, split: str):
