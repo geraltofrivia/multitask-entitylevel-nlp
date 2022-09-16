@@ -19,7 +19,7 @@ except ImportError:
 from utils.data import Tasks
 from loops import training_loop
 from preproc.encode import PreEncoder
-from models.multitask import MangoesMTL
+from models.multitask import MTLModel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, NER_IS_MULTILABEL
@@ -37,7 +37,7 @@ torch.backends.cudnn.deterministic = True
 
 
 def make_optimizer(
-        model: MangoesMTL,
+        model: MTLModel,
         base_keyword: str,
         task_weight_decay: Optional[float],
         task_learning_rate: Optional[float],
@@ -480,7 +480,7 @@ def train(ctx):
     dev_ds = ctx.obj['dev_ds']
 
     # Make the model
-    model = MangoesMTL(dir_encoder, config=config, **config.to_dict()).to(device)
+    model = MTLModel(dir_encoder, config=config, **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     n_params = sum([param.nelement() for param in model.parameters()])
     print("Model params: ", n_params)
