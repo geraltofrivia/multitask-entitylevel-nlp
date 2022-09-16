@@ -20,4 +20,4 @@ parameters:
     min: 3
     max: 8
 program: src/run.py -d dwie -t coref 1.0 False -t pruner 1.0 True -enc SpanBERT/spanbert-base-cased -tok bert-base-cased -e 30 -dv cuda --train-encoder -d2 ontonotes -t2 pos 1.0 False
-# wandb sweep --update magnet/entitymention-mtl/oaaqv8gk sweeps/crpr-dw-pos-on.yaml
+# wandb sweep --update magnet/entitymention-mtl/oaaqv8gk recipes/sweep-crpr-dw-pos-on.yaml

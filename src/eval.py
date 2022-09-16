@@ -616,7 +616,7 @@ class CorefCeafe(CustomMacroMetric):
             for j in range(len(clusters)):
                 scores[i, j] = self._coref_phi4_(c1=gold_clusters[i], c2=clusters[j])
         matching = linear_assignment(-scores)
-        similarity = sum(scores[matching[0], matching[1]])
+        similarity = sum(scores[matching[:, 0], matching[:, 1]])
 
         # similarity = sum(scores[matching[:, 0], matching[:, 1]])
         return similarity, len(clusters), similarity, len(gold_clusters)

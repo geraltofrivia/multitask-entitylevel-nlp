@@ -103,14 +103,23 @@ Other TODOs
 - [ ] Implement Shared Pruner (integrated in there)
 - [ ] Recheck if tokenizer is working as intended (do we need special chars or not)
 - [ ] Make setup.sh conditioned and verbose
-- [ ] Should we make a new repo for preproc data management?
+- [x] Should we make a new repo for preproc data management?: NO!
 
-## 12-09-2022
+# General
 
-- [ ] Get ACE baselines
+- [ ] Find a way to easily run sweeps
+
+# ACE
+
+- [ ] Figure out NER metrics and clamp them down tight.
 - [ ] Get ACE Sweep Started
 - [ ] Find a place to note down important experiment results
 
-## 13-09-2022
+# Ontonotes
 
-So I'm still short of the baseline.
+So I'm still short of the baseline. Time to fork out and try to get baseline Ontonotes working well.
+First step: get the current best result out. Sweep.
+
+- [ ] Run a bert-base-uncased sweep
+- [ ] Mimic parameter init (and see if performance rises or falls)
+- [ ] Okay, its time to write a OAR management class/thing
