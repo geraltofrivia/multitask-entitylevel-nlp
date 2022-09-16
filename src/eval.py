@@ -9,7 +9,7 @@ from typing import Dict, Callable, List, Union, Optional, Type
 
 import numpy as np
 import torch
-from scipy.optimize import linear_sum_assignment as linear_assignment
+from sklearn.utils.linear_assignment_ import linear_assignment
 from torchmetrics import Precision, Recall, F1Score, AUROC
 from tqdm.auto import tqdm
 

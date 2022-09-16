@@ -16,3 +16,4 @@ wandb
 sklearn
 torchmetrics
 my-torch==0.0.9a
+scikit-learn==0.22.1
