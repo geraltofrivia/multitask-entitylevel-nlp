@@ -66,6 +66,7 @@ class ACE2005Parser(GenericParser):
         ner = self.get_ner_obj(raw, doc_sents, doc_pos)
         rel = self.get_rel_obj(raw, doc_sents, doc_pos)
         bridging = BridgingAnaphors.new()
+        genre = doc_name.replace('_', '&&&').replace('.', '&&&').split('&&&')[0]  # there are 26 such things in train
 
         document = Document(
             document=doc_sents,
@@ -75,7 +76,8 @@ class ACE2005Parser(GenericParser):
             coref=coref,
             ner=ner,
             rel=rel,
-            bridging=bridging
+            bridging=bridging,
+            genre=genre
         )
 
         return document
