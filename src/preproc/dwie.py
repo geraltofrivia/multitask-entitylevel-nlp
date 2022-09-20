@@ -477,6 +477,7 @@ class DWIEParser(GenericParser):
             coref=coref,
             ner=ner,
             rel=rel,
+            genre='dwie',
             bridging=bridging
         )
 

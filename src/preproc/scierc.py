@@ -114,7 +114,8 @@ class SciERCParser(GenericParser):
                 coref=coref,
                 ner=ner,
                 rel=rel,
-                bridging=BridgingAnaphors.new()
+                bridging=BridgingAnaphors.new(),
+                genre='scierc'
             )
 
             outputs.append(document)
