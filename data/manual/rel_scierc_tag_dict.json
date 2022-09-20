@@ -1,9 +1,0 @@
-{
-  "FEATURE-OF": 0,
-  "HYPONYM-OF": 1,
-  "COMPARE": 2,
-  "EVALUATE-FOR": 3,
-  "CONJUNCTION": 4,
-  "PART-OF": 5,
-  "USED-FOR": 6
-}
