@@ -106,6 +106,9 @@ class MultiTaskDataIter(Dataset):
                 # The tag dictionary does not exist. Report and quit.
                 raise LabelDictNotFound(f"No label dict found for pos task for {self._src_}")
 
+        with (LOC.manual / f"genre_{self._src_}_tag_dict.json").open("r") as f:
+            self.genre_dict = json.load(f)
+
         (self.data, flag_successfully_pulled_from_disk) = self.load_from_disk(rebuild_cache)
         self.task_weights = {}
 
@@ -633,7 +636,7 @@ class MultiTaskDataIter(Dataset):
         token_type_ids = tokenized.token_type_ids.reshape((-1, n_mlen))  # n_seq, m_len
         attention_mask = tokenized.attention_mask.reshape((-1, n_mlen))
         speaker_ids = speaker_ids.reshape((-1, n_mlen)) if speaker_ids is not None else speaker_ids
-
+        genre = self.genre_dict[instance.genre]
         """
             Span Iteration: find all valid contiguous sequences of inputs. 
         
@@ -727,6 +730,7 @@ class MultiTaskDataIter(Dataset):
             "word_map": wordid_for_subword,
             "speaker_ids": speaker_ids,
             "sentence_map": sentid_for_subword,
+            "genre": genre,
             "n_words": n_words,
             "n_subwords": n_subwords,
             "candidate_starts": candidate_starts,
