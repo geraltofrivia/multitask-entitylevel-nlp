@@ -62,12 +62,24 @@ def weighted_addition_losses(losses, tasks, scales):
     return torch.sum(weighted)
 
 
-def load_speaker_tag_dict(parentdir: Path, src: str) -> Optional[Dict[str, str]]:
+def load_speaker_tag_dict(parentdir: Path, src: str) -> Optional[Dict[str, int]]:
     """
         If a dict containing self._src_ is in parentdir for speakers, pull it else return None
         PS: Parentdir should be config.LOCATIONS.manual
     """
     loc = parentdir / f'speaker_{src}_tag_dict.json'
+    if not loc.exists():
+        return None
+    with loc.open('r') as f:
+        return json.load(f)
+
+
+def load_genre_tag_dict(parentdir: Path, src: str) -> Optional[Dict[str, int]]:
+    """
+        If a dict containing self._src_ is in parentdir for genres, pull it else return None
+        PS: Parentdir should be config.LOCATIONS.manual
+    """
+    loc = parentdir / f'genre_{src}_tag_dict.json'
     if not loc.exists():
         return None
     with loc.open('r') as f:

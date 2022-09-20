@@ -392,15 +392,18 @@ def run(
     config.task_2 = tasks_2
 
     """
-        Speaker ID logic
+        Speaker ID logic | Genre ID logic
         If ANY of the domains has speaker IDs, and we're using them, we should enable speakers for all datasets.
         This is because there is going to be a shape problem with the slow antecedent scorer.
         So for example, you gave ` -d codicrac-light -d2 ontonotes` (72 speakers and no speaker respectively)
         we will have 73 speakers where first 72 are for Light, and the last one is for Ontonotes (always constant).
+        
+        The genres also work in the same manner. We concat the dict, and offset values for subsequent domains
     """
     # This is to be given to a MultiDomainDataCombiner IF we are working in a multidomain setting.
     # This is for task 1 and 2 respectively. If you add more datasets, change!
     speaker_offsets = [0, tasks.n_speakers]
+    genre_offsets = [0, tasks.n_genres]
 
     """
         Prep datasets.
@@ -420,9 +423,9 @@ def run(
 
         # Combine the two single domain dataset to make a multidomain dataiter
         train_ds = partial(MultiDomainDataCombiner, srcs=[train_ds, train_ds_2], sampling_ratio=sampling_ratio,
-                           speaker_offsets=speaker_offsets)
+                           speaker_offsets=speaker_offsets, genre_offsets=genre_offsets)
         dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio,
-                         speaker_offsets=speaker_offsets)
+                         speaker_offsets=speaker_offsets, genre_offsets=genre_offsets)
 
     """
         Prepare Context Object
@@ -440,6 +443,7 @@ def run(
     ctx.obj['tokenizer'] = tokenizer
     ctx.obj['_is_multidomain'] = _is_multidomain
     ctx.obj['speaker_offsets'] = speaker_offsets
+    ctx.obj['genre_offsets'] = genre_offsets
     ctx.obj['save'] = save
     ctx.obj['resume_dir'] = resume_dir
     ctx.obj['use_wandb'] = use_wandb

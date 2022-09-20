@@ -9,7 +9,8 @@ from typing import List, Optional, Tuple, Union
 
 from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
 from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
-from utils.misc import argsort, load_speaker_tag_dict, get_duplicates_format_listoflist as get_duplicates
+from utils.misc import argsort, load_speaker_tag_dict, get_duplicates_format_listoflist as get_duplicates, \
+    load_genre_tag_dict
 from utils.nlp import to_toks
 
 
@@ -656,6 +657,8 @@ class Tasks:
         if self.dataset in KNOWN_HAS_SPEAKERS:
             self.n_speakers = self._get_n_speakers_(dataset=self.dataset)
 
+        self.n_genres = self._get_n_genres_(dataset=self.dataset)
+
     def sort(self):
         """ Rearranges all artefacts to sort them in the right order """
 
@@ -702,6 +705,13 @@ class Tasks:
         if speaker_tag_dict is None:
             raise LabelDictNotFound(f"No label dict of speakers found for {dataset}")
         return len(speaker_tag_dict)
+
+    @staticmethod
+    def _get_n_genres_(dataset: str) -> int:
+        genre_tag_dict = load_genre_tag_dict(LOC.manual, dataset)
+        if genre_tag_dict is None:
+            raise LabelDictNotFound(f"No label dict of genres found for {dataset}")
+        return len(genre_tag_dict)
 
     @staticmethod
     def _parse_loss_scales_(names: List[str], scales: List[float]) -> List[float]:

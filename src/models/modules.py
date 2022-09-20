@@ -768,6 +768,7 @@ class CorefDecoderMangoes(torch.nn.Module):
             num_segments: int,
             len_segment: int,
             domain: str,
+            genre: int,
             device: Union[str, torch.device],
     ):
 

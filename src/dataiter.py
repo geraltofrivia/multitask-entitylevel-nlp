@@ -917,6 +917,7 @@ class MultiDomainDataCombiner(Dataset):
             srcs: List[Callable],
             sampling_ratio: Optional[Iterable[float]] = None,
             speaker_offsets: Optional[List[int]] = None,
+            genre_offsets: Optional[List[int]] = None,
             deterministic: bool = False
     ):
         """
@@ -948,6 +949,7 @@ class MultiDomainDataCombiner(Dataset):
         self.dataiters: List[MultiTaskDataIter] = [iter_partial() for iter_partial in srcs]
         self.tasks: List[Tasks] = [dataiter.tasks for dataiter in self.dataiters]
         self._speaker_offsets = speaker_offsets if speaker_offsets is not None else [0] * len(self.tasks)
+        self._genre_offsets = genre_offsets if genre_offsets is not None else [0] * len(self.tasks)
         self._deterministic = deterministic
         """
             Set dataset sampling indices.
@@ -1020,10 +1022,13 @@ class MultiDomainDataCombiner(Dataset):
 
             """
                 Now, for some custom logic
+                Increment speaker ID based on offsets. And the same for genres.
             """
             # Apply speaker offset if speaker IDs are not none
             if instance['speaker_ids'] is not None:
                 instance['speaker_ids'] += self._speaker_offsets[dataiter_index]
+
+            instance['genre'] += self._genre_offsets[dataiter_index]
 
             # Update pointer registry
             self.source_pointers[dataiter_index] = pointer_index
