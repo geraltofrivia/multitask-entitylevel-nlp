@@ -385,7 +385,7 @@ class CorefDecoderHOI(torch.nn.Module):
             coref_num_genres: int,
             bias_in_last_layers: bool,
             coref_use_metadata: bool,
-            coref_num_speakers: int = 2
+            coref_num_speakers: int = 2,
     ):
         """
         :param coref_depth: int indicating the number of higher order iterations in loop. 1 is not really higher order.
@@ -450,6 +450,104 @@ class CorefDecoderHOI(torch.nn.Module):
         self.update_steps = 0  # Internal use for debug
         self.debug = True
 
+    @staticmethod
+    def _merge_span_to_cluster(cluster_emb, cluster_sizes, cluster_to_merge_id, span_emb, reduce):
+        cluster_size = cluster_sizes[cluster_to_merge_id].item()
+        if reduce == 'mean':
+            cluster_emb[cluster_to_merge_id] = (cluster_emb[cluster_to_merge_id] * cluster_size + span_emb) / (
+                    cluster_size + 1)
+        elif reduce == 'max':
+            cluster_emb[cluster_to_merge_id], _ = torch.max(torch.stack([cluster_emb[cluster_to_merge_id], span_emb]),
+                                                            dim=0)
+        else:
+            raise ValueError('reduce value is invalid: %s' % reduce)
+        cluster_sizes[cluster_to_merge_id] += 1
+
+    def cluster_merging(self, top_span_emb, top_antecedent_idx, top_antecedent_scores, emb_cluster_size,
+                        cluster_score_ffnn,
+                        cluster_transform, dropout, device, reduce='mean', easy_cluster_first=False):
+        num_top_spans, max_top_antecedents = top_antecedent_idx.shape[0], top_antecedent_idx.shape[1]
+        span_emb_size = top_span_emb.shape[-1]
+        max_num_clusters = num_top_spans
+
+        span_to_cluster_id = torch.zeros(num_top_spans, dtype=torch.long, device=device)  # id 0 as dummy cluster
+        cluster_emb = torch.zeros(max_num_clusters, span_emb_size, dtype=torch.float,
+                                  device=device)  # [max num clusters, emb size]
+        num_clusters = 1  # dummy cluster
+        cluster_sizes = torch.ones(max_num_clusters, dtype=torch.long, device=device)
+
+        merge_order = torch.arange(0, num_top_spans)
+        if easy_cluster_first:
+            max_antecedent_scores, _ = torch.max(top_antecedent_scores, dim=1)
+            merge_order = torch.argsort(max_antecedent_scores, descending=True)
+        cluster_merging_scores = [None] * num_top_spans
+
+        for i in merge_order.tolist():
+            # Get cluster scores
+            antecedent_cluster_idx = span_to_cluster_id[top_antecedent_idx[i]]
+            antecedent_cluster_emb = cluster_emb[antecedent_cluster_idx]
+            # antecedent_cluster_emb = dropout(cluster_transform(antecedent_cluster_emb))
+
+            antecedent_cluster_size = cluster_sizes[antecedent_cluster_idx]
+            antecedent_cluster_size = Utils.bucket_distance(antecedent_cluster_size)
+            cluster_size_emb = dropout(emb_cluster_size(antecedent_cluster_size))
+
+            span_emb = top_span_emb[i].unsqueeze(0).repeat(max_top_antecedents, 1)
+            similarity_emb = span_emb * antecedent_cluster_emb
+            pair_emb = torch.cat([span_emb, antecedent_cluster_emb, similarity_emb, cluster_size_emb],
+                                 dim=1)  # [max top antecedents, pair emb size]
+            cluster_scores = torch.squeeze(cluster_score_ffnn(pair_emb), 1)
+            cluster_scores_mask = (antecedent_cluster_idx > 0).to(torch.float)
+            cluster_scores *= cluster_scores_mask
+            cluster_merging_scores[i] = cluster_scores
+
+            # Get predicted antecedent
+            antecedent_scores = top_antecedent_scores[i] + cluster_scores
+            max_score, max_score_idx = torch.max(antecedent_scores, dim=0)
+            if max_score < 0:
+                continue  # Dummy antecedent
+            max_antecedent_idx = top_antecedent_idx[i, max_score_idx]
+
+            if not easy_cluster_first:  # Always add span to antecedent's cluster
+                # Create antecedent cluster if needed
+                antecedent_cluster_id = span_to_cluster_id[max_antecedent_idx]
+                if antecedent_cluster_id == 0:
+                    antecedent_cluster_id = num_clusters
+                    span_to_cluster_id[max_antecedent_idx] = antecedent_cluster_id
+                    cluster_emb[antecedent_cluster_id] = top_span_emb[max_antecedent_idx]
+                    num_clusters += 1
+                # Add span to cluster
+                span_to_cluster_id[i] = antecedent_cluster_id
+                self._merge_span_to_cluster(cluster_emb, cluster_sizes, antecedent_cluster_id, top_span_emb[i],
+                                            reduce=reduce)
+            else:  # current span can be in cluster already
+                antecedent_cluster_id = span_to_cluster_id[max_antecedent_idx]
+                curr_span_cluster_id = span_to_cluster_id[i]
+                if antecedent_cluster_id > 0 and curr_span_cluster_id > 0:
+                    # Merge two clusters
+                    span_to_cluster_id[max_antecedent_idx] = curr_span_cluster_id
+                    self._merge_clusters(cluster_emb, cluster_sizes, antecedent_cluster_id, curr_span_cluster_id,
+                                         reduce=reduce)
+                elif curr_span_cluster_id > 0:
+                    # Merge antecedent to span's cluster
+                    span_to_cluster_id[max_antecedent_idx] = curr_span_cluster_id
+                    self._merge_span_to_cluster(cluster_emb, cluster_sizes, curr_span_cluster_id,
+                                                top_span_emb[max_antecedent_idx], reduce=reduce)
+                else:
+                    # Create antecedent cluster if needed
+                    if antecedent_cluster_id == 0:
+                        antecedent_cluster_id = num_clusters
+                        span_to_cluster_id[max_antecedent_idx] = antecedent_cluster_id
+                        cluster_emb[antecedent_cluster_id] = top_span_emb[max_antecedent_idx]
+                        num_clusters += 1
+                    # Add span to cluster
+                    span_to_cluster_id[i] = antecedent_cluster_id
+                    self._merge_span_to_cluster(cluster_emb, cluster_sizes, antecedent_cluster_id, top_span_emb[i],
+                                                reduce=reduce)
+
+        cluster_merging_scores = torch.stack(cluster_merging_scores, dim=0)
+        return cluster_merging_scores
+
     def forward(
             self,
 
@@ -469,9 +567,12 @@ class CorefDecoderHOI(torch.nn.Module):
             num_segments: int,
             len_segment: int,
             domain: str,
+            genre: int,
             device: Union[str, torch.device],
     ):
         """ We pick up after span pruning done by SpanPruner forward """
+
+        # TODO: figure out if we need attention mask to still be broken into segments or linearized?
 
         # Used to limit how many antecedents we consider, per pruned span
         num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
@@ -506,47 +607,49 @@ class CorefDecoderHOI(torch.nn.Module):
                 same_speaker = torch.unsqueeze(pruned_span_speaker_ids, 1) == top_antecedent_speaker_id
                 same_speaker_emb = self.emb_same_speaker(same_speaker.to(torch.long))
                 genre_emb = self.emb_genre(genre)
-                genre_emb = torch.unsqueeze(torch.unsqueeze(genre_emb, 0), 0).repeat(num_top_spans, max_top_antecedents,
-                                                                                     1)
-            if conf['use_segment_distance']:
-                num_segs, seg_len = input_ids.shape[0], input_ids.shape[1]
+                genre_emb = torch.unsqueeze(torch.unsqueeze(genre_emb, 0), 0).repeat(num_top_mentions,
+                                                                                     num_top_antecedents, 1)
+            if self._use_metadata:
+                num_segs, seg_len = attention_mask.shape[0], attention_mask.shape[1]
                 token_seg_ids = torch.arange(0, num_segs, device=device).unsqueeze(1).repeat(1, seg_len)
-                token_seg_ids = token_seg_ids[input_mask]
-                top_span_seg_ids = token_seg_ids[top_span_starts]
-                top_antecedent_seg_ids = token_seg_ids[top_span_starts[top_antecedent_idx]]
+                token_seg_ids = token_seg_ids[attention_mask]
+                top_span_seg_ids = token_seg_ids[pruned_span_starts]
+                top_antecedent_seg_ids = token_seg_ids[pruned_span_starts[top_antecedent_idx]]
                 top_antecedent_seg_distance = torch.unsqueeze(top_span_seg_ids, 1) - top_antecedent_seg_ids
                 top_antecedent_seg_distance = torch.clamp(top_antecedent_seg_distance, 0,
                                                           self.config['max_training_sentences'] - 1)
                 seg_distance_emb = self.emb_segment_distance(top_antecedent_seg_distance)
-            if conf['use_features']:  # Antecedent distance
-                top_antecedent_distance = util.bucket_distance(top_antecedent_offsets)
-                top_antecedent_distance_emb = self.emb_top_antecedent_distance(top_antecedent_distance)
+            # if conf['use_features']:  # Antecedent distance
+            top_antecedent_distance = Utils.bucket_distance(top_antecedent_offsets)
+            top_antecedent_distance_emb = self.emb_top_antecedent_distance(top_antecedent_distance)
 
-            for depth in range(conf['coref_depth']):
-                top_antecedent_emb = top_span_emb[top_antecedent_idx]  # [num top spans, max top antecedents, emb size]
+            for depth in range(self._depth):
+                top_antecedent_emb = pruned_span_emb[
+                    top_antecedent_idx]  # [num top spans, max top antecedents, emb size]
                 feature_list = []
-                if conf['use_metadata']:  # speaker, genre
+                if self._use_metadata:  # speaker, genre
                     feature_list.append(same_speaker_emb)
                     feature_list.append(genre_emb)
-                if conf['use_segment_distance']:
                     feature_list.append(seg_distance_emb)
-                if conf['use_features']:  # Antecedent distance
-                    feature_list.append(top_antecedent_distance_emb)
+                # if conf['use_features']:  # Antecedent distance
+                feature_list.append(top_antecedent_distance_emb)
+
                 feature_emb = torch.cat(feature_list, dim=2)
                 feature_emb = self.dropout(feature_emb)
-                target_emb = torch.unsqueeze(top_span_emb, 1).repeat(1, max_top_antecedents, 1)
+                target_emb = torch.unsqueeze(pruned_span_emb, 1).repeat(1, num_top_antecedents, 1)
                 similarity_emb = target_emb * top_antecedent_emb
                 pair_emb = torch.cat([target_emb, top_antecedent_emb, similarity_emb, feature_emb], 2)
                 top_pairwise_slow_scores = torch.squeeze(self.coref_score_ffnn(pair_emb), 2)
                 top_pairwise_scores = top_pairwise_slow_scores + top_pairwise_fast_scores
-                if conf['higher_order'] == 'cluster_merging':
-                    cluster_merging_scores = ho.cluster_merging(top_span_emb, top_antecedent_idx, top_pairwise_scores,
-                                                                self.emb_cluster_size, self.cluster_score_ffnn, None,
-                                                                self.dropout,
-                                                                device=device, reduce=conf['cluster_reduce'],
-                                                                easy_cluster_first=conf['easy_cluster_first'])
+                if self._higher_order == 'cluster_merging':
+                    cluster_merging_scores = self.cluster_merging(pruned_span_emb, top_antecedent_idx,
+                                                                  top_pairwise_scores,
+                                                                  self.emb_cluster_size, self.cluster_score_ffnn, None,
+                                                                  self.dropout,
+                                                                  device=device, reduce=conf['cluster_reduce'],
+                                                                  easy_cluster_first=conf['easy_cluster_first'])
                     break
-                elif depth != conf['coref_depth'] - 1:
+                elif depth != self._depth - 1:
                     if conf['higher_order'] == 'attended_antecedent':
                         refined_span_emb = ho.attended_antecedent(top_span_emb, top_antecedent_emb, top_pairwise_scores,
                                                                   device)

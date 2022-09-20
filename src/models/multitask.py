@@ -71,6 +71,7 @@ class MTLModel(nn.Module):
             bias_in_last_layers: bool,
             skip_instance_after_nspan: int,
             coref_num_speakers: int,
+            coref_num_genres: int,
             use_speakers: bool,
             shared_compressor: bool,  # If True, it will reduce BERT embeddings from 768 to 256
 

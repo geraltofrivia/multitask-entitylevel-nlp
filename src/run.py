@@ -372,6 +372,7 @@ def run(
     config.pruner_top_span_ratio = pruner_top_span_ratio
     config.coref_higher_order = coref_higher_order
     config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
+    config.coref_num_genres = sum(task.n_genres for task in [tasks, tasks_2])
     config.vocab_size = tokenizer.get_vocab().__len__()
     config.freeze_encoder = not train_encoder
     if shared_compressor:
