@@ -403,8 +403,7 @@ class CorefDecoderHOI(torch.nn.Module):
         self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout)
         self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) \
             if self._depth > 1 else None
-        self.span_attn_ffnn = Utils.make_ffnn(_span_dim, 0, 1, self._dropout) \
- \
+
         self.update_steps = 0  # Internal use for debug
         self.debug = True
 
