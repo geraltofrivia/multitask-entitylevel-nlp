@@ -176,7 +176,7 @@ def get_dataiter_partials(
         tasks=tasks,
         split=KNOWN_SPLITS[tasks.dataset].train,
         tokenizer=tokenizer,
-        allow_speaker_ids=not config.ignore_speakers
+        use_speakers=config.use_speakers
     )
     dev_ds = partial(
         MultiTaskDataIter,
@@ -185,7 +185,7 @@ def get_dataiter_partials(
         tasks=tasks,
         split=KNOWN_SPLITS[tasks.dataset].dev,
         tokenizer=tokenizer,
-        allow_speaker_ids=not config.ignore_speakers
+        use_speakers=config.use_speakers
     )
 
     return train_ds, dev_ds
@@ -248,10 +248,10 @@ def get_dataiter_partials(
                    "on pruner_max_num_spans")
 @click.option('--coref-loss-mean', type=bool, default=DEFAULTS['coref_loss_mean'],
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
-@click.option('--coref-higher-order', '-cho', type=int, default=DEFAULTS['coref_higher_order'],
-              help='Number of times we run the higher order loop. ')
-@click.option('--ignore-speakers', type=bool, default=False,
-              help="If True, we ignore speaker ID info even if we have access to it")
+@click.option('--coref-higher-order', '-cho', type=str, default=DEFAULTS['coref_higher_order'],
+              help='Whether we do cluster merging or something else for higher order aggregation')
+@click.option('--use-speakers', type=bool, default=True,
+              help="If False, we ignore speaker ID info even if we have access to it")
 @click.option('--use-pretrained-model', default=None, type=str,
               help="If you want the model parameters (as much as can be loaded) from a particular place on disk,"
                    "maybe from another run for e.g., you want to specify the directory here.")
@@ -283,7 +283,7 @@ def run(
         wandb_comment: str,
         wandb_name: str,
         filter_candidates_pos: bool,
-        ignore_speakers: bool,
+        use_speakers: bool,
         shared_compressor: bool,
         save: bool,
         resume_dir: int,
@@ -338,7 +338,7 @@ def run(
     tasks = Tasks.parse(dataset, tuples=tasks)
     tasks_2 = Tasks.parse(dataset_2, tuples=tasks_2)
 
-    if ignore_speakers:
+    if not use_speakers:
         tasks.n_speakers = -1
         tasks_2.n_speakers = -1
 
@@ -355,7 +355,7 @@ def run(
 
     config.max_span_width = max_span_width
     config.max_training_segments = max_training_segments
-    config.ignore_speakers = ignore_speakers
+    config.use_speakers = use_speakers
     config.device = device
     config.trim = trim
     config.debug = debug
@@ -371,7 +371,7 @@ def run(
     config.curdir = str(Path('.').absolute())
     config.pruner_top_span_ratio = pruner_top_span_ratio
     config.coref_higher_order = coref_higher_order
-    config.coref_num_speakers = 0 if config.ignore_speakers else tasks.n_speakers + tasks_2.n_speakers
+    config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
     config.vocab_size = tokenizer.get_vocab().__len__()
     config.freeze_encoder = not train_encoder
     if shared_compressor:

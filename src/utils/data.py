@@ -582,7 +582,6 @@ class Tasks:
             tasks = Tasks.parse('ontonotes', ['pruner', 1.0, True], ['pos', 10.4, False])
 
         After which it would be able to tell you how many POS tags does this dataset (ontonotes here) contain.
-
     """
 
     names: List[str]
@@ -596,7 +595,7 @@ class Tasks:
     n_speakers: Optional[int] = field(default_factory=int)
 
     @classmethod
-    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], ignore_speakers: bool = False):
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], use_speakers: bool = False):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(

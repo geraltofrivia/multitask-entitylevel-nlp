@@ -115,14 +115,17 @@ DEFAULTS: dict = FancyDict({
     'ner_dropout': 0.3,
     'pos_dropout': 0.3,
     'encoder_dropout': 0.3,
-    'unary_hdim': 1500,
+    'unary_hdim': 1000,
     'dense_layers': 0,  # Dense layers are parameterized transformation right after encoder in mtl model.
 
     'pruner_top_span_ratio': 0.4,
     'pruner_max_num_spans': 250,  # Can never have more than this number of spans post pruning
     'pruner_use_width': True,  # if False, we ignore span width as a feature in span width embeddings and pruning spans.
-    'coref_higher_order': 2,  # num of times we run the higher order loop
+    'coref_higher_order': 'cluster_merging',
+    # attended_antecedent, max_antecedent, entity_equalization, span_clustering, cluster_merging
+    'coref_depth': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
+    'coref_use_metadata': True,  # If true, antecedent anaphor distance is taken into account
     'bias_in_last_layers': False,  # model's last lin layers will have bias set based on this flag
     'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)
     'max_document_segments': 10,  # If there are more than these segments i.e., 10*512 wp tokens,
@@ -142,7 +145,7 @@ DEFAULTS: dict = FancyDict({
         'adam_epsilon': 1e-6,
         'clip_gradients_norm': 1.0,
         'learning_rate': 0.0001,
-    }),
+    })
 })
 LOSS_SCALES = {
     'coref_ner_pruner': np.exp(LOSS_RATIO_CNP) / np.sum(np.exp(LOSS_RATIO_CNP)),

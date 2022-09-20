@@ -44,7 +44,7 @@ class MultiTaskDataIter(Dataset):
             tasks: Tasks,
             config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
-            allow_speaker_ids: bool = True,
+            use_speakers: bool = True,
             rebuild_cache: bool = False,
             shuffle: bool = False
     ):
@@ -58,7 +58,7 @@ class MultiTaskDataIter(Dataset):
         :param tokenizer: a pretrained BertTokenizer
         :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
         :param rebuild_cache: a flag which if True ignores pre-processed pickled files and reprocesses everything
-        :param allow_speaker_ids: a bool which if turned to False will hide the speaker ID from __getitem__.
+        :param use_speakers: a bool which if turned to False will hide the speaker ID from __getitem__.
             in an ideal world, this should prevent the model from doing anything with speakers.
         """
         # TODO: make it such that multiple values can be passed in 'split'
@@ -68,7 +68,7 @@ class MultiTaskDataIter(Dataset):
         self.tokenizer = tokenizer
         self.config = config
         self.uncased = config.uncased
-        self._flag_allow_speaker_ids = allow_speaker_ids
+        self.flag_use_speakers = use_speakers
         self._do_shuffle: bool = shuffle
 
         self.loss_scales = torch.tensor(tasks.loss_scales, dtype=torch.float)
@@ -247,7 +247,7 @@ class MultiTaskDataIter(Dataset):
         obj = self.data[item]
 
         # Append relevant things to it
-        if not self._flag_allow_speaker_ids:
+        if not self.flag_use_speakers:
             # And this automatically makes it so the model doesn't have to worry about it
             obj['speaker_ids'] = None
 

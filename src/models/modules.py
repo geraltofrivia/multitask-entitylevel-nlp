@@ -12,6 +12,7 @@
     But inference and pred with labels need to be outside.
 """
 import math
+from collections import Iterable
 from typing import Union, List
 
 import torch
@@ -30,10 +31,31 @@ from utils.exceptions import BadParameters
 class Utils(object):
 
     @staticmethod
-    def make_embeddings(num_embeddings: int, embedding_dim: int, std: float = 0.02) -> torch.nn.Module:
+    def make_embedding(num_embeddings: int, embedding_dim: int, std: float = 0.02) -> torch.nn.Module:
         emb = nn.Embedding(num_embeddings, embedding_dim)
         init.normal_(emb.weight, std=std)
         return emb
+
+    @staticmethod
+    def make_ffnn(input_dim: int, hidden_dim: Union[int, List[int]], output_dim: int, dropout: float):
+        if hidden_dim is None or hidden_dim == 0 or hidden_dim == [] or hidden_dim == [0]:
+            return Utils.make_linear(input_dim, output_dim)
+
+        if not isinstance(hidden_dim, Iterable):
+            hidden_dim = [hidden_dim]
+        ffnn = [Utils.make_linear(input_dim, hidden_dim[0]), nn.ReLU(), dropout]
+        for i in range(1, len(hidden_dim)):
+            ffnn += [Utils.make_linear(hidden_dim[i - 1], hidden_dim[i]), nn.ReLU(), dropout]
+        ffnn.append(Utils.make_linear(hidden_dim[-1], output_dim))
+        return nn.Sequential(*ffnn)
+
+    @staticmethod
+    def make_linear(in_features, out_features, bias=True, std=0.02):
+        linear = nn.Linear(in_features, out_features, bias)
+        init.normal_(linear.weight, std=std)
+        if bias:
+            init.zeros_(linear.bias)
+        return linear
 
     @staticmethod
     def extract_spans(candidate_starts, candidate_ends, candidate_mention_scores, num_top_mentions):
@@ -132,7 +154,7 @@ class SharedDense(torch.nn.Module):
             layers: List[torch.nn.Module] = []
 
             for indim, outdim in zip(_arr[:-1], _arr[1:]):
-                layer = [nn.Linear(indim, outdim)]
+                layer = [Utils.make_linear(indim, outdim)]
                 if batchnorm:
                     layer.append(nn.BatchNorm1d(outdim))
                 if activation:
@@ -195,8 +217,8 @@ class SpanPruner(torch.nn.Module):
                 nn.Dropout(self._dropout),
                 nn.Linear(unary_hdim, 1),
             )
-            self.emb_span_width = Utils.make_embeddings(max_span_width, coref_metadata_feature_size)
-            self.emb_span_width_prior = Utils.make_embeddings(max_span_width, coref_metadata_feature_size)
+            self.emb_span_width = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
+            self.emb_span_width_prior = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
 
     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
         """
@@ -307,14 +329,94 @@ class SpanPruner(torch.nn.Module):
         }
 
 
-class CorefDecoder(torch.nn.Module):
+class CorefDecoderHOI(torch.nn.Module):
 
     def __init__(
             self,
             max_top_antecedents: int,
             unary_hdim: int,
             hidden_size: int,
-            ignore_speakers: bool,
+            use_speakers: bool,
+            max_training_segments: int,
+            coref_metadata_feature_size: int,
+            coref_dropout: float,
+            coref_higher_order: str,
+            coref_depth: int,
+            coref_num_genres: int,
+            bias_in_last_layers: bool,
+            coref_use_metadata: bool,
+            coref_num_speakers: int = 2
+    ):
+        """
+        :param coref_depth: int indicating the number of higher order iterations in loop. 1 is not really higher order.
+            Stuff I need to add here:
+                genre stuff: num_genres
+
+            Coref loss stuff comes here as well
+
+        """
+        super().__init__()
+        self._dropout = coref_dropout
+        self._n_genres = coref_num_genres
+        self._use_speakers = use_speakers
+        self._use_metadata = coref_use_metadata
+        self._depth = coref_depth
+        self._higher_order = coref_higher_order
+
+        _feat_dim = coref_metadata_feature_size
+        _span_dim = (hidden_size * 3)
+        if self._use_metadata:
+            # For span width
+            _span_dim += _feat_dim
+
+        _pair_dim = _span_dim * 3
+        if self._use_metadata:
+            _pair_dim += _feat_dim * 2  # One for segment distance, one for span width
+        if self._use_speakers:
+            _pair_dim += _feat_dim * 2  # For same_speaker stuff. Why 2 times though? # TODO: figure out
+
+        self.emb_same_speaker = Utils.make_embedding(2, _feat_dim) \
+            if self._use_speakers else None
+        self.emb_segment_distance = Utils.make_embedding(max_training_segments, _feat_dim)
+        self.emb_top_antecedent_distance = Utils.make_embedding(10, _feat_dim)
+        if self._use_metadata:
+            self.emb_genre = Utils.make_embedding(self._n_genres, _feat_dim)
+            self.emb_antecedent_distance_prior = Utils.make_embedding(10, _feat_dim)
+            self.antecedent_distance_score_ffnn = Utils.make_ffnn(_feat_dim, 0, 1, self._dropout)
+        else:
+            self.emb_antecedent_distance_prior = None
+            self.emb_genre = None
+            self.antecedent_distance_score_ffnn = None
+
+        if self._higher_order == 'cluster_merging':
+            self.emb_cluster_size = self.make_embedding(10, _feat_dim)
+            self.span_attn_ffnn = None
+            self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, [unary_hdim, ], 1, self._dropout)
+        elif self._higher_order == 'span_clustering':
+            self.emb_cluster_size = None
+            self.span_attn_ffnn = Utils.make_ffnn(_span_dim, 0, 1, self._dropout)
+            self.cluster_score_ffnn = None
+        else:
+            self.emb_cluster_size, self.span_attn_ffnn, self.cluster_score_ffnn = None, None, None
+
+        self.coarse_bilinear = Utils.make_ffnn(self.span_emb_size, 0, self.span_emb_size, dropout=self._dropout)
+        self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout)
+        self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) \
+            if self._depth > 1 else None
+        self.span_attn_ffnn = Utils.make_ffnn(_span_dim, 0, 1, self._dropout) \
+ \
+        self.update_steps = 0  # Internal use for debug
+        self.debug = True
+
+
+class CorefDecoderMangoes(torch.nn.Module):
+
+    def __init__(
+            self,
+            max_top_antecedents: int,
+            unary_hdim: int,
+            hidden_size: int,
+            use_speakers: bool,
             max_training_segments: int,
             coref_metadata_feature_size: int,
             coref_dropout: float,
@@ -325,15 +427,14 @@ class CorefDecoder(torch.nn.Module):
         super().__init__()
 
         self._dropout = coref_dropout
-
-        # Config Time
-        _span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
-        _final_metadata_size = coref_metadata_feature_size * (2 if ignore_speakers else 3)
-
         self.max_top_antecedents: int = max_top_antecedents
         self.max_training_segments: int = max_training_segments
         self.coref_depth: int = coref_higher_order
-        self._ignore_speakers = ignore_speakers
+        self._ignore_speakers = not use_speakers
+
+        # Config Time
+        _span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
+        _final_metadata_size = coref_metadata_feature_size * (2 if self._ignore_speakers else 3)
 
         # Parameters Time
         self.fast_antecedent_projection = torch.nn.Linear(_span_embedding_dim, _span_embedding_dim)
@@ -352,13 +453,13 @@ class CorefDecoder(torch.nn.Module):
         # self.genre_embeddings = nn.Embedding(num_embeddings=len(self.genres),
         #                                       embedding_dim=coref_metadata_feature_size)
 
-        self.emb_segment_dist = Utils.make_embeddings(max_training_segments, coref_metadata_feature_size)
-        self.emb_fast_distance = Utils.make_embeddings(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
-        self.emb_slow_distance = Utils.make_embeddings(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
+        self.emb_segment_dist = Utils.make_embedding(max_training_segments, coref_metadata_feature_size)
+        self.emb_fast_distance = Utils.make_embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
+        self.emb_slow_distance = Utils.make_embedding(num_embeddings=10, embedding_dim=coref_metadata_feature_size)
         if self._ignore_speakers:
             self.emb_same_speaker = None
         else:
-            self.emb_same_speaker = Utils.make_embeddings(2, coref_metadata_feature_size)
+            self.emb_same_speaker = Utils.make_embedding(2, coref_metadata_feature_size)
 
     @staticmethod
     def batch_gather(emb, indices):

@@ -71,7 +71,7 @@ class MTLModel(nn.Module):
             bias_in_last_layers: bool,
             skip_instance_after_nspan: int,
             coref_num_speakers: int,
-            ignore_speakers: bool,
+            use_speakers: bool,
             shared_compressor: bool,  # If True, it will reduce BERT embeddings from 768 to 256
 
             # This is a crucial flag which changes a lot of things
@@ -127,7 +127,7 @@ class MTLModel(nn.Module):
                 max_top_antecedents=max_top_antecedents,
                 unary_hdim=unary_hdim,
                 hidden_size=hidden_size,
-                ignore_speakers=ignore_speakers,
+                use_speakers=use_speakers,
                 max_training_segments=max_training_segments,
                 coref_metadata_feature_size=coref_metadata_feature_size,
                 coref_dropout=coref_dropout,
@@ -192,7 +192,7 @@ class MTLModel(nn.Module):
         self.coref_loss_mean = coref_loss_mean
         self.ner_n_classes = {task.dataset: task.n_classes_ner for task in [task_1, task_2]}
         self._skip_instance_after_nspan = skip_instance_after_nspan
-        self._ignore_speaker = ignore_speakers
+        self._use_speaker = use_speakers
         self._freeze_encoder = freeze_encoder
         self._tasks_: List[Tasks] = [task_1, task_2]
 
@@ -301,6 +301,7 @@ class MTLModel(nn.Module):
     @staticmethod
     def coref_loss(top_antecedent_scores, top_antecedent_labels):
         """
+        TODO: this goes as well
         Calculate softmax loss
 
         Parameters
@@ -332,6 +333,7 @@ class MTLModel(nn.Module):
             top_antecedents_mask: torch.tensor,
             top_antecedents_score: torch.tensor,
     ) -> torch.tensor:
+        """ this is going to the module as well """
         gold_candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
                                                                gold_starts, gold_ends,
                                                                gold_cluster_ids)
