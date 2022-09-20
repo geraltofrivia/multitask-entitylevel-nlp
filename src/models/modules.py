@@ -29,6 +29,9 @@ from utils.exceptions import BadParameters
 
 
 class Utils(object):
+    """
+        Contain some elements that are used across different modules
+    """
 
     @staticmethod
     def make_embedding(num_embeddings: int, embedding_dim: int, std: float = 0.02) -> torch.nn.Module:
@@ -104,6 +107,43 @@ class Utils(object):
                     end_to_earliest_start[cand_end] = cand_start
             current_span_index += 1
         return torch.tensor(sorted(selected_spans)).long().to(candidate_starts.device)
+
+    @staticmethod
+    def batch_select(tensor, idx, device=torch.device('cpu')):
+        """ Do selection per row (first axis). """
+        assert tensor.shape[0] == idx.shape[0]  # Same size of first dim
+        dim0_size, dim1_size = tensor.shape[0], tensor.shape[1]
+
+        tensor = torch.reshape(tensor, [dim0_size * dim1_size, -1])
+        idx_offset = torch.unsqueeze(torch.arange(0, dim0_size, device=device) * dim1_size, 1)
+        new_idx = idx + idx_offset
+        selected = tensor[new_idx]
+
+        if tensor.shape[-1] == 1:  # If selected element is scalar, restore original dim
+            selected = torch.squeeze(selected, -1)
+
+        return selected
+
+    @staticmethod
+    def bucket_distance(distances):
+        """
+        Places the given values (designed for distances) into 10 semi-logscale buckets:
+        [0, 1, 2, 3, 4, 5-7, 8-15, 16-31, 32-63, 64+].
+
+        Parameters
+        ----------
+        distances: tensor of size (candidates, candidates)
+            token distances between pairs
+
+        Returns
+        -------
+        distance buckets
+            tensor of size (candidates, candidates)
+        """
+        logspace_idx = torch.floor(torch.log(distances.float()) / math.log(2)).int() + 3
+        use_identity = (distances <= 4).int()
+        combined_idx = use_identity * distances + (1 - use_identity) * logspace_idx
+        return torch.clamp(combined_idx, 0, 9)
 
 
 class SharedDense(torch.nn.Module):
@@ -362,6 +402,7 @@ class CorefDecoderHOI(torch.nn.Module):
         self._use_metadata = coref_use_metadata
         self._depth = coref_depth
         self._higher_order = coref_higher_order
+        self.max_top_antecedents: int = max_top_antecedents
 
         _feat_dim = coref_metadata_feature_size
         _span_dim = (hidden_size * 3)
@@ -384,8 +425,8 @@ class CorefDecoderHOI(torch.nn.Module):
             self.emb_antecedent_distance_prior = Utils.make_embedding(10, _feat_dim)
             self.antecedent_distance_score_ffnn = Utils.make_ffnn(_feat_dim, 0, 1, self._dropout)
         else:
-            self.emb_antecedent_distance_prior = None
             self.emb_genre = None
+            self.emb_antecedent_distance_prior = None
             self.antecedent_distance_score_ffnn = None
 
         if self._higher_order == 'cluster_merging':
@@ -404,8 +445,126 @@ class CorefDecoderHOI(torch.nn.Module):
         self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) \
             if self._depth > 1 else None
 
+        self.dropout = nn.Dropout(p=self._dropout)
+
         self.update_steps = 0  # Internal use for debug
         self.debug = True
+
+    def forward(
+            self,
+
+            # Actual input stuff
+            attention_mask: torch.tensor,  # [num_seg, len_seg]
+
+            # Pruner outputs
+            pruned_span_starts: torch.tensor,  # [num_cand, ]
+            pruned_span_ends: torch.tensor,  # [num_cand, ]
+            pruned_span_indices: torch.tensor,  # [num_cand, ]
+            pruned_span_scores: torch.tensor,  # [num_cand, ]
+            pruned_span_speaker_ids: torch.tensor,  # [num_cand, ]
+            pruned_span_emb: torch.tensor,  # [num_cand, emb_size]
+
+            # Some input ID things
+            num_top_mentions: int,
+            num_segments: int,
+            len_segment: int,
+            domain: str,
+            device: Union[str, torch.device],
+    ):
+        """ We pick up after span pruning done by SpanPruner forward """
+
+        # Used to limit how many antecedents we consider, per pruned span
+        num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
+
+        # Coarse pruning on each mention's antecedents
+        top_span_range = torch.arange(0, num_top_mentions, device=device)
+        antecedent_offsets = torch.unsqueeze(top_span_range, 1) - torch.unsqueeze(top_span_range, 0)
+        antecedent_mask = (antecedent_offsets >= 1)
+        pairwise_mention_score_sum = torch.unsqueeze(pruned_span_scores, 1) + torch.unsqueeze(pruned_span_scores, 0)
+        source_span_emb = self.dropout(self.coarse_bilinear(pruned_span_emb))
+        target_span_emb = self.dropout(torch.transpose(pruned_span_emb, 0, 1))
+        pairwise_coref_scores = torch.matmul(source_span_emb, target_span_emb)
+        pairwise_fast_scores = pairwise_mention_score_sum + pairwise_coref_scores
+        pairwise_fast_scores += torch.log(antecedent_mask.to(torch.float))
+        if self._use_metadata:
+            distance_score = torch.squeeze(
+                self.antecedent_distance_score_ffnn(self.dropout(self.emb_antecedent_distance_prior.weight)), 1)
+            bucketed_distance = Utils.bucket_distance(antecedent_offsets)
+            antecedent_distance_score = distance_score[bucketed_distance]
+            pairwise_fast_scores += antecedent_distance_score
+        top_pairwise_fast_scores, top_antecedent_idx = torch.topk(pairwise_fast_scores, k=num_top_antecedents)
+        top_antecedent_mask = Utils.batch_select(antecedent_mask, top_antecedent_idx,
+                                                 device)  # [num top spans, max top antecedents]
+        top_antecedent_offsets = Utils.batch_select(antecedent_offsets, top_antecedent_idx, device)
+
+        # Slow Mention Ranking
+        if True:
+            # if conf['fine_grained']:
+            same_speaker_emb, genre_emb, seg_distance_emb, top_antecedent_distance_emb = None, None, None, None
+            if self._use_speakers:
+                top_antecedent_speaker_id = pruned_span_speaker_ids[top_antecedent_idx]
+                same_speaker = torch.unsqueeze(pruned_span_speaker_ids, 1) == top_antecedent_speaker_id
+                same_speaker_emb = self.emb_same_speaker(same_speaker.to(torch.long))
+                genre_emb = self.emb_genre(genre)
+                genre_emb = torch.unsqueeze(torch.unsqueeze(genre_emb, 0), 0).repeat(num_top_spans, max_top_antecedents,
+                                                                                     1)
+            if conf['use_segment_distance']:
+                num_segs, seg_len = input_ids.shape[0], input_ids.shape[1]
+                token_seg_ids = torch.arange(0, num_segs, device=device).unsqueeze(1).repeat(1, seg_len)
+                token_seg_ids = token_seg_ids[input_mask]
+                top_span_seg_ids = token_seg_ids[top_span_starts]
+                top_antecedent_seg_ids = token_seg_ids[top_span_starts[top_antecedent_idx]]
+                top_antecedent_seg_distance = torch.unsqueeze(top_span_seg_ids, 1) - top_antecedent_seg_ids
+                top_antecedent_seg_distance = torch.clamp(top_antecedent_seg_distance, 0,
+                                                          self.config['max_training_sentences'] - 1)
+                seg_distance_emb = self.emb_segment_distance(top_antecedent_seg_distance)
+            if conf['use_features']:  # Antecedent distance
+                top_antecedent_distance = util.bucket_distance(top_antecedent_offsets)
+                top_antecedent_distance_emb = self.emb_top_antecedent_distance(top_antecedent_distance)
+
+            for depth in range(conf['coref_depth']):
+                top_antecedent_emb = top_span_emb[top_antecedent_idx]  # [num top spans, max top antecedents, emb size]
+                feature_list = []
+                if conf['use_metadata']:  # speaker, genre
+                    feature_list.append(same_speaker_emb)
+                    feature_list.append(genre_emb)
+                if conf['use_segment_distance']:
+                    feature_list.append(seg_distance_emb)
+                if conf['use_features']:  # Antecedent distance
+                    feature_list.append(top_antecedent_distance_emb)
+                feature_emb = torch.cat(feature_list, dim=2)
+                feature_emb = self.dropout(feature_emb)
+                target_emb = torch.unsqueeze(top_span_emb, 1).repeat(1, max_top_antecedents, 1)
+                similarity_emb = target_emb * top_antecedent_emb
+                pair_emb = torch.cat([target_emb, top_antecedent_emb, similarity_emb, feature_emb], 2)
+                top_pairwise_slow_scores = torch.squeeze(self.coref_score_ffnn(pair_emb), 2)
+                top_pairwise_scores = top_pairwise_slow_scores + top_pairwise_fast_scores
+                if conf['higher_order'] == 'cluster_merging':
+                    cluster_merging_scores = ho.cluster_merging(top_span_emb, top_antecedent_idx, top_pairwise_scores,
+                                                                self.emb_cluster_size, self.cluster_score_ffnn, None,
+                                                                self.dropout,
+                                                                device=device, reduce=conf['cluster_reduce'],
+                                                                easy_cluster_first=conf['easy_cluster_first'])
+                    break
+                elif depth != conf['coref_depth'] - 1:
+                    if conf['higher_order'] == 'attended_antecedent':
+                        refined_span_emb = ho.attended_antecedent(top_span_emb, top_antecedent_emb, top_pairwise_scores,
+                                                                  device)
+                    elif conf['higher_order'] == 'max_antecedent':
+                        refined_span_emb = ho.max_antecedent(top_span_emb, top_antecedent_emb, top_pairwise_scores,
+                                                             device)
+                    elif conf['higher_order'] == 'entity_equalization':
+                        refined_span_emb = ho.entity_equalization(top_span_emb, top_antecedent_emb, top_antecedent_idx,
+                                                                  top_pairwise_scores, device)
+                    elif conf['higher_order'] == 'span_clustering':
+                        refined_span_emb = ho.span_clustering(top_span_emb, top_antecedent_idx, top_pairwise_scores,
+                                                              self.span_attn_ffnn, device)
+
+                    gate = self.gate_ffnn(torch.cat([top_span_emb, refined_span_emb], dim=1))
+                    gate = torch.sigmoid(gate)
+                    top_span_emb = gate * refined_span_emb + (1 - gate) * top_span_emb  # [num top spans, span emb size]
+        else:
+            top_pairwise_scores = top_pairwise_fast_scores  # [num top spans, max top antecedents]
 
 
 class CorefDecoderMangoes(torch.nn.Module):
@@ -486,27 +645,6 @@ class CorefDecoderMangoes(torch.nn.Module):
         target_emb = F.dropout(span_emb, p=self._dropout, training=self.training)  # [cand, emb]
         return torch.mm(source_emb, target_emb.t())  # [cand, cand]
 
-    @staticmethod
-    def bucket_distance(distances):
-        """
-        Places the given values (designed for distances) into 10 semi-logscale buckets:
-        [0, 1, 2, 3, 4, 5-7, 8-15, 16-31, 32-63, 64+].
-
-        Parameters
-        ----------
-        distances: tensor of size (candidates, candidates)
-            token distances between pairs
-
-        Returns
-        -------
-        distance buckets
-            tensor of size (candidates, candidates)
-        """
-        logspace_idx = torch.floor(torch.log(distances.float()) / math.log(2)).int() + 3
-        use_identity = (distances <= 4).int()
-        combined_idx = use_identity * distances + (1 - use_identity) * logspace_idx
-        return torch.clamp(combined_idx, 0, 9)
-
     def coarse_to_fine_pruning(self, span_emb, mention_scores, num_top_antecedents):
         """
         Compute fast estimate antecedent scores and prune based on these scores.
@@ -539,7 +677,7 @@ class CorefDecoderMangoes(torch.nn.Module):
         fast_antecedent_scores += torch.log(antecedents_mask.float())  # [cand, cand]
         fast_antecedent_scores += self.get_fast_antecedent_scores(span_emb)  # [cand, cand]
         # add distance scores
-        antecedent_distance_buckets = self.bucket_distance(antecedent_offsets).to(span_emb.device)  # [cand, cand]
+        antecedent_distance_buckets = Utils.bucket_distance(antecedent_offsets).to(span_emb.device)  # [cand, cand]
         bucket_embeddings = F.dropout(self.emb_fast_distance(torch.arange(start=0, end=10, device=span_emb.device)),
                                       p=self._dropout, training=self.training)  # [10, feature_size]
         bucket_scores = self.distance_projection(bucket_embeddings)  # [10, 1]
@@ -590,7 +728,7 @@ class CorefDecoderMangoes(torch.nn.Module):
             # feature_emb_list.append(genre_embs)
 
         # span distance
-        antecedent_distance_buckets = self.bucket_distance(top_antecedent_offsets).to(
+        antecedent_distance_buckets = Utils.bucket_distance(top_antecedent_offsets).to(
             top_span_emb.device)  # [cand, cand]
         bucket_embeddings = self.emb_slow_distance(
             torch.arange(start=0, end=10, device=top_span_emb.device))  # [10, feature_size]

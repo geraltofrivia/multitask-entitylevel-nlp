@@ -22,7 +22,7 @@ from preproc.encode import PreEncoder
 from models.multitask import MTLModel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
-from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, NER_IS_MULTILABEL
+from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, DOMAIN_HAS_NER_MULTILABEL
 from utils.exceptions import ImproperDumpDir, BadParameters
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
     TraceCandidates, NERSpanRecognitionMicroMultiLabel, NERMultiLabelAcc, POSPRMacro, POSAcc
@@ -513,9 +513,9 @@ def train(ctx):
 
         if 'ner' in task:
             metrics[task.dataset] += [
-                NERAcc if not task.dataset in NER_IS_MULTILABEL else \
+                NERAcc if not task.dataset in DOMAIN_HAS_NER_MULTILABEL else \
                     partial(NERMultiLabelAcc, nc=task.n_classes_ner, threshold=config.ner_threshold),
-                NERSpanRecognitionMicro if task.dataset not in NER_IS_MULTILABEL else NERSpanRecognitionMicroMultiLabel,
+                NERSpanRecognitionMicro if task.dataset not in DOMAIN_HAS_NER_MULTILABEL else NERSpanRecognitionMicroMultiLabel,
                 # partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner, device=config.device)
             ]
         if 'pruner' in task:

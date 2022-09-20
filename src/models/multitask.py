@@ -18,9 +18,9 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.data import Tasks
-from config import _SEED_ as SEED, NER_IS_MULTILABEL
+from config import _SEED_ as SEED, DOMAIN_HAS_NER_MULTILABEL
 from preproc.encode import Retriever
-from models.modules import SpanPruner, CorefDecoder, SharedDense
+from models.modules import SpanPruner, CorefDecoderMangoes as CorefDecoder, SharedDense
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
 random.seed(SEED)
@@ -179,7 +179,7 @@ class MTLModel(nn.Module):
         self.pruner_loss = self._rescaling_weights_bce_loss_
         self.ner_loss = {}
         for task in [task_1, task_2]:
-            if task.dataset in NER_IS_MULTILABEL:
+            if task.dataset in DOMAIN_HAS_NER_MULTILABEL:
                 self.ner_loss[task.dataset] = nn.functional.binary_cross_entropy_with_logits
             else:
                 self.ner_loss[task.dataset] = nn.functional.cross_entropy
@@ -690,7 +690,7 @@ class MTLModel(nn.Module):
                 We want to turn all those zero rows into ones where the last element is active (not an entity class)
                 If NER is not a multilabel class, then those positions are already at zero. Don't have to do anything.
             """
-            if domain in NER_IS_MULTILABEL:
+            if domain in DOMAIN_HAS_NER_MULTILABEL:
                 zero_indices = torch.sum(ner_labels, dim=1) == 0  # n_spans
                 ner_labels[zero_indices, 0] = 1  # n_spans, n_classes+1
             else:

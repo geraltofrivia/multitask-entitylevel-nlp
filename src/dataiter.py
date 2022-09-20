@@ -22,7 +22,8 @@ try:
 except ImportError:
     from . import _pathfix
 from utils.misc import check_dumped_config, compute_class_weight_sparse, SerializedBertConfig, deterministic_hash
-from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split, is_split_train, NER_IS_MULTILABEL
+from config import LOCATIONS as LOC, _SEED_ as SEED, KNOWN_TASKS, unalias_split, is_split_train, \
+    DOMAIN_HAS_NER_MULTILABEL
 from utils.exceptions import NoValidAnnotations, LabelDictNotFound, UnknownTaskException
 from utils.nlp import to_toks, match_subwords_to_words
 from utils.data import Document, Tasks
@@ -158,7 +159,7 @@ class MultiTaskDataIter(Dataset):
         # Create a flat (long, long) list of all labels
         # print(self.data[0][task]['gold_labels'])
         # print(self.data[0][task]['gold_labels'])
-        if task == 'ner' and self.tasks.dataset in NER_IS_MULTILABEL:
+        if task == 'ner' and self.tasks.dataset in DOMAIN_HAS_NER_MULTILABEL:
             y = torch.cat([datum[task]['gold_label_values'].nonzero(as_tuple=False)[:, 1] for datum in self.data])
         else:
             y = torch.cat([datum[task]['gold_label_values'] for datum in self.data])
@@ -509,7 +510,7 @@ class MultiTaskDataIter(Dataset):
         gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
         gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
 
-        if self._src_ in NER_IS_MULTILABEL:
+        if self._src_ in DOMAIN_HAS_NER_MULTILABEL:
             gold_labels = torch.tensor(gold_labels, dtype=torch.long, device='cpu')
         else:
             gold_labels = torch.tensor([np.argmax(doc_ner) for doc_ner in gold_labels],

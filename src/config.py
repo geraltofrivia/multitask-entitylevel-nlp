@@ -82,7 +82,8 @@ KNOWN_SPLITS = FancyDict({
     })
 })
 KNOWN_HAS_SPEAKERS = [key for key in KNOWN_SPLITS.keys() if key.startswith('codicrac')]
-NER_IS_MULTILABEL = ['dwie', 'ace2005']  # Refer to this to know which datasets have mutlilabel NER targets
+DOMAIN_HAS_NER_MULTILABEL = ['dwie', 'ace2005']  # Refer to this to know which datasets have mutlilabel NER targets
+DOMAIN_HAS_GENRES = ['ontonotes', 'ace2005']
 
 
 def is_split_train(dataset: str, split: str):
