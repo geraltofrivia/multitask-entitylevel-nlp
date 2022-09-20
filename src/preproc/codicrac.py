@@ -553,6 +553,7 @@ class CODICRACParser(GenericParser):
             bridging_words = [(ante.words, ana.words) for ante, ana in
                               zip(bridging_anaphors[docname], bridging_antecedents[docname])]
             bridging = BridgingAnaphors(spans=bridging_spans, words=bridging_words)
+            genre = self.dataset
 
             # Make the object
             document = Document(
@@ -563,7 +564,8 @@ class CODICRACParser(GenericParser):
                 ner=ner,
                 rel=TypedRelations.new(),
                 bridging=bridging,
-                speakers=doc_speakers
+                speakers=doc_speakers,
+                genre=genre
             )
 
             # Now to finalise the instance
