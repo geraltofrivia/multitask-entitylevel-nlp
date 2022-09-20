@@ -171,43 +171,44 @@ class ACE2005Parser(GenericParser):
 
         return rel_obj
 
+    def create_label_dict(self):
+        """
+            Check if two trainable splits of ace2005 - train, and dev are already processed or not.
+            If not, return error.
 
-def create_label_dict():
-    """
-        Check if two trainable splits of ace2005 - train, and dev are already processed or not.
-        If not, return error.
+            If yes, go through all of them and find all unique output labels to encode them in a particular fashion.
+        :return: None
+        """
+        relevant_splits: List[str] = ['train', 'dev']
 
-        If yes, go through all of them and find all unique output labels to encode them in a particular fashion.
-    :return: None
-    """
-    relevant_splits: List[str] = ['train', 'dev']
+        # Check if dump.json exists in all of these
+        ner_labels = set()
+        rel_labels = set()
+        pos_labels = set()
+        for split in relevant_splits:
+            reader = DocumentReader('ace2005', split=split)
+            for doc in reader:
+                ner_labels = ner_labels.union(doc.ner.get_all_tags())
+                rel_labels = rel_labels.union(doc.rel.tags)
+                pos_labels = pos_labels.union(set(to_toks(doc.pos)))
 
-    # Check if dump.json exists in all of these
-    ner_labels = set()
-    rel_labels = set()
-    pos_labels = set()
-    for split in relevant_splits:
-        reader = DocumentReader('ace2005', split=split)
-        for doc in reader:
-            ner_labels = ner_labels.union(doc.ner.get_all_tags())
-            rel_labels = rel_labels.union(doc.rel.tags)
-            pos_labels = pos_labels.union(set(to_toks(doc.pos)))
+        # Turn them into dicts and dump them as json
+        with (LOC.manual / 'ner_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
+            ner_labels = {tag: i for i, tag in enumerate(ner_labels)}
+            json.dump(ner_labels, f)
+            print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ace2005_tag_dict.json')}")
 
-    # Turn them into dicts and dump them as json
-    with (LOC.manual / 'ner_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
-        ner_labels = {tag: i for i, tag in enumerate(ner_labels)}
-        json.dump(ner_labels, f)
-        print(f"Wrote a dict of {len(ner_labels)} items to {(LOC.manual / 'ner_ace2005_tag_dict.json')}")
+        with (LOC.manual / 'rel_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
+            rel_labels = {tag: i for i, tag in enumerate(rel_labels)}
+            json.dump(rel_labels, f)
+            print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ace2005_tag_dict.json')}")
 
-    with (LOC.manual / 'rel_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
-        rel_labels = {tag: i for i, tag in enumerate(rel_labels)}
-        json.dump(rel_labels, f)
-        print(f"Wrote a dict of {len(rel_labels)} items to {(LOC.manual / 'rel_ace2005_tag_dict.json')}")
+        with (LOC.manual / 'pos_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
+            pos_labels = {tag: i for i, tag in enumerate(pos_labels)}
+            json.dump(pos_labels, f)
+            print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ace2005_tag_dict.json')}")
 
-    with (LOC.manual / 'pos_ace2005_tag_dict.json').open('w+', encoding='utf8') as f:
-        pos_labels = {tag: i for i, tag in enumerate(pos_labels)}
-        json.dump(pos_labels, f)
-        print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ace2005_tag_dict.json')}")
+        self.create_genre_label_dict()
 
 
 if __name__ == '__main__':
@@ -218,4 +219,4 @@ if __name__ == '__main__':
     parser = ACE2005Parser(LOC.ace2005, ['test'])
     parser.run()
 
-    create_label_dict()
+    parser.create_label_dict()

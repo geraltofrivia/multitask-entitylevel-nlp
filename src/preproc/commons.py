@@ -1,3 +1,4 @@
+import copy
 import json
 import pickle
 from abc import ABC, abstractmethod
@@ -14,7 +15,8 @@ except ImportError:
     from . import _pathfix
 from utils.data import Document
 from utils.nlp import PreTokenizedPreSentencizedTokenizer
-from config import LOCATIONS as LOC
+from config import LOCATIONS as LOC, KNOWN_SPLITS
+from dataiter import DocumentReader
 
 
 class GenericParser(ABC):
@@ -42,6 +44,27 @@ class GenericParser(ABC):
         self.nlp.tokenizer = PreTokenizedPreSentencizedTokenizer(self.nlp.vocab)
 
         self._speaker_vocab_ = {}
+        self._genre_vocab_ = {}
+
+    def create_genre_label_dict(self):
+        dataset = self.write_dir.name
+
+        relevant_splits: Dict[str, str] = copy.deepcopy(KNOWN_SPLITS[dataset])
+        if len(relevant_splits) > 2:
+            relevant_splits.pop('test')
+
+        genre_labels = set()
+        for split_nm, split_vl in relevant_splits.items():
+            reader = DocumentReader(self.write_dir.name, split_vl)
+            genre_labels = genre_labels.union(set([doc.genre for doc in reader]))
+        genre_labels = list(genre_labels)
+
+        write_dir = LOC.manual / f'genre_{self.write_dir.name}_tag_dict.json'
+        with write_dir.open('w+', encoding='utf8') as f:
+            genre_labels = {tag: i for i, tag in enumerate(sorted(genre_labels))}
+            json.dump(genre_labels, f)
+            print(f"Wrote {len(genre_labels)} genres to "
+                  f"{(LOC.manual / f'genre_{self.write_dir.name}_tag_dict.json')}")
 
     @abstractmethod
     def parse(self, split_nm: Union[Path, str]):

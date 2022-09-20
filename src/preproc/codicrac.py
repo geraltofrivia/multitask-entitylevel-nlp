@@ -577,7 +577,7 @@ class CODICRACParser(GenericParser):
 
     def create_label_dict(self):
         """ We assume that every split is processed at the same time.
-            So now we go out and create a label dict for speakers as well."""
+            So now we go out and create a label dict for speakers as well. """
 
         relevant_splits = ['dev', 'train']
         pos_labels = set()
@@ -598,6 +598,7 @@ class CODICRACParser(GenericParser):
             json.dump(pos_labels, f)
             print(f"Wrote a dict of {len(pos_labels)} items to {write_dir}")
 
+        self.create_genre_label_dict()
 
 @click.command()
 @click.option("--dataset", "-d", type=str, help="The name of the dataset like 'persuasion', 'light', 'arrau' etc.")

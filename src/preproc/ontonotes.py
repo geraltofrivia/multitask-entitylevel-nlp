@@ -392,8 +392,7 @@ class CoNLLOntoNotesParser(GenericParser):
             finalised_annotation_tag,
         )
 
-    @staticmethod
-    def create_label_dict():
+    def create_label_dict(self):
         """
             Check if two trainable splits of scierc - train, and dev are already processed or not.
             If not, return error.
@@ -427,6 +426,7 @@ class CoNLLOntoNotesParser(GenericParser):
             json.dump(pos_labels, f)
             print(f"Wrote a dict of {len(pos_labels)} items to {(LOC.manual / 'pos_ontonotes_tag_dict.json')}")
 
+        self.create_genre_label_dict()
 
 @click.command()
 @click.option(
@@ -442,7 +442,7 @@ class CoNLLOntoNotesParser(GenericParser):
     is_flag=True,
     help="If True, we ignore the documents without any coref annotation",
 )
-@click.option("--run_all", "-a", is_flag=True, help="If flag is given, we process every ontonotes split.")
+@click.option("--run-all", "-a", is_flag=True, help="If flag is given, we process every ontonotes split.")
 @click.option("--collect-labels", is_flag=True,
               help="If this flag is True, we ignore everything else, "
                    "just go through train, dev splits and collect unique labels and create a dict out of them.")
@@ -452,8 +452,6 @@ def run(suffix: str, collect_labels: bool, ignore_empty: bool, run_all: bool = F
             LOC.ontonotes_conll, suffixes=[suffix], ignore_empty_documents=ignore_empty
         )
         parser.run()
-    elif collect_labels:
-        CoNLLOntoNotesParser.create_label_dict()
     else:
         suffixes = ['train', 'development', 'conll-2012-test', 'test']
         parser = CoNLLOntoNotesParser(
