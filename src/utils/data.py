@@ -657,7 +657,11 @@ class Tasks:
         if self.dataset in KNOWN_HAS_SPEAKERS:
             self.n_speakers = self._get_n_speakers_(dataset=self.dataset)
 
-        self.n_genres = self._get_n_genres_(dataset=self.dataset)
+        try:
+            self.n_genres = self._get_n_genres_(dataset=self.dataset)
+        except FileNotFoundError:
+            warnings.warn(f"No genre dict found for {self.dataset}. Setting to one.")
+            self.n_genres = 1
 
     def sort(self):
         """ Rearranges all artefacts to sort them in the right order """
