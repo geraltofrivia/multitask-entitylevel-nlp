@@ -20,7 +20,7 @@ except ImportError:
 from utils.data import Tasks
 from config import _SEED_ as SEED, DOMAIN_HAS_NER_MULTILABEL
 from preproc.encode import Retriever
-from models.modules import SpanPruner, CorefDecoderHOI as CorefDecoder, SharedDense
+from models.modules import SpanPruner, CorefDecoderHOI as CorefDecoder, SharedDense, Utils
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
 random.seed(SEED)
@@ -68,6 +68,8 @@ class MTLModel(nn.Module):
             coref_num_speakers: int,
             coref_num_genres: int,
             coref_use_metadata: bool,
+            coref_loss_type: bool,
+            coref_false_new_delta: float,
 
             # NER specific Params
             ner_dropout: float,
@@ -145,7 +147,9 @@ class MTLModel(nn.Module):
                 coref_cluster_dloss=coref_cluster_dloss,
                 coref_num_speakers=coref_num_speakers,
                 coref_use_metadata=coref_use_metadata,
-                bias_in_last_layers=bias_in_last_layers
+                bias_in_last_layers=bias_in_last_layers,
+                coref_loss_type=coref_loss_type,
+                coref_false_new_delta=coref_false_new_delta
             )
 
         span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
@@ -243,34 +247,6 @@ class MTLModel(nn.Module):
         else:
             return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
-    @staticmethod
-    def get_candidate_labels(candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels):
-        """
-        get labels of candidates from gold ground truth
-
-        Parameters
-        ----------
-        candidate_starts, candidate_ends: tensor of size (candidates)
-            start and end token indices (in flattened document) of candidate spans
-        labeled_starts, labeled_ends: tensor of size (labeled)
-            start and end token indices (in flattened document) of labeled spans
-        labels: tensor of size (labeled)
-            cluster ids
-
-        Returns
-        -------
-        candidate_labels: tensor of size (candidates)
-        """
-        same_start = torch.eq(labeled_starts.unsqueeze(1),
-                              candidate_starts.unsqueeze(0))  # [num_labeled, num_candidates]
-        same_end = torch.eq(labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0))  # [num_labeled, num_candidates]
-        same_span = torch.logical_and(same_start, same_end)  # [num_labeled, num_candidates]
-        # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
-        if labels.shape.__len__() == 1:
-            candidate_labels = torch.mm(labels.unsqueeze(0).float(), same_span.float()).long()  # [1, num_candidates]
-        else:
-            candidate_labels = torch.mm(same_span.transpose(1, 0).float(), labels.float())  # [nclasses, num_candidates]
-        return candidate_labels.squeeze(0)  # [num_candidates] or [nclasses, num_candidate]
 
     def todel_get_predicted_antecedents(self, antecedent_idx, antecedent_scores):
         """ CPU list input """
@@ -346,9 +322,9 @@ class MTLModel(nn.Module):
             top_antecedents_score: torch.tensor,
     ) -> torch.tensor:
         """ this is going to the module as well """
-        gold_candidate_cluster_ids = self.get_candidate_labels(candidate_starts, candidate_ends,
-                                                               gold_starts, gold_ends,
-                                                               gold_cluster_ids)
+        gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+                                                                gold_starts, gold_ends,
+                                                                gold_cluster_ids)
         top_span_cluster_ids = gold_candidate_cluster_ids[top_span_indices]
 
         # Unpack everything we need
@@ -439,7 +415,7 @@ class MTLModel(nn.Module):
                 pruned_span_scores=pruner_outputs['pruned_span_scores'],
                 pruned_span_speaker_ids=pruner_outputs['pruned_span_speaker_ids'],
                 pruned_span_emb=pruner_outputs['pruned_span_emb'],
-                num_top_mentions=pruner_outputs['num_top_mentions'],
+                num_top_spans=pruner_outputs['num_top_spans'],
                 num_segments=num_seg,
                 len_segment=len_seg,
                 domain=domain,
@@ -571,7 +547,7 @@ class MTLModel(nn.Module):
             outputs["loss"]["pruner"] = pruner_loss
             outputs["pruner"] = {"logits": logits_after_pruning, "labels": labels_after_pruning}
 
-            # labels_after_pruning = self.get_candidate_labels(candidate_starts, candidate_ends,
+            # labels_after_pruning = Utils.get_candidate_labels(candidate_starts, candidate_ends,
             #                                                  gold_starts, gold_ends,)
 
             # # Repeat pred to gold dims and then collapse the eq.
@@ -582,7 +558,7 @@ class MTLModel(nn.Module):
         if "coref" in tasks:
 
             # Compute Loss
-            coref_loss = self.get_coref_loss(
+            coref_loss = self.coref.get_coref_loss(
                 candidate_starts=predictions['candidate_starts'],
                 candidate_ends=predictions['candidate_ends'],
                 gold_starts=coref['gold_starts'],
@@ -591,7 +567,11 @@ class MTLModel(nn.Module):
                 top_span_indices=predictions['pruned_span_indices'],
                 top_antecedents=predictions['coref_top_antecedents'],
                 top_antecedents_mask=predictions['coref_top_antecedents_mask'],
-                top_antecedents_score=predictions['coref_top_antecedents_score']
+                top_antecedents_score=predictions['coref_top_antecedents_score'],
+                cluster_merging_scores=predictions['coref_cluster_merging_scores'],
+                top_pairwise_scores=predictions['coref_top_pairwise_scores'],
+                num_top_spans=predictions['num_top_spans'],
+                device=input_ids.device
             )
 
             if self.coref_loss_mean:
@@ -697,9 +677,9 @@ class MTLModel(nn.Module):
             ner_gold_ends = ner["gold_ends"]
             ner_gold_label_values = ner["gold_label_values"]
             ner_logits = predictions["ner_logits"]  # n_spans, n_classes
-            ner_labels = self.get_candidate_labels(candidate_starts, candidate_ends,
-                                                   ner_gold_starts, ner_gold_ends,
-                                                   ner_gold_label_values)
+            ner_labels = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+                                                    ner_gold_starts, ner_gold_ends,
+                                                    ner_gold_label_values)
 
             """
                 At this point NER Labels is a n_spans, n_classes+1 matrix where most rows are zero.

@@ -66,7 +66,7 @@ class Utils(object):
         return linear
 
     @staticmethod
-    def extract_spans(candidate_starts, candidate_ends, candidate_mention_scores, num_top_mentions):
+    def extract_spans(candidate_starts, candidate_ends, candidate_mention_scores, num_top_spans):
         """
         Extracts the candidate spans with the highest mention scores, who's spans don't cross over other spans.
 
@@ -78,11 +78,11 @@ class Utils(object):
                 Indices of the ends of spans for each candidate.
             candidate_mention_scores: tensor of size (candidates)
                 Mention score for each candidate.
-            num_top_mentions: int
+            num_top_spans: int
                 Number of candidates to extract
         Returns:
         --------
-            top_span_indices: tensor of size (num_top_mentions)
+            top_span_indices: tensor of size (num_top_spans)
                 Span indices of the non-crossing spans with the highest mention scores
         """
         # sort based on mention scores
@@ -92,7 +92,7 @@ class Utils(object):
         start_to_latest_end = {}
         selected_spans = []
         current_span_index = 0
-        while len(selected_spans) < num_top_mentions and current_span_index < candidate_starts.size(0):
+        while len(selected_spans) < num_top_spans and current_span_index < candidate_starts.size(0):
             ind = top_span_indices[current_span_index]
             any_crossing = False
             cand_start = candidate_starts[ind].item()
@@ -149,6 +149,35 @@ class Utils(object):
         use_identity = (distances <= 4).int()
         combined_idx = use_identity * distances + (1 - use_identity) * logspace_idx
         return torch.clamp(combined_idx, 0, 9)
+
+    @staticmethod
+    def get_candidate_labels(candidate_starts, candidate_ends, labeled_starts, labeled_ends, labels):
+        """
+        get labels of candidates from gold ground truth
+
+        Parameters
+        ----------
+        candidate_starts, candidate_ends: tensor of size (candidates)
+            start and end token indices (in flattened document) of candidate spans
+        labeled_starts, labeled_ends: tensor of size (labeled)
+            start and end token indices (in flattened document) of labeled spans
+        labels: tensor of size (labeled)
+            cluster ids
+
+        Returns
+        -------
+        candidate_labels: tensor of size (candidates)
+        """
+        same_start = torch.eq(labeled_starts.unsqueeze(1),
+                              candidate_starts.unsqueeze(0))  # [num_labeled, num_candidates]
+        same_end = torch.eq(labeled_ends.unsqueeze(1), candidate_ends.unsqueeze(0))  # [num_labeled, num_candidates]
+        same_span = torch.logical_and(same_start, same_end)  # [num_labeled, num_candidates]
+        # type casting in next line is due to torch not supporting matrix multiplication for Long tensors
+        if labels.shape.__len__() == 1:
+            candidate_labels = torch.mm(labels.unsqueeze(0).float(), same_span.float()).long()  # [1, num_candidates]
+        else:
+            candidate_labels = torch.mm(same_span.transpose(1, 0).float(), labels.float())  # [nclasses, num_candidates]
+        return candidate_labels.squeeze(0)  # [num_candidates] or [nclasses, num_candidate]
 
 
 class SharedDense(torch.nn.Module):
@@ -348,10 +377,11 @@ class SpanPruner(torch.nn.Module):
 
         # Get beam size (its a function of top span ratio, and length of document, capped by a threshold
         # noinspection PyTypeChecker
-        num_top_mentions = int(min(self._max_num_spans, _num_words * self._top_span_ratio))
+        num_top_spans = int(min(self._max_num_spans, _num_words * self._top_span_ratio))
 
         # Get top mention scores and sort by span order
-        pruned_span_indices = Utils.extract_spans(candidate_starts, candidate_ends, span_scores, num_top_mentions)
+
+        pruned_span_indices = Utils.extract_spans(candidate_starts, candidate_ends, span_scores, num_top_spans)
         pruned_span_starts = candidate_starts[pruned_span_indices]
         pruned_span_ends = candidate_ends[pruned_span_indices]
         pruned_span_emb = span_emb[pruned_span_indices]
@@ -364,13 +394,13 @@ class SpanPruner(torch.nn.Module):
 
         return {
             'span_emb': span_emb,
-            'pruned_span_indices': pruned_span_indices,
+            'pruned_span_indices': pruned_span_indices,  # HOI calls it 'selected_idx'
             'pruned_span_starts': pruned_span_starts,
             'pruned_span_ends': pruned_span_ends,
             'pruned_span_emb': pruned_span_emb,
             'pruned_span_scores': pruned_span_scores,
             'pruned_span_speaker_ids': pruned_span_speaker_ids,
-            'num_top_mentions': num_top_mentions
+            'num_top_spans': num_top_spans
         }
 
 
@@ -393,6 +423,8 @@ class CorefDecoderHOI(torch.nn.Module):
             coref_cluster_dloss: bool,
             bias_in_last_layers: bool,
             coref_use_metadata: bool,
+            coref_loss_type: str,
+            coref_false_new_delta: float,
             coref_num_speakers: int = 2,
     ):
         """
@@ -414,6 +446,7 @@ class CorefDecoderHOI(torch.nn.Module):
         self._easy_cluster_first = coref_easy_cluster_first
         self._cluster_reduce = coref_cluster_reduce
         self._cluster_dloss = coref_cluster_dloss
+        self._loss_type = coref_loss_type
 
         _feat_dim = coref_metadata_feature_size
         _span_dim = (hidden_size * 3)
@@ -465,7 +498,8 @@ class CorefDecoderHOI(torch.nn.Module):
         self._span_dim = _span_dim
         self._feat_dim = _feat_dim
         self._pair_dim = _pair_dim
-        self.max_training_segments = max_training_segments
+        self._max_training_segments = max_training_segments
+        self._false_new_delta = coref_false_new_delta
 
     @staticmethod
     def _merge_span_to_cluster(cluster_emb, cluster_sizes, cluster_to_merge_id, span_emb, reduce):
@@ -656,7 +690,7 @@ class CorefDecoderHOI(torch.nn.Module):
             pruned_span_emb: torch.tensor,  # [num_cand, emb_size]
 
             # Some input ID things
-            num_top_mentions: int,
+            num_top_spans: int,
             num_segments: int,
             len_segment: int,
             domain: str,
@@ -670,10 +704,10 @@ class CorefDecoderHOI(torch.nn.Module):
         # TODO: figure out if we need attention mask to still be broken into segments or linearized?
 
         # Used to limit how many antecedents we consider, per pruned span
-        num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
+        num_top_antecedents = min(self.max_top_antecedents, num_top_spans)
 
         # Coarse pruning on each mention's antecedents
-        top_span_range = torch.arange(0, num_top_mentions, device=device)
+        top_span_range = torch.arange(0, num_top_spans, device=device)
         antecedent_offsets = torch.unsqueeze(top_span_range, 1) - torch.unsqueeze(top_span_range, 0)
         antecedent_mask = (antecedent_offsets >= 1)
         pairwise_mention_score_sum = torch.unsqueeze(pruned_span_scores, 1) + torch.unsqueeze(pruned_span_scores, 0)
@@ -702,7 +736,7 @@ class CorefDecoderHOI(torch.nn.Module):
                 same_speaker = torch.unsqueeze(pruned_span_speaker_ids, 1) == top_antecedent_speaker_id
                 same_speaker_emb = self.emb_same_speaker(same_speaker.to(torch.long))
                 genre_emb = self.emb_genre(genre)
-                genre_emb = torch.unsqueeze(torch.unsqueeze(genre_emb, 0), 0).repeat(num_top_mentions,
+                genre_emb = torch.unsqueeze(torch.unsqueeze(genre_emb, 0), 0).repeat(num_top_spans,
                                                                                      num_top_antecedents, 1)
             if self._use_metadata:
                 num_segs, seg_len = attention_mask.shape[0], attention_mask.shape[1]
@@ -712,7 +746,7 @@ class CorefDecoderHOI(torch.nn.Module):
                 top_antecedent_seg_ids = token_seg_ids[pruned_span_starts[top_antecedent_idx]]
                 top_antecedent_seg_distance = torch.unsqueeze(top_span_seg_ids, 1) - top_antecedent_seg_ids
                 top_antecedent_seg_distance = torch.clamp(top_antecedent_seg_distance, 0,
-                                                          self.max_training_segments - 1)
+                                                          self._max_training_segments - 1)
                 seg_distance_emb = self.emb_segment_distance(top_antecedent_seg_distance)
             # if conf['use_features']:  # Antecedent distance
             top_antecedent_distance = Utils.bucket_distance(top_antecedent_offsets)
@@ -744,6 +778,7 @@ class CorefDecoderHOI(torch.nn.Module):
                                                                   easy_cluster_first=self._easy_cluster_first)
                     break
                 elif depth != self._depth - 1:
+                    cluster_merging_scores = None
                     if self._higher_order == 'attended_antecedent':
                         refined_span_emb = self.attended_antecedent(pruned_span_emb, top_antecedent_emb,
                                                                     top_pairwise_scores, device)
@@ -768,7 +803,7 @@ class CorefDecoderHOI(torch.nn.Module):
             # noinspection PyUnreachableCode
             top_pairwise_scores = top_pairwise_fast_scores  # [num top spans, max top antecedents]
 
-        top_antecedent_scores = torch.cat([torch.zeros(num_top_mentions, 1, device=device), top_pairwise_scores], dim=1)
+        top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_pairwise_scores], dim=1)
 
         """
             TODO: there's a bunch of stuff here that seems to be here for the purpose of making the loss compuation
@@ -780,6 +815,8 @@ class CorefDecoderHOI(torch.nn.Module):
             "coref_top_antecedents": top_antecedent_idx,
             "coref_top_antecedents_score": top_antecedent_scores,
             "coref_top_antecedents_mask": top_antecedent_mask,
+            "coref_top_pairwise_scores": coref_top_pairwise_scores,
+            "coref_cluster_merging_scores": cluster_merging_scores,  # only valid when cluster merging
             "pruned_candidate_mention_scores": pruned_span_scores,
             "pruned_span_starts": pruned_span_starts,
             "pruned_span_ends": pruned_span_ends,
@@ -787,6 +824,79 @@ class CorefDecoderHOI(torch.nn.Module):
             # "coref_top_span_cluster_ids": top_span_cluster_ids,
         }
 
+    def get_coref_loss(
+            self,
+            candidate_starts: torch.tensor,
+            candidate_ends: torch.tensor,
+            gold_starts: torch.tensor,
+            gold_ends: torch.tensor,
+            gold_cluster_ids: torch.tensor,
+            top_span_indices: torch.tensor,
+            top_antecedents: torch.tensor,
+            top_antecedents_mask: torch.tensor,
+            top_antecedents_score: torch.tensor,
+            cluster_merging_scores: torch.tensor,  # For cluster merging
+            top_pairwise_scores: torch.tensor,  # For cluster merging
+            num_top_spans: int,
+            device: Union[str, torch.device],
+    ):
+        """
+            This is to be called with elements from CorefDecoderHoi forward, but also with other stuff (gold)
+            AGAIN: THIS DOES NOT CALL FORWARD INSIDE IT. Call it from your 'main' module, whatever that is.
+        """
+        # same as their `candidate_labels`
+        gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+                                                                gold_starts, gold_ends,
+                                                                gold_cluster_ids)
+
+        top_span_cluster_ids = gold_candidate_cluster_ids[top_span_indices]
+        top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents]
+        top_antecedent_cluster_ids += (top_antecedents_mask.to(
+            torch.long) - 1) * 100000  # Mask id on invalid antecedents
+        same_gold_cluster_indicator = (top_antecedent_cluster_ids == torch.unsqueeze(top_span_cluster_ids, 1))
+        non_dummy_indicator = torch.unsqueeze(top_span_cluster_ids > 0, 1)
+        pairwise_labels = same_gold_cluster_indicator & non_dummy_indicator
+        dummy_antecedent_labels = torch.logical_not(pairwise_labels.any(dim=1, keepdims=True))
+        top_antecedent_gold_labels = torch.cat([dummy_antecedent_labels, pairwise_labels], dim=1)
+
+        # Get loss
+        if self._loss_type == 'marginalized':
+            log_marginalized_antecedent_scores = torch.logsumexp(
+                top_antecedents_score + torch.log(top_antecedent_gold_labels.to(torch.float)), dim=1)
+            log_norm = torch.logsumexp(top_antecedents_score, dim=1)
+            loss = torch.sum(log_norm - log_marginalized_antecedent_scores)
+        elif self._loss_type == 'hinge':
+            top_antecedent_mask = torch.cat([torch.ones(num_top_spans, 1, dtype=torch.bool, device=device),
+                                             top_antecedents_mask], dim=1)
+            top_antecedents_score += torch.log(top_antecedent_mask.to(torch.float))
+            highest_antecedent_scores, highest_antecedent_idx = torch.max(top_antecedents_score, dim=1)
+            gold_antecedent_scores = top_antecedents_score + torch.log(top_antecedent_gold_labels.to(torch.float))
+            highest_gold_antecedent_scores, highest_gold_antecedent_idx = torch.max(gold_antecedent_scores, dim=1)
+            slack_hinge = 1 + highest_antecedent_scores - highest_gold_antecedent_scores
+            # Calculate delta
+            highest_antecedent_is_gold = (highest_antecedent_idx == highest_gold_antecedent_idx)
+            mistake_false_new = (highest_antecedent_idx == 0) & torch.logical_not(dummy_antecedent_labels.squeeze())
+            delta = ((3 - self._false_new_delta) / 2) * torch.ones(num_top_spans, dtype=torch.float, device=device)
+            delta -= (1 - self._false_new_delta) * mistake_false_new.to(torch.float)
+            delta *= torch.logical_not(highest_antecedent_is_gold).to(torch.float)
+            loss = torch.sum(slack_hinge * delta)
+        else:
+            raise ValueError(f"Unknown Loss type: `{self._loss_type}`. Must be `marginalized` or `hinge`.")
+
+        if self._higher_order == 'cluster_merging':
+            top_pairwise_scores += cluster_merging_scores
+            top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_pairwise_scores],
+                                              dim=1)
+            log_marginalized_antecedent_scores2 = torch.logsumexp(
+                top_antecedent_scores + torch.log(top_antecedent_gold_labels.to(torch.float)), dim=1)
+            log_norm2 = torch.logsumexp(top_antecedent_scores, dim=1)  # [num top spans]
+            loss_cm = torch.sum(log_norm2 - log_marginalized_antecedent_scores2)
+            if self._cluster_dloss:
+                loss += loss_cm
+            else:
+                loss = loss_cm
+
+        return loss
 
 class CorefDecoderMangoes(torch.nn.Module):
 
@@ -985,7 +1095,7 @@ class CorefDecoderMangoes(torch.nn.Module):
             pruned_span_emb: torch.tensor,  # [num_cand, emb_size]
 
             # Some input ID things
-            num_top_mentions: int,
+            num_top_spans: int,
             num_segments: int,
             len_segment: int,
             domain: str,
@@ -993,10 +1103,10 @@ class CorefDecoderMangoes(torch.nn.Module):
             device: Union[str, torch.device],
     ):
 
-        num_top_antecedents = min(self.max_top_antecedents, num_top_mentions)
+        num_top_antecedents = min(self.max_top_antecedents, num_top_spans)
 
         # Start with coarse model
-        dummy_scores = torch.zeros([num_top_mentions, 1], device=device)
+        dummy_scores = torch.zeros([num_top_spans, 1], device=device)
         top_ante, top_ante_mask, top_ante_fast_scores, top_ante_offsets = self.coarse_to_fine_pruning(
             pruned_span_emb,
             pruned_span_scores,
