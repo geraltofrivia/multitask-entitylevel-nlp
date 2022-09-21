@@ -636,7 +636,7 @@ class MultiTaskDataIter(Dataset):
         token_type_ids = tokenized.token_type_ids.reshape((-1, n_mlen))  # n_seq, m_len
         attention_mask = tokenized.attention_mask.reshape((-1, n_mlen))
         speaker_ids = speaker_ids.reshape((-1, n_mlen)) if speaker_ids is not None else speaker_ids
-        genre = self.genre_dict[instance.genre]
+        genre = torch.tensor(self.genre_dict[instance.genre], dtype=torch.long)
         """
             Span Iteration: find all valid contiguous sequences of inputs. 
         

@@ -465,6 +465,7 @@ class CorefDecoderHOI(torch.nn.Module):
         self._span_dim = _span_dim
         self._feat_dim = _feat_dim
         self._pair_dim = _pair_dim
+        self.max_training_segments = max_training_segments
 
     @staticmethod
     def _merge_span_to_cluster(cluster_emb, cluster_sizes, cluster_to_merge_id, span_emb, reduce):
@@ -664,6 +665,8 @@ class CorefDecoderHOI(torch.nn.Module):
     ):
         """ We pick up after span pruning done by SpanPruner forward """
 
+        attention_mask = attention_mask.to(bool)
+
         # TODO: figure out if we need attention mask to still be broken into segments or linearized?
 
         # Used to limit how many antecedents we consider, per pruned span
@@ -709,7 +712,7 @@ class CorefDecoderHOI(torch.nn.Module):
                 top_antecedent_seg_ids = token_seg_ids[pruned_span_starts[top_antecedent_idx]]
                 top_antecedent_seg_distance = torch.unsqueeze(top_span_seg_ids, 1) - top_antecedent_seg_ids
                 top_antecedent_seg_distance = torch.clamp(top_antecedent_seg_distance, 0,
-                                                          self.config['max_training_sentences'] - 1)
+                                                          self.max_training_segments - 1)
                 seg_distance_emb = self.emb_segment_distance(top_antecedent_seg_distance)
             # if conf['use_features']:  # Antecedent distance
             top_antecedent_distance = Utils.bucket_distance(top_antecedent_offsets)
@@ -765,7 +768,7 @@ class CorefDecoderHOI(torch.nn.Module):
             # noinspection PyUnreachableCode
             top_pairwise_scores = top_pairwise_fast_scores  # [num top spans, max top antecedents]
 
-        top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_pairwise_scores], dim=1)
+        top_antecedent_scores = torch.cat([torch.zeros(num_top_mentions, 1, device=device), top_pairwise_scores], dim=1)
 
         """
             TODO: there's a bunch of stuff here that seems to be here for the purpose of making the loss compuation
