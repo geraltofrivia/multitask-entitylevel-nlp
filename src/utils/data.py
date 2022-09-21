@@ -3,6 +3,7 @@
 """
 import copy
 import json
+import warnings
 from dataclasses import dataclass, field
 from functools import cached_property
 from typing import List, Optional, Tuple, Union
@@ -594,9 +595,11 @@ class Tasks:
     n_classes_pruner: Optional[int] = field(default_factory=int)
     n_classes_pos: Optional[int] = field(default_factory=int)
     n_speakers: Optional[int] = field(default_factory=int)
+    n_genres = 0
 
     @classmethod
-    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]], use_speakers: bool = False):
+    def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]],
+              use_speakers: bool = False, faux: bool = False):
 
         if not type(datasrc) in [type(None), str]:
             raise BadParameters(
@@ -759,7 +762,7 @@ class Tasks:
 
     @classmethod
     def create(cls):
-        return Tasks.parse(datasrc=None, tuples=[])
+        return Tasks.parse(datasrc=None, tuples=[], faux=True)
 
     def isempty(self):
         return self.dataset is None and len(self) == 0
