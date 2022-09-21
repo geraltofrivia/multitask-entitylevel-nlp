@@ -753,10 +753,12 @@ class CorefDecoderHOI(torch.nn.Module):
                     gate = self.gate_ffnn(torch.cat([pruned_span_emb, refined_span_emb], dim=1))
                     gate = torch.sigmoid(gate)
                     pruned_span_emb = gate * refined_span_emb + (
-                                1 - gate) * pruned_span_emb  # [num top spans, span emb size]
+                            1 - gate) * pruned_span_emb  # [num top spans, span emb size]
         else:
             # noinspection PyUnreachableCode
             top_pairwise_scores = top_pairwise_fast_scores  # [num top spans, max top antecedents]
+
+        top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_pairwise_scores], dim=1)
 
         """
             TODO: there's a bunch of stuff here that seems to be here for the purpose of making the loss compuation
@@ -765,9 +767,9 @@ class CorefDecoderHOI(torch.nn.Module):
         """
 
         return {
-            "coref_top_antecedents": top_ante,
-            "coref_top_antecedents_score": top_ante_scores,
-            "coref_top_antecedents_mask": top_ante_mask,
+            "coref_top_antecedents": top_antecedent_idx,
+            "coref_top_antecedents_score": top_antecedent_scores,
+            "coref_top_antecedents_mask": top_antecedent_mask,
             "pruned_candidate_mention_scores": pruned_span_scores,
             "pruned_span_starts": pruned_span_starts,
             "pruned_span_ends": pruned_span_ends,
