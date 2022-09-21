@@ -485,7 +485,8 @@ def train(ctx):
     dev_ds = ctx.obj['dev_ds']
 
     # Make the model
-    model = MTLModel(dir_encoder, config=config, **config.to_dict()).to(device)
+    model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
+                     **config.to_dict()).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     n_params = sum([param.nelement() for param in model.parameters()])
     print("Model params: ", n_params)

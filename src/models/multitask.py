@@ -451,6 +451,7 @@ class MTLModel(nn.Module):
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
             "flattened_ids": flattened_ids,
+            "num_top_spans": pruner_outputs['num_top_spans'],
             **coref_specific,
             **ner_specific,
             **pos_specific

@@ -123,3 +123,10 @@ First step: get the current best result out. Sweep.
 - [ ] Run a bert-base-uncased sweep
 - [ ] Mimic parameter init (and see if performance rises or falls)
 - [ ] Okay, its time to write a OAR management class/thing
+
+----
+
+# 21-09-2022
+
+- [!] **Redo all NER runs** (We are working with shared pruner!)
+- [ ] Add a flag to disassociate NER with pruner stuff.

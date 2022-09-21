@@ -815,7 +815,7 @@ class CorefDecoderHOI(torch.nn.Module):
             "coref_top_antecedents": top_antecedent_idx,
             "coref_top_antecedents_score": top_antecedent_scores,
             "coref_top_antecedents_mask": top_antecedent_mask,
-            "coref_top_pairwise_scores": coref_top_pairwise_scores,
+            "coref_top_pairwise_scores": top_pairwise_scores,
             "coref_cluster_merging_scores": cluster_merging_scores,  # only valid when cluster merging
             "pruned_candidate_mention_scores": pruned_span_scores,
             "pruned_span_starts": pruned_span_starts,
