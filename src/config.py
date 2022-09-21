@@ -124,6 +124,9 @@ DEFAULTS: dict = FancyDict({
     'pruner_use_width': True,  # if False, we ignore span width as a feature in span width embeddings and pruning spans.
     'coref_higher_order': 'cluster_merging',
     # attended_antecedent, max_antecedent, entity_equalization, span_clustering, cluster_merging
+    'coref_cluster_reduce': 'mean',  # For cluster_merging
+    'coref_easy_cluster_first': False,  # For cluster_merging
+    'coref_cluster_dloss': False,  # For cluster_merging
     'coref_depth': 2,  # num of times we run the higher order loop
     'coref_loss_mean': False,  # if true, we do a mean after calc coref loss
     'coref_use_metadata': True,  # If true, antecedent anaphor distance is taken into account

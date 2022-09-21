@@ -40,7 +40,8 @@ class Utils(object):
         return emb
 
     @staticmethod
-    def make_ffnn(input_dim: int, hidden_dim: Union[int, List[int]], output_dim: int, dropout: float):
+    def make_ffnn(input_dim: int, hidden_dim: Union[int, List[int]], output_dim: int, dropout: float,
+                  bias_in_last_layers: bool = True):
         if hidden_dim is None or hidden_dim == 0 or hidden_dim == [] or hidden_dim == [0]:
             return Utils.make_linear(input_dim, output_dim)
 
@@ -49,7 +50,7 @@ class Utils(object):
         ffnn = [Utils.make_linear(input_dim, hidden_dim[0]), nn.ReLU(), dropout]
         for i in range(1, len(hidden_dim)):
             ffnn += [Utils.make_linear(hidden_dim[i - 1], hidden_dim[i]), nn.ReLU(), dropout]
-        ffnn.append(Utils.make_linear(hidden_dim[-1], output_dim))
+        ffnn.append(Utils.make_linear(hidden_dim[-1], output_dim, bias=bias_in_last_layers))
         return nn.Sequential(*ffnn)
 
     @staticmethod
@@ -383,6 +384,9 @@ class CorefDecoderHOI(torch.nn.Module):
             coref_higher_order: str,
             coref_depth: int,
             coref_num_genres: int,
+            coref_easy_cluster_first: bool,
+            coref_cluster_reduce: str,
+            coref_cluster_dloss: bool,
             bias_in_last_layers: bool,
             coref_use_metadata: bool,
             coref_num_speakers: int = 2,
@@ -403,6 +407,9 @@ class CorefDecoderHOI(torch.nn.Module):
         self._depth = coref_depth
         self._higher_order = coref_higher_order
         self.max_top_antecedents: int = max_top_antecedents
+        self._easy_cluster_first = coref_easy_cluster_first
+        self._cluster_reduce = coref_cluster_reduce
+        self._cluster_dloss = coref_cluster_dloss
 
         _feat_dim = coref_metadata_feature_size
         _span_dim = (hidden_size * 3)
@@ -432,7 +439,8 @@ class CorefDecoderHOI(torch.nn.Module):
         if self._higher_order == 'cluster_merging':
             self.emb_cluster_size = self.make_embedding(10, _feat_dim)
             self.span_attn_ffnn = None
-            self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, [unary_hdim, ], 1, self._dropout)
+            self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, [unary_hdim, ], 1, self._dropout,
+                                                      bias_in_last_layers=bias_in_last_layers)
         elif self._higher_order == 'span_clustering':
             self.emb_cluster_size = None
             self.span_attn_ffnn = Utils.make_ffnn(_span_dim, 0, 1, self._dropout)
@@ -441,7 +449,8 @@ class CorefDecoderHOI(torch.nn.Module):
             self.emb_cluster_size, self.span_attn_ffnn, self.cluster_score_ffnn = None, None, None
 
         self.coarse_bilinear = Utils.make_ffnn(self.span_emb_size, 0, self.span_emb_size, dropout=self._dropout)
-        self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout)
+        self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout,
+                                                bias_in_last_layers=bias_in_last_layers)
         self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) \
             if self._depth > 1 else None
 
@@ -548,6 +557,82 @@ class CorefDecoderHOI(torch.nn.Module):
         cluster_merging_scores = torch.stack(cluster_merging_scores, dim=0)
         return cluster_merging_scores
 
+    @staticmethod
+    def attended_antecedent(top_span_emb, top_antecedent_emb, top_antecedent_scores, device):
+        num_top_spans = top_span_emb.shape[0]
+        top_antecedent_weights = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_antecedent_scores], dim=1)
+        top_antecedent_weights = nn.functional.softmax(top_antecedent_weights, dim=1)
+        top_antecedent_emb = torch.cat([torch.unsqueeze(top_span_emb, 1), top_antecedent_emb], dim=1)
+        refined_span_emb = torch.sum(torch.unsqueeze(top_antecedent_weights, 2) * top_antecedent_emb,
+                                     dim=1)  # [num top spans, span emb size]
+        return refined_span_emb
+
+    @staticmethod
+    def max_antecedent(top_span_emb, top_antecedent_emb, top_antecedent_scores, device):
+        num_top_spans = top_span_emb.shape[0]
+        top_antecedent_weights = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_antecedent_scores], dim=1)
+        top_antecedent_emb = torch.cat([torch.unsqueeze(top_span_emb, 1), top_antecedent_emb], dim=1)
+        max_antecedent_idx = torch.argmax(top_antecedent_weights, dim=1, keepdim=True)
+        refined_span_emb = Utils.batch_select(top_antecedent_emb, max_antecedent_idx, device=device).squeeze(
+            1)  # [num top spans, span emb size]
+        return refined_span_emb
+
+    @staticmethod
+    def span_clustering(top_span_emb, top_antecedent_idx, top_antecedent_scores, span_attn_ffnn, device):
+        # Get predicted antecedents
+        num_top_spans, max_top_antecedents = top_antecedent_idx.shape[0], top_antecedent_idx.shape[1]
+        predicted_antecedents = []
+        top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_antecedent_scores], dim=1)
+        for i, idx in enumerate((torch.argmax(top_antecedent_scores, axis=1) - 1).tolist()):
+            if idx < 0:
+                predicted_antecedents.append(-1)
+            else:
+                predicted_antecedents.append(top_antecedent_idx[i, idx].item())
+        # Get predicted clusters
+        predicted_clusters = []
+        span_to_cluster_id = [-1] * num_top_spans
+        for i, predicted_idx in enumerate(predicted_antecedents):
+            if predicted_idx < 0:
+                continue
+            assert i > predicted_idx, f'span idx: {i}; antecedent idx: {predicted_idx}'
+            # Check antecedent's cluster
+            antecedent_cluster_id = span_to_cluster_id[predicted_idx]
+            if antecedent_cluster_id == -1:
+                antecedent_cluster_id = len(predicted_clusters)
+                predicted_clusters.append([predicted_idx])
+                span_to_cluster_id[predicted_idx] = antecedent_cluster_id
+            # Add mention to cluster
+            predicted_clusters[antecedent_cluster_id].append(i)
+            span_to_cluster_id[i] = antecedent_cluster_id
+        if len(predicted_clusters) == 0:
+            return top_span_emb
+
+        # Pad clusters
+        max_cluster_size = max([len(c) for c in predicted_clusters])
+        cluster_sizes = []
+        for cluster in predicted_clusters:
+            cluster_sizes.append(len(cluster))
+            cluster += [0] * (max_cluster_size - len(cluster))
+        predicted_clusters_mask = torch.arange(0, max_cluster_size, device=device).repeat(len(predicted_clusters), 1)
+        predicted_clusters_mask = predicted_clusters_mask < torch.tensor(cluster_sizes, device=device).unsqueeze(
+            1)  # [num clusters, max cluster size]
+        # Get cluster repr
+        predicted_clusters = torch.tensor(predicted_clusters, device=device)
+        cluster_emb = top_span_emb[predicted_clusters]  # [num clusters, max cluster size, emb size]
+        span_attn = torch.squeeze(span_attn_ffnn(cluster_emb), 2)
+        span_attn += torch.log(predicted_clusters_mask.to(torch.float))
+        span_attn = nn.functional.softmax(span_attn, dim=1)
+        cluster_emb = torch.sum(cluster_emb * torch.unsqueeze(span_attn, 2), dim=1)  # [num clusters, emb size]
+        # Get refined span
+        refined_span_emb = []
+        for i, cluster_idx in enumerate(span_to_cluster_id):
+            if cluster_idx < 0:
+                refined_span_emb.append(top_span_emb[i])
+            else:
+                refined_span_emb.append(cluster_emb[cluster_idx])
+        refined_span_emb = torch.stack(refined_span_emb, dim=0)
+        return refined_span_emb
+
     def forward(
             self,
 
@@ -624,8 +709,7 @@ class CorefDecoderHOI(torch.nn.Module):
             top_antecedent_distance_emb = self.emb_top_antecedent_distance(top_antecedent_distance)
 
             for depth in range(self._depth):
-                top_antecedent_emb = pruned_span_emb[
-                    top_antecedent_idx]  # [num top spans, max top antecedents, emb size]
+                top_antecedent_emb = pruned_span_emb[top_antecedent_idx]  # [n_spans, max top antecedents, emb size]
                 feature_list = []
                 if self._use_metadata:  # speaker, genre
                     feature_list.append(same_speaker_emb)
@@ -646,28 +730,50 @@ class CorefDecoderHOI(torch.nn.Module):
                                                                   top_pairwise_scores,
                                                                   self.emb_cluster_size, self.cluster_score_ffnn, None,
                                                                   self.dropout,
-                                                                  device=device, reduce=conf['cluster_reduce'],
-                                                                  easy_cluster_first=conf['easy_cluster_first'])
+                                                                  device=device, reduce=self._cluster_reduce,
+                                                                  easy_cluster_first=self._easy_cluster_first)
                     break
                 elif depth != self._depth - 1:
-                    if conf['higher_order'] == 'attended_antecedent':
-                        refined_span_emb = ho.attended_antecedent(top_span_emb, top_antecedent_emb, top_pairwise_scores,
-                                                                  device)
-                    elif conf['higher_order'] == 'max_antecedent':
-                        refined_span_emb = ho.max_antecedent(top_span_emb, top_antecedent_emb, top_pairwise_scores,
-                                                             device)
-                    elif conf['higher_order'] == 'entity_equalization':
-                        refined_span_emb = ho.entity_equalization(top_span_emb, top_antecedent_emb, top_antecedent_idx,
-                                                                  top_pairwise_scores, device)
-                    elif conf['higher_order'] == 'span_clustering':
-                        refined_span_emb = ho.span_clustering(top_span_emb, top_antecedent_idx, top_pairwise_scores,
-                                                              self.span_attn_ffnn, device)
+                    if self._higher_order == 'attended_antecedent':
+                        refined_span_emb = self.attended_antecedent(pruned_span_emb, top_antecedent_emb,
+                                                                    top_pairwise_scores, device)
+                    elif self._higher_order == 'max_antecedent':
+                        refined_span_emb = self.max_antecedent(pruned_span_emb, top_antecedent_emb, top_pairwise_scores,
+                                                               device)
+                    elif self._higher_order == 'entity_equalization':
+                        raise NotImplementedError(f"Did not implement entity equalization yet")
+                        # refined_span_emb = ho.entity_equalization(top_span_emb, top_antecedent_emb, top_antecedent_idx,
+                        #                                           top_pairwise_scores, device)
+                    elif self._higher_order == 'span_clustering':
+                        refined_span_emb = self.span_clustering(pruned_span_emb, top_antecedent_idx,
+                                                                top_pairwise_scores, self.span_attn_ffnn, device)
+                    else:
+                        raise ValueError(f"Unknown value for self._higher_order: {self._higher_order}")
 
-                    gate = self.gate_ffnn(torch.cat([top_span_emb, refined_span_emb], dim=1))
+                    gate = self.gate_ffnn(torch.cat([pruned_span_emb, refined_span_emb], dim=1))
                     gate = torch.sigmoid(gate)
-                    top_span_emb = gate * refined_span_emb + (1 - gate) * top_span_emb  # [num top spans, span emb size]
+                    pruned_span_emb = gate * refined_span_emb + (
+                                1 - gate) * pruned_span_emb  # [num top spans, span emb size]
         else:
+            # noinspection PyUnreachableCode
             top_pairwise_scores = top_pairwise_fast_scores  # [num top spans, max top antecedents]
+
+        """
+            TODO: there's a bunch of stuff here that seems to be here for the purpose of making the loss compuation
+                only.
+            Once we figure its purpose out, we will proceed to add a pred_with_labels or do_loss fn or something ihre.                
+        """
+
+        return {
+            "coref_top_antecedents": top_ante,
+            "coref_top_antecedents_score": top_ante_scores,
+            "coref_top_antecedents_mask": top_ante_mask,
+            "pruned_candidate_mention_scores": pruned_span_scores,
+            "pruned_span_starts": pruned_span_starts,
+            "pruned_span_ends": pruned_span_ends,
+            "pruned_span_indices": pruned_span_indices,
+            # "coref_top_span_cluster_ids": top_span_cluster_ids,
+        }
 
 
 class CorefDecoderMangoes(torch.nn.Module):
