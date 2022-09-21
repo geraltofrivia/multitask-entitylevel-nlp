@@ -40,13 +40,17 @@ class Utils(object):
         return emb
 
     @staticmethod
-    def make_ffnn(input_dim: int, hidden_dim: Union[int, List[int]], output_dim: int, dropout: float,
+    def make_ffnn(input_dim: int, hidden_dim: Union[int, List[int]], output_dim: int, dropout: Union[float, nn.Module],
                   bias_in_last_layers: bool = True):
         if hidden_dim is None or hidden_dim == 0 or hidden_dim == [] or hidden_dim == [0]:
             return Utils.make_linear(input_dim, output_dim)
 
         if not isinstance(hidden_dim, Iterable):
             hidden_dim = [hidden_dim]
+
+        if not isinstance(dropout, nn.Module):
+            dropout = nn.Dropout(p=dropout)
+
         ffnn = [Utils.make_linear(input_dim, hidden_dim[0]), nn.ReLU(), dropout]
         for i in range(1, len(hidden_dim)):
             ffnn += [Utils.make_linear(hidden_dim[i - 1], hidden_dim[i]), nn.ReLU(), dropout]
@@ -423,6 +427,8 @@ class CorefDecoderHOI(torch.nn.Module):
         if self._use_speakers:
             _pair_dim += _feat_dim * 2  # For same_speaker stuff. Why 2 times though? # TODO: figure out
 
+        self.dropout = nn.Dropout(p=self._dropout)
+
         self.emb_same_speaker = Utils.make_embedding(2, _feat_dim) \
             if self._use_speakers else None
         self.emb_segment_distance = Utils.make_embedding(max_training_segments, _feat_dim)
@@ -437,9 +443,9 @@ class CorefDecoderHOI(torch.nn.Module):
             self.antecedent_distance_score_ffnn = None
 
         if self._higher_order == 'cluster_merging':
-            self.emb_cluster_size = self.make_embedding(10, _feat_dim)
+            self.emb_cluster_size = Utils.make_embedding(10, _feat_dim)
             self.span_attn_ffnn = None
-            self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, [unary_hdim, ], 1, self._dropout,
+            self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, unary_hdim, 1, self._dropout,
                                                       bias_in_last_layers=bias_in_last_layers)
         elif self._higher_order == 'span_clustering':
             self.emb_cluster_size = None
@@ -448,16 +454,17 @@ class CorefDecoderHOI(torch.nn.Module):
         else:
             self.emb_cluster_size, self.span_attn_ffnn, self.cluster_score_ffnn = None, None, None
 
-        self.coarse_bilinear = Utils.make_ffnn(self.span_emb_size, 0, self.span_emb_size, dropout=self._dropout)
+        self.coarse_bilinear = Utils.make_ffnn(_span_dim, 0, _span_dim, dropout=self._dropout)
         self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout,
                                                 bias_in_last_layers=bias_in_last_layers)
         self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) \
             if self._depth > 1 else None
 
-        self.dropout = nn.Dropout(p=self._dropout)
-
         self.update_steps = 0  # Internal use for debug
         self.debug = True
+        self._span_dim = _span_dim
+        self._feat_dim = _feat_dim
+        self._pair_dim = _pair_dim
 
     @staticmethod
     def _merge_span_to_cluster(cluster_emb, cluster_sizes, cluster_to_merge_id, span_emb, reduce):
