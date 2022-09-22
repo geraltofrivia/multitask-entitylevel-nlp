@@ -118,6 +118,7 @@ def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[fl
             return max(0.0, float(n_updates - current_step) / float(max(1, n_updates)))
 
         schedulers = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda_task)
+        return schedulers
 
     else:
         raise BadParameters(f"Unknown LR Schedule Recipe Name - {lr_schedule}")
