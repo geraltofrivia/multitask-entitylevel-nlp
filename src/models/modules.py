@@ -275,22 +275,18 @@ class SpanPruner(torch.nn.Module):
         self._top_span_ratio: float = pruner_top_span_ratio
 
         # Parameter Time!
+        _feat_dim = coref_metadata_feature_size
+        _span_dim = (hidden_size * 3) + _feat_dim
         self.span_attend_projection = nn.Linear(hidden_size, 1)
-        span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
         self.span_scorer = nn.Sequential(
-            nn.Linear(span_embedding_dim, unary_hdim),
+            nn.Linear(_span_dim, unary_hdim),
             nn.ReLU(),
             nn.Dropout(self._dropout),
             nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
         )
 
         if self._use_width:
-            self.span_width_scorer = nn.Sequential(
-                nn.Linear(coref_metadata_feature_size, unary_hdim),
-                nn.ReLU(),
-                nn.Dropout(self._dropout),
-                nn.Linear(unary_hdim, 1),
-            )
+            self.span_width_scorer = Utils.make_ffnn(_feat_dim, [unary_hdim], 1, self._dropout)
             self.emb_span_width = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
             self.emb_span_width_prior = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
 
@@ -441,65 +437,42 @@ class CorefDecoderHOI(torch.nn.Module):
         self._use_speakers = use_speakers
         self._use_metadata = coref_use_metadata
         self._depth = coref_depth
-        self._higher_order = coref_higher_order
-        self.max_top_antecedents: int = max_top_antecedents
+        self._ho = coref_higher_order
+        self._max_top_antecedents: int = max_top_antecedents
         self._easy_cluster_first = coref_easy_cluster_first
         self._cluster_reduce = coref_cluster_reduce
         self._cluster_dloss = coref_cluster_dloss
         self._loss_type = coref_loss_type
 
         _feat_dim = coref_metadata_feature_size
-        _span_dim = (hidden_size * 3)
-        if self._use_metadata:
-            # For span width
-            _span_dim += _feat_dim
+        _span_dim = (hidden_size * 3) + (_feat_dim if self._use_metadata else 0)
+        _pair_dim = _span_dim * 3 + (_feat_dim * 2 if self._use_metadata else 0) + \
+                    (_feat_dim * 2 if self._use_speakers else 0)
 
-        _pair_dim = _span_dim * 3
-        if self._use_metadata:
-            _pair_dim += _feat_dim * 2  # One for segment distance, one for span width
-        if self._use_speakers:
-            _pair_dim += _feat_dim * 2  # For same_speaker stuff. Why 2 times though? # TODO: figure out
-
-        self.dropout = nn.Dropout(p=self._dropout)
-
-        self.emb_same_speaker = Utils.make_embedding(2, _feat_dim) \
-            if self._use_speakers else None
-        self.emb_segment_distance = Utils.make_embedding(max_training_segments, _feat_dim)
-        self.emb_top_antecedent_distance = Utils.make_embedding(10, _feat_dim)
-        if self._use_metadata:
-            self.emb_genre = Utils.make_embedding(self._n_genres, _feat_dim)
-            self.emb_antecedent_distance_prior = Utils.make_embedding(10, _feat_dim)
-            self.antecedent_distance_score_ffnn = Utils.make_ffnn(_feat_dim, 0, 1, self._dropout)
-        else:
-            self.emb_genre = None
-            self.emb_antecedent_distance_prior = None
-            self.antecedent_distance_score_ffnn = None
-
-        if self._higher_order == 'cluster_merging':
-            self.emb_cluster_size = Utils.make_embedding(10, _feat_dim)
-            self.span_attn_ffnn = None
-            self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, unary_hdim, 1, self._dropout,
-                                                      bias_in_last_layers=bias_in_last_layers)
-        elif self._higher_order == 'span_clustering':
-            self.emb_cluster_size = None
-            self.span_attn_ffnn = Utils.make_ffnn(_span_dim, 0, 1, self._dropout)
-            self.cluster_score_ffnn = None
-        else:
-            self.emb_cluster_size, self.span_attn_ffnn, self.cluster_score_ffnn = None, None, None
-
-        self.coarse_bilinear = Utils.make_ffnn(_span_dim, 0, _span_dim, dropout=self._dropout)
-        self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout,
-                                                bias_in_last_layers=bias_in_last_layers)
-        self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) \
-            if self._depth > 1 else None
-
-        self.update_steps = 0  # Internal use for debug
+        # more variables
         self.debug = True
         self._span_dim = _span_dim
         self._feat_dim = _feat_dim
         self._pair_dim = _pair_dim
         self._max_training_segments = max_training_segments
         self._false_new_delta = coref_false_new_delta
+        self.dropout = nn.Dropout(p=self._dropout)
+
+        self.emb_same_speaker = Utils.make_embedding(2, _feat_dim) if self._use_speakers else None
+        self.emb_segment_distance = Utils.make_embedding(max_training_segments, _feat_dim)
+        self.emb_top_antecedent_distance = Utils.make_embedding(10, _feat_dim)
+        self.emb_genre = Utils.make_embedding(self._n_genres, _feat_dim) if self._use_metadata else None
+        self.emb_antecedent_distance_prior = Utils.make_embedding(10, _feat_dim) if self._use_metadata else None
+        self.emb_cluster_size = Utils.make_embedding(10, _feat_dim) if self._ho == 'cluster_merging' else None
+
+        self.antecedent_distance_score_ffnn = Utils.make_ffnn(_feat_dim, 0, 1,
+                                                              self._dropout) if self._use_metadata else None
+        self.span_attn_ffnn = Utils.make_ffnn(_span_dim, 0, 1, self._dropout) if self._ho == 'span_clustering' else None
+        self.cluster_score_ffnn = Utils.make_ffnn(3 * _span_dim + _feat_dim, unary_hdim, 1, self._dropout,
+                                                  bias_in_last_layers) if self._ho == 'cluster_merging' else None
+        self.coarse_bilinear = Utils.make_ffnn(_span_dim, 0, _span_dim, dropout=self._dropout)
+        self.coref_score_ffnn = Utils.make_ffnn(_pair_dim, [1000], 1, self._dropout, bias_in_last_layers)
+        self.gate_ffnn = Utils.make_ffnn(2 * _span_dim, 0, _pair_dim, self._dropout) if self._depth > 1 else None
 
     @staticmethod
     def _merge_span_to_cluster(cluster_emb, cluster_sizes, cluster_to_merge_id, span_emb, reduce):
@@ -704,7 +677,7 @@ class CorefDecoderHOI(torch.nn.Module):
         # TODO: figure out if we need attention mask to still be broken into segments or linearized?
 
         # Used to limit how many antecedents we consider, per pruned span
-        num_top_antecedents = min(self.max_top_antecedents, num_top_spans)
+        num_top_antecedents = min(self._max_top_antecedents, num_top_spans)
 
         # Coarse pruning on each mention's antecedents
         top_span_range = torch.arange(0, num_top_spans, device=device)
@@ -769,7 +742,7 @@ class CorefDecoderHOI(torch.nn.Module):
                 pair_emb = torch.cat([target_emb, top_antecedent_emb, similarity_emb, feature_emb], 2)
                 top_pairwise_slow_scores = torch.squeeze(self.coref_score_ffnn(pair_emb), 2)
                 top_pairwise_scores = top_pairwise_slow_scores + top_pairwise_fast_scores
-                if self._higher_order == 'cluster_merging':
+                if self._ho == 'cluster_merging':
                     cluster_merging_scores = self.cluster_merging(pruned_span_emb, top_antecedent_idx,
                                                                   top_pairwise_scores,
                                                                   self.emb_cluster_size, self.cluster_score_ffnn, None,
@@ -779,21 +752,21 @@ class CorefDecoderHOI(torch.nn.Module):
                     break
                 elif depth != self._depth - 1:
                     cluster_merging_scores = None
-                    if self._higher_order == 'attended_antecedent':
+                    if self._ho == 'attended_antecedent':
                         refined_span_emb = self.attended_antecedent(pruned_span_emb, top_antecedent_emb,
                                                                     top_pairwise_scores, device)
-                    elif self._higher_order == 'max_antecedent':
+                    elif self._ho == 'max_antecedent':
                         refined_span_emb = self.max_antecedent(pruned_span_emb, top_antecedent_emb, top_pairwise_scores,
                                                                device)
-                    elif self._higher_order == 'entity_equalization':
+                    elif self._ho == 'entity_equalization':
                         raise NotImplementedError(f"Did not implement entity equalization yet")
                         # refined_span_emb = ho.entity_equalization(top_span_emb, top_antecedent_emb, top_antecedent_idx,
                         #                                           top_pairwise_scores, device)
-                    elif self._higher_order == 'span_clustering':
+                    elif self._ho == 'span_clustering':
                         refined_span_emb = self.span_clustering(pruned_span_emb, top_antecedent_idx,
                                                                 top_pairwise_scores, self.span_attn_ffnn, device)
                     else:
-                        raise ValueError(f"Unknown value for self._higher_order: {self._higher_order}")
+                        raise ValueError(f"Unknown value for self._higher_order: {self._ho}")
 
                     gate = self.gate_ffnn(torch.cat([pruned_span_emb, refined_span_emb], dim=1))
                     gate = torch.sigmoid(gate)
@@ -883,7 +856,7 @@ class CorefDecoderHOI(torch.nn.Module):
         else:
             raise ValueError(f"Unknown Loss type: `{self._loss_type}`. Must be `marginalized` or `hinge`.")
 
-        if self._higher_order == 'cluster_merging':
+        if self._ho == 'cluster_merging':
             top_pairwise_scores += cluster_merging_scores
             top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_pairwise_scores],
                                               dim=1)
