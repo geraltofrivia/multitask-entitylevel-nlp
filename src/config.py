@@ -108,7 +108,7 @@ LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0, 1.0]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = FancyDict({
     'skip_instance_after_nspan': 15000,
-    'max_span_width': 5,  # we need to push this to 30 somehow :shrug:
+    'max_span_width': 30,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
     'max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_dropout': 0.3,
@@ -143,13 +143,13 @@ DEFAULTS: dict = FancyDict({
     'ner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
     'pruner_unweighted': True,  # if True, we don't estimate class weights and dont use them during loss comp
     'trainer': FancyDict({
-        'encoder_learning_rate': 2e-05,  # the LR used for encoder IF encoder is not frozen.
-        'encoder_weight_decay': 0.01,  # the WD used for encoder. Used for everything else if task wd is not specified
+        'encoder_learning_rate': 1e-5,  # the LR used for encoder IF encoder is not frozen.
+        'encoder_weight_decay': 1e-2,  # the WD used for encoder. Used for everything else if task wd is not specified
         'adam_beta1': 0.9,
         'adam_beta2': 0.999,
         'adam_epsilon': 1e-6,
         'clip_gradients_norm': 1.0,
-        'learning_rate': 0.0001,
+        'learning_rate': 2e-4,
         'coref_false_new_delta': 1.5  # For loss_type = hinge
     })
 })
@@ -167,5 +167,7 @@ LOSS_SCALES = {
     'pos': [1.0, ],
 }
 SCHEDULER_CONFIG = {
-    'gamma': {'decay_rate': 0.9}
+    'gamma': {'decay_rate': 0.93},
+    'warmup': {'warmup': 0.1}
+
 }

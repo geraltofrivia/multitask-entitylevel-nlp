@@ -93,7 +93,7 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
-def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[float]) \
+def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[float], n_updates: int) \
         -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
     if not lr_schedule:
         return None
@@ -103,6 +103,21 @@ def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[fl
         lambda_1 = lambda epoch: hyperparam ** epoch
         scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda_1)
         return scheduler
+    elif lr_schedule == 'warmup':
+        warmup_ratio = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['warmup']['warmup']
+        warmup_steps = int(n_updates * warmup_ratio)
+
+        # def lr_lambda_bert(current_step):
+        #     if current_step < warmup_steps:
+        #         return float(current_step) / float(max(1, warmup_steps))
+        #     return max(
+        #         0.0, float(n_updates - current_step) / float(max(1, n_updates - warmup_steps))
+        #     )
+
+        def lr_lambda_task(current_step):
+            return max(0.0, float(n_updates - current_step) / float(max(1, n_updates)))
+
+        schedulers = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda_task)
 
     else:
         raise BadParameters(f"Unknown LR Schedule Recipe Name - {lr_schedule}")
@@ -428,6 +443,9 @@ def run(
         dev_ds = partial(MultiDomainDataCombiner, srcs=[dev_ds, dev_ds_2], sampling_ratio=sampling_ratio,
                          speaker_offsets=speaker_offsets, genre_offsets=genre_offsets)
 
+    # Init them once to note the length
+    len_train = iter(train_ds()).__len__()
+
     """
         Prepare Context Object
         So far, we've done some common stuff. At this point, based on what was invoked, we can change a lot of things.
@@ -456,6 +474,7 @@ def run(
     ctx.obj['trim'] = trim
     ctx.obj['train_ds'] = train_ds
     ctx.obj['dev_ds'] = dev_ds
+    ctx.obj['len_train'] = len_train
 
 
 @run.command()
@@ -483,6 +502,7 @@ def train(ctx):
     trim = ctx.obj['trim']
     train_ds = ctx.obj['train_ds']
     dev_ds = ctx.obj['dev_ds']
+    len_train = ctx.obj['len_train']
 
     # Make the model
     model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
@@ -506,7 +526,7 @@ def train(ctx):
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
-    scheduler = make_scheduler(opt, lr_schedule[0], lr_schedule[1])
+    scheduler = make_scheduler(opt, lr_schedule[0], lr_schedule[1], n_updates=len_train * config.trainer.epochs)
 
     # Collect all metrics
     metrics = {task.dataset: [] for task in [tasks, tasks_2]}
