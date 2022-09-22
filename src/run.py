@@ -444,7 +444,7 @@ def run(
                          speaker_offsets=speaker_offsets, genre_offsets=genre_offsets)
 
     # Init them once to note the length
-    len_train = iter(train_ds()).__len__()
+    len_train = train_ds().__len__()
 
     """
         Prepare Context Object
