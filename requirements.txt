@@ -4,7 +4,6 @@ scipy
 numpy
 jsonlines
 tqdm
-zlib
 configparser
 python-Levenshtein
 thefuzz
