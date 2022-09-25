@@ -96,32 +96,37 @@ def make_optimizer(
 def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[float], n_updates: int) \
         -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
     if not lr_schedule:
-        return None
+        return None, None
 
     if lr_schedule == 'gamma':
         hyperparam = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['gamma']['decay_rate']
         lambda_1 = lambda epoch: hyperparam ** epoch
-        scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda_1)
-        return scheduler
+        scheduler_per_epoch = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda_1)
+        scheduler_per_iter = None
     elif lr_schedule == 'warmup':
+        # TODO: model both optimizers here
         warmup_ratio = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['warmup']['warmup']
         warmup_steps = int(n_updates * warmup_ratio)
 
-        # def lr_lambda_bert(current_step):
-        #     if current_step < warmup_steps:
-        #         return float(current_step) / float(max(1, warmup_steps))
-        #     return max(
-        #         0.0, float(n_updates - current_step) / float(max(1, n_updates - warmup_steps))
-        #     )
+        def lr_lambda_bert(current_step):
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+            return max(
+                0.0, float(n_updates - current_step) / float(max(1, n_updates - warmup_steps))
+            )
 
         def lr_lambda_task(current_step):
             return max(0.0, float(n_updates - current_step) / float(max(1, n_updates)))
 
-        schedulers = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda_task)
-        return schedulers
-
+        scheduler_per_iter = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda_task)
+        scheduler_per_epoch = None
     else:
         raise BadParameters(f"Unknown LR Schedule Recipe Name - {lr_schedule}")
+
+    if scheduler_per_iter is not None and scheduler_per_epoch is not None:
+        raise ValueError(f"Both Scheduler per iter and Scheduler per epoch are non-none. This won't fly.")
+
+    return scheduler_per_epoch, scheduler_per_iter
 
 
 def get_pretrained_dirs(enc_nm: str, tok_nm: str):
@@ -527,7 +532,8 @@ def train(ctx):
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
-    scheduler = make_scheduler(opt, lr_schedule[0], lr_schedule[1], n_updates=len_train * config.trainer.epochs)
+    scheduler_per_epoch, scheduler_per_iter = make_scheduler(opt, lr_schedule[0], lr_schedule[1],
+                                                             n_updates=len_train * config.trainer.epochs)
 
     # Collect all metrics
     metrics = {task.dataset: [] for task in [tasks, tasks_2]}
@@ -618,8 +624,10 @@ def train(ctx):
         checkpoint = torch.load(savedir / 'torch.save')
         model.load_state_dict(checkpoint['model_state_dict'])
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
-        if scheduler:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if scheduler_per_epoch:
+            scheduler_per_epoch.load_state_dict(checkpoint['scheduler_state_dict'])
+        if scheduler_per_iter:
+            scheduler_per_iter.load_state_dict(checkpoint['scheduler_state_dict'])
         print(f"Successfully resuming training from Epoch {config.epochs_last_run}")
 
     # WandB stuff
@@ -657,7 +665,8 @@ def train(ctx):
         epochs_last_run=config.epochs_last_run if hasattr(config, 'epochs_last_run') else 0,
         debug=config.debug,
         clip_grad_norm=config.trainer.clip_gradients_norm,
-        scheduler=scheduler
+        scheduler_per_epoch=scheduler_per_epoch,
+        scheduler_per_iter=scheduler_per_iter
     )
     print("potato")
 

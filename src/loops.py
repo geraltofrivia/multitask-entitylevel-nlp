@@ -43,7 +43,8 @@ def training_loop(
         epochs_last_run: int = 0,
         save_config: dict = None,
         debug: bool = False,
-        scheduler: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
+        scheduler_per_epoch: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
+        scheduler_per_iter: Optional[Type[torch.optim.lr_scheduler._LRScheduler]] = None,
         clip_grad_norm: float = 0.0,
 ) -> (list, list, list):
     """
@@ -128,13 +129,17 @@ def training_loop(
             for task_nm in instance['tasks']:
                 per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
 
+            # If LR scheduler is provided, run it
+            if scheduler_per_iter is not None:
+                scheduler_per_iter.step()
+
         model.eval()
         # Evaluation (on the validation set)
         dev_eval.run()
 
-        # If LR scheduler is provided, run it
-        if scheduler is not None:
-            scheduler.step()
+        # If LR scheduler (per epoch) is provided, run it
+        if scheduler_per_epoch is not None:
+            scheduler_per_epoch.step()
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
