@@ -187,7 +187,9 @@ class MultiTaskDataIter(Dataset):
              MultiTaskDatasetDump_coref_ner.pkl
         """
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_repr_ / "MultiTaskDatasetDump"
+        dump_dir = LOC.parsed / self._src_ / self._split_repr_
+        dump_dir.mkdir(exist_ok=True)
+        dump_fname = dump_dir / "MultiTaskDatasetDump"
         for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
