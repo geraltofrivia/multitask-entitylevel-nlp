@@ -41,7 +41,7 @@ class MultiTaskDataIter(Dataset):
     def __init__(
             self,
             src: str,
-            split: str,
+            split: Union[str, List[str]],
             tasks: Tasks,
             config: Union[FancyDict, SerializedBertConfig],
             tokenizer: transformers.BertTokenizer,
@@ -55,6 +55,7 @@ class MultiTaskDataIter(Dataset):
                 - ideally you should delete the Dataset and make a new one every time you start a new epoch.
         :param src: the name of the main dataset (e.g. ontonotes)
         :param split: the name of the dataset split (e.g. 'train', or 'development')
+            NOTE: you can pass multiple values if you want to load multiple ones in the same iter (when training on dev)
         :param config: the config dict (SerializedBertConfig + required params)
         :param tokenizer: a pretrained BertTokenizer
         :param tasks: a tasks object with loss scales, with ner and pruner classes etc all noted down.
@@ -65,6 +66,7 @@ class MultiTaskDataIter(Dataset):
         # TODO: make it such that multiple values can be passed in 'split'
         self._src_ = src
         self._split_ = split
+        self._split_repr_ = split if isinstance(split, str) else ''.join(sorted(split))
         self.tasks: Tasks = tasks
         self.tokenizer = tokenizer
         self.config = config
@@ -185,7 +187,7 @@ class MultiTaskDataIter(Dataset):
              MultiTaskDatasetDump_coref_ner.pkl
         """
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
+        dump_fname = LOC.parsed / self._src_ / self._split_repr_ / "MultiTaskDatasetDump"
         for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
@@ -204,12 +206,13 @@ class MultiTaskDataIter(Dataset):
             a bool indicating whether we successfully pulled something from the disk or not
         """
         success = False
+        split = self._split_repr_
 
         if ignore_cache:
             return None, success
 
         # Prep the file name
-        dump_fname = LOC.parsed / self._src_ / self._split_ / "MultiTaskDatasetDump"
+        dump_fname = LOC.parsed / self._src_ / split / "MultiTaskDatasetDump"
         for task in self.tasks:
             dump_fname = str(dump_fname) + f"_{task}"
         dump_fname = Path(dump_fname + ".pkl")
@@ -776,7 +779,7 @@ class MultiTaskDataIter(Dataset):
 
 class DocumentReader(Dataset):
     def __init__(
-            self, src: str, split: Optional[str] = None, shuffle: bool = False, tasks: Tasks = Tasks.create()
+            self, src: str, split: Union[str, List[str]], shuffle: bool = False, tasks: Tasks = Tasks.create()
     ):
         """
             Returns an iterable that yields one document at a time.
@@ -817,10 +820,9 @@ class DocumentReader(Dataset):
 
     @staticmethod
     def get_fnames(dataset: str, split: str):
-        if split:
-            return [fnm for fnm in (LOC.parsed / dataset / split).glob("dump*.pkl")]
-        else:
-            return [fnm for fnm in (LOC.parsed / dataset).glob("dump*.pkl")]
+        if isinstance(split, str):
+            split = [split]
+        return [fnm for _split in split for fnm in (LOC.parsed / dataset / _split).glob("dump*.pkl")]
 
     def pull_from_disk(self):
         """RIP ur mem lol"""
@@ -1049,8 +1051,9 @@ class MultiDomainDataCombiner(Dataset):
 
 if __name__ == '__main__':
 
-    task = Tasks.parse(datasrc='codicrac-persuasion', tuples=[('coref', 1.0, True)])
-    di = DocumentReader('codicrac-persuasion', 'train', tasks=task)
+    task = Tasks.parse(datasrc='ontonotes', tuples=[('coref', 1.0, True)])
+    # di = DocumentReader('ontonotes', tasks=task)
+    di = DocumentReader('ontonotes', ['train', 'development'], tasks=task)
 
     for x in di:
         print('potato')

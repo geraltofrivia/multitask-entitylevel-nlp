@@ -23,7 +23,7 @@ from models.multitask import MTLModel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, DOMAIN_HAS_NER_MULTILABEL
-from utils.exceptions import ImproperDumpDir, BadParameters
+from utils.exceptions import ImproperDumpDir, BadParameters, UnknownDomainException
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
     TraceCandidates, NERSpanRecognitionMicroMultiLabel, NERMultiLabelAcc, POSPRMacro, POSAcc
 
@@ -189,13 +189,25 @@ def get_dataiter_partials(
         tasks: Tasks,
         tokenizer: transformers.BertTokenizer,
 ):
+    train_split = KNOWN_SPLITS[tasks.dataset].train
+    dev_split = KNOWN_SPLITS[tasks.dataset].dev
+    if config.train_on_dev:
+        try:
+            test_split = KNOWN_SPLITS[tasks.dataset].test
+        except KeyError as e:
+            raise UnknownDomainException(f"The dataset: {tasks.dataset} does not have a test split. "
+                                         f"This can either be because the dataset itself does not have a test split, "
+                                         f"or because we haven't configured KNOWN_SPLITS (src/config.py) properly.")
+    else:
+        test_split = None
+
     # Load the data
     train_ds = partial(
         MultiTaskDataIter,
         src=tasks.dataset,
         config=config,
         tasks=tasks,
-        split=KNOWN_SPLITS[tasks.dataset].train,
+        split=[train_split, dev_split] if config.train_on_dev else train_split,
         tokenizer=tokenizer,
         use_speakers=config.use_speakers
     )
@@ -204,7 +216,7 @@ def get_dataiter_partials(
         src=tasks.dataset,
         config=config,
         tasks=tasks,
-        split=KNOWN_SPLITS[tasks.dataset].dev,
+        split=test_split if config.train_on_dev else dev_split,
         tokenizer=tokenizer,
         use_speakers=config.use_speakers
     )
@@ -286,6 +298,7 @@ def get_dataiter_partials(
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
 @click.option('--wandb-name', '-wbname', type=str, default=None,
               help="You can specify a short name for the run here as well. ")
+@click.option('--train-on-dev', is_flag=True, help="If enabled, test<-dev & train<-train+dev set.")
 def run(
         ctx,  # The ctx obj click uses to pass things around in commands
         tokenizer: str,
@@ -316,7 +329,8 @@ def run(
         max_training_segments: int,
         coref_loss_mean: bool,
         coref_higher_order: int,
-        pruner_top_span_ratio: float
+        pruner_top_span_ratio: float,
+        train_on_dev: bool
 ):
     # TODO: enable specifying data sampling ratio when we have 2 datasets
     # TODO: implement soft loading the model parameters somehow.
@@ -396,6 +410,7 @@ def run(
     config.coref_num_genres = sum(task.n_genres for task in [tasks, tasks_2])
     config.vocab_size = tokenizer.get_vocab().__len__()
     config.freeze_encoder = not train_encoder
+    config.train_on_dev = train_on_dev
     if shared_compressor:
         config.unary_hdim = DEFAULTS.unary_hdim // 3
 

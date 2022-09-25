@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Union
 
 import numpy as np
 from mytorch.utils.goodies import FancyDict
@@ -91,13 +91,20 @@ def is_split_train(dataset: str, split: str):
     return KNOWN_SPLITS[dataset]['train'] == split
 
 
-def unalias_split(split: str) -> str:
+def _unalias_split_(split: str) -> str:
     for ds, ds_splits in KNOWN_SPLITS.items():
         for split_alias, split_vl in ds_splits.items():
             if split_vl == split:
                 return split_alias
 
     raise UnknownDataSplitException(f"The split: {split} is unknown.")
+
+
+def unalias_split(split: Union[str, List[str]]) -> Union[str, List[str]]:
+    if isinstance(split, str):
+        return _unalias_split_(split)
+    else:
+        return [_unalias_split_(x) for x in split]
 
 
 # LOSS_RATIO_CNP = [1.0 / 20000, 1.0 / 2.5, 1.0]  # Loss ratio to use to train coref, ner and pruner
