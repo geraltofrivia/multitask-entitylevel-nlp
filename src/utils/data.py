@@ -641,6 +641,10 @@ class Tasks:
                    n_speakers=n_speakers)
 
     def __post_init__(self, *args, **kwargs):
+
+        if self.isempty():
+            return
+
         self.sort()
 
         """ 
