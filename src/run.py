@@ -255,7 +255,8 @@ def get_dataiter_partials(
                    "E.g.: `gamma 0.98`. \nTODO: add more recipes here")
 @click.option("--encoder", "-enc", type=str, default=None, help="Which BERT model (for now) to load.")
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
-@click.option("--device", "-dv", type=str, default=None, help="The device to use: cpu, cuda, cuda:0, ...")
+@click.option("--device", "-dv", type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
+              help="Force a device- ('cpu'/'cuda'). If not specified, defaults to cuda if available else cpu.")
 @click.option('--trim', is_flag=True,
               help="If True, We only consider 50 documents in one dataset. For quick iterations. NOTE:"
                    "if d1, d2 are both provided, documents are trimmed for both.")
