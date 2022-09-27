@@ -488,9 +488,8 @@ def run(
         # Saving stuff
         if save:
             config.savedir = str(savedir)
-            save_config = config.to_dict()
         else:
-            savedir, save_config = None, None
+            savedir = None, None
 
     """
         Speaker ID logic | Genre ID logic
