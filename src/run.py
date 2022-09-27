@@ -472,6 +472,10 @@ def run(
         with (savedir / 'config.json').open('r', encoding='utf8') as f:
             config = safely_pull_config(json.load(f))
 
+        # We need to make task objects from the config as well. This is because loss scales, class weights may differ.
+        tasks = Tasks(**config.task_1)
+        tasks_2 = Tasks(**config.task_2)
+
         # Pull config, tokenizer and encoder stuff from
         dir_config = config._config
         dir_tokenizer = config._tokenizer
