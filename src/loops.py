@@ -1,3 +1,4 @@
+import atexit
 import json
 import pickle
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import List, Callable, Union, Optional, Type
 import numpy as np
 import torch
 import wandb
+from termcolor import colored
 from tqdm.auto import tqdm
 
 # Local imports
@@ -24,6 +26,12 @@ def aggregate_metrics(inter_epoch: dict, intra_epoch: dict):
         for metric_nm, metric_list in intra_epoch[task_nm].items():
             inter_epoch[task_nm][metric_nm].append(np.mean(metric_list))
     return inter_epoch
+
+
+def goodbye(loc: Path):
+    prefix = colored("loops.py", "green", attrs=['bold'])
+    value = colored(f"{loc}", "green", attrs=['bold'])
+    print(prefix, f"Find the summary of this run at ", value)
 
 
 # noinspection PyProtectedMember
@@ -77,6 +85,9 @@ def training_loop(
     skipped = {task_obj.dataset: [] for task_obj in tasks}
 
     trn_dataset = trn_dl()
+
+    if flag_save:
+        atexit.register(goodbye, save_dir)
 
     # Epoch level
     for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
