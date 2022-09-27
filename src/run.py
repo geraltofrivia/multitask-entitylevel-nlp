@@ -493,7 +493,7 @@ def run(
         if save:
             config.savedir = str(savedir)
         else:
-            savedir = None, None
+            savedir = None
 
     """
         Speaker ID logic | Genre ID logic
