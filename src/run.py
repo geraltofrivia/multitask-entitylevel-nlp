@@ -22,7 +22,7 @@ from loops import training_loop
 from preproc.encode import PreEncoder
 from models.multitask import MTLModel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
-from utils.misc import merge_configs, SerializedBertConfig, convert_to_fancydict
+from utils.misc import merge_configs, SerializedBertConfig, safely_pull_config
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, DOMAIN_HAS_NER_MULTILABEL
 from utils.exceptions import BadParameters, UnknownDomainException
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
@@ -469,7 +469,7 @@ def run(
         assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
 
         with (savedir / 'config.json').open('r', encoding='utf8') as f:
-            config = convert_to_fancydict(json.load(f))
+            config = safely_pull_config(json.load(f))
 
         # Pull config, tokenizer and encoder stuff from
         dir_config = config._config

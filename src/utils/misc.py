@@ -346,7 +346,8 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         '_tokenizer',
         '_encoder',
         '_sampling_ratio',
-        'wandb_name'
+        'wandb_name',
+        'epochs_last_run'
     ]
 
     # If old is a dict, we don't need to pull
@@ -496,15 +497,26 @@ def _get_duplicates_(spantuples: List[tuple]) -> (dict, list):
     return duplicates, indices
 
 
-def convert_to_fancydict(obj: Union[Type[BertConfig], Type[dict]]) -> FancyDict:
+def safely_pull_config(obj: Union[Type[BertConfig], Type[dict]]) -> FancyDict:
     if isinstance(obj, BertConfig):
         obj = obj.to_dict()
+
+    # We know that there can be some problems with the id2label field. So let's patch that here.
+    # The problem is that instead of dict['id2label'] = {0: ..., 1: ...};
+    # We have dict['id2label'] = {'0': ..., '1': ...}; i.e. they're strings
+    if 'id2label' in obj:
+        id2label = {}
+        for k, v in obj['id2label']:
+            if isinstance(k, str):
+                id2label[int(k)] = v
+            else:
+                id2label[k] = v
 
     op = FancyDict()
     for k, v in obj.items():
         if isinstance(v, dict) or isinstance(v, BertConfig):
             # noinspection PyTypeChecker
-            op[k] = convert_to_fancydict(v)
+            op[k] = safely_pull_config(v)
         else:
             op[k] = v
 
