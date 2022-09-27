@@ -340,7 +340,12 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'coref_depth',
         'coref_use_metadata',
         'coref_loss_type',
-        'train_on_dev'
+        'train_on_dev',
+        '_config',
+        '_tokenizer',
+        '_encoder',
+        '_sampling_ratio',
+        'wandb_name'
     ]
 
     # If old is a dict, we don't need to pull

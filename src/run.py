@@ -21,9 +21,9 @@ from loops import training_loop
 from preproc.encode import PreEncoder
 from models.multitask import MTLModel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
-from utils.misc import check_dumped_config, merge_configs, SerializedBertConfig
+from utils.misc import merge_configs, SerializedBertConfig
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, DOMAIN_HAS_NER_MULTILABEL
-from utils.exceptions import ImproperDumpDir, BadParameters, UnknownDomainException
+from utils.exceptions import BadParameters, UnknownDomainException
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
     TraceCandidates, NERSpanRecognitionMicroMultiLabel, NERMultiLabelAcc, POSPRMacro, POSAcc
 
@@ -93,6 +93,7 @@ def make_optimizer(
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
 
 
+# noinspection PyProtectedMember
 def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[float], n_updates: int) \
         -> Optional[Type[torch.optim.lr_scheduler._LRScheduler]]:
     if not lr_schedule:
@@ -152,7 +153,7 @@ def get_saved_wandb_id(loc: Path):
 
 
 def get_save_parent_dir(parentdir: Path, tasks: Tasks, tasks_2: Optional[Tasks],
-                        config: Union[SerializedBertConfig, dict]) -> Path:
+                        trial: bool = False) -> Path:
     """
         Normally returns parentdir/dataset+dataset2/'_'.join(sorted(tasks))+'-'+'_'.join(sorted(tasks_2)).
         E.g. if dataset, tasks are ontonotes and ['coref', 'pruner'] and
@@ -178,7 +179,7 @@ def get_save_parent_dir(parentdir: Path, tasks: Tasks, tasks_2: Optional[Tasks],
         tasks_prefix += '-'
         tasks_prefix += '_'.join(tasks_2.names)
 
-    if config.trim or config.wandb_trial:
+    if trial:
         return parentdir / 'trial' / dataset_prefix / tasks_prefix
     else:
         return parentdir / dataset_prefix / tasks_prefix
@@ -194,7 +195,7 @@ def get_dataiter_partials(
     if config.train_on_dev:
         try:
             test_split = KNOWN_SPLITS[tasks.dataset].test
-        except KeyError as e:
+        except KeyError:
             raise UnknownDomainException(f"The dataset: {tasks.dataset} does not have a test split. "
                                          f"This can either be because the dataset itself does not have a test split, "
                                          f"or because we haven't configured KNOWN_SPLITS (src/config.py) properly.")
@@ -224,7 +225,7 @@ def get_dataiter_partials(
     return train_ds, dev_ds
 
 
-# noinspection PyDefaultArgument
+# noinspection PyDefaultArgument,PyProtectedMember
 @click.group()
 @click.pass_context
 @click.option("--dataset", "-d", type=str, required=True,
@@ -339,20 +340,6 @@ def run(
 
     ctx.ensure_object(dict)
 
-    if not tokenizer:
-        tokenizer = encoder
-
-    if shared_compressor and dense_layers < 1:
-        raise BadParameters(f"You want the shared layers to compress the BERT embeddings but"
-                            f"also want to have zero (specifically: {dense_layers}) layers. That's not going to work.")
-
-    # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
-    wandb_trial = trim or debug
-
-    # If we are to "resume" training things from somewhere, we should also have the save flag enabled
-    if resume_dir >= 0:
-        save = True
-
     """
         Sanity Checks
         -> At least one dataset and task 1 are provided
@@ -369,65 +356,129 @@ def run(
     if dataset_2 not in list(KNOWN_SPLITS.keys()) + [None]:
         raise BadParameters(f"Unknown dataset: {dataset_2}")
 
-    _is_multidomain: bool = dataset_2 is not None
-
     tasks = Tasks.parse(dataset, tuples=tasks)
     tasks_2 = Tasks.parse(dataset_2, tuples=tasks_2)
 
-    if not use_speakers:
-        tasks.n_speakers = -1
-        tasks_2.n_speakers = -1
-
-    dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
-
-    tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
-    config = SerializedBertConfig(dir_config)
+    _is_multidomain: bool = not tasks_2.isempty()
 
     """
-        TODO: HACK: Fix later
+        At this point we ask whether we want to resume something or we want to have a regular run.
+        If resume dir is non negative, it indicates that we ignore every other parameter and infer things from the task
+        and saved config alone
     """
-    if dir_config == 'SpanBERT/spanbert-large-cased':
-        config.hidden_size = 1024
 
-    config.max_span_width = max_span_width
-    config.max_training_segments = max_training_segments
-    config.use_speakers = use_speakers
-    config.device = device
-    config.trim = trim
-    config.debug = debug
-    config.skip_instance_after_nspan = DEFAULTS[
-        'skip_instance_after_nspan'] if filter_candidates_pos else -1
-    config.wandb = use_wandb
-    config.wandb_comment = wandb_comment
-    config.wandb_trial = wandb_trial
-    config.coref_loss_mean = coref_loss_mean
-    config.dense_layers = dense_layers
-    config.shared_compressor = shared_compressor
-    config.uncased = encoder.endswith('uncased')
-    config.curdir = str(Path('.').absolute())
-    config.pruner_top_span_ratio = pruner_top_span_ratio
-    config.coref_higher_order = coref_higher_order
-    config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
-    config.coref_num_genres = sum(task.n_genres for task in [tasks, tasks_2])
-    config.vocab_size = tokenizer.get_vocab().__len__()
-    config.freeze_encoder = not train_encoder
-    config.train_on_dev = train_on_dev
-    if shared_compressor:
-        config.unary_hdim = DEFAULTS.unary_hdim // 3
+    if resume_dir < 0:
 
-    # Make a trainer dict and also
-    config.trainer = FancyDict()
-    config.trainer.learning_rate = learning_rate
-    config.trainer.epochs = epochs
-    config.trainer.lr_schedule = lr_schedule[0]
-    config.trainer.lr_schedule_param = lr_schedule[1]
-    # config.trainer.adam_beta1
+        """
+            Here we either go for train part of things, or we go to resume part (which just requires this stuff).
+        """
 
-    config = merge_configs(old=DEFAULTS, new=config)
+        if not tokenizer:
+            tokenizer = encoder
 
-    # Log the tasks var into config as well
-    config.task_1 = tasks
-    config.task_2 = tasks_2
+        if shared_compressor and dense_layers < 1:
+            raise BadParameters(f"You want the shared layers to compress the BERT embeddings but"
+                                f"also want to have zero (specifically: {dense_layers}) layers. That's not going to work.")
+
+        # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
+        wandb_trial = trim or debug
+
+        if not use_speakers:
+            tasks.n_speakers = -1
+            tasks_2.n_speakers = -1
+
+        dir_config, dir_tokenizer, dir_encoder = get_pretrained_dirs(encoder, tokenizer)
+
+        tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
+        config = SerializedBertConfig(dir_config)
+
+        """
+            TODO: HACK: Fix later
+        """
+        if dir_config == 'SpanBERT/spanbert-large-cased':
+            config.hidden_size = 1024
+
+        # These things are stored to help restoring down the line
+        config._config = dir_config
+        config._tokenizer = dir_tokenizer
+        config._encoder = dir_encoder
+        config._sampling_ratio = sampling_ratio
+
+        config.max_span_width = max_span_width
+        config.max_training_segments = max_training_segments
+        config.use_speakers = use_speakers
+        config.device = device
+        config.trim = trim
+        config.debug = debug
+        config.skip_instance_after_nspan = DEFAULTS[
+            'skip_instance_after_nspan'] if filter_candidates_pos else -1
+        config.wandb = use_wandb
+        config.wandb_comment = wandb_comment
+        config.wandb_trial = wandb_trial
+        config.wandb_name = wandb_name
+        config.coref_loss_mean = coref_loss_mean
+        config.dense_layers = dense_layers
+        config.shared_compressor = shared_compressor
+        config.uncased = encoder.endswith('uncased')
+        config.curdir = str(Path('.').absolute())
+        config.pruner_top_span_ratio = pruner_top_span_ratio
+        config.coref_higher_order = coref_higher_order
+        config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
+        config.coref_num_genres = sum(task.n_genres for task in [tasks, tasks_2])
+        config.vocab_size = tokenizer.get_vocab().__len__()
+        config.freeze_encoder = not train_encoder
+        config.train_on_dev = train_on_dev
+        if config.shared_compressor:
+            config.unary_hdim = DEFAULTS.unary_hdim // 3
+
+        # Make a trainer dict and also
+        config.trainer = FancyDict()
+        config.trainer.learning_rate = learning_rate
+        config.trainer.epochs = epochs
+        config.trainer.lr_schedule = lr_schedule[0]
+        config.trainer.lr_schedule_param = lr_schedule[1]
+        # config.trainer.adam_beta1
+
+        config = merge_configs(old=DEFAULTS, new=config)
+
+        # Log the tasks var into config as well
+        config.task_1 = tasks
+        config.task_2 = tasks_2
+
+        # Saving stuff
+        if save:
+            savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2,
+                                          trial=config.trim or config.wandb_trial)
+            savedir.mkdir(parents=True, exist_ok=True)
+            savedir = mt_save_dir(parentdir=savedir, _newdir=True)
+            save_config = config.to_dict()
+            config.savedir = str(savedir)
+        else:
+            savedir, save_config = None, None
+
+    else:
+
+        # Figure out where we pull the model and everything from
+        savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2,
+                                                            trial=trim or debug), _newdir=False)
+        savedir = savedir / str(resume_dir)
+        assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
+
+        with (savedir / 'config.json').open('r', encoding='utf8') as f:
+            config = json.load(f)
+
+        # Pull config, tokenizer and encoder stuff from
+        dir_config = config._config
+        dir_tokenizer = config._tokenizer
+        dir_encoder = config._encoder
+        sampling_ratio = config._sampling_ratio
+
+        tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
+        config = merge_configs(old=SerializedBertConfig(dir_config), new=config)
+        save_config = config.to_dict()
+
+        # There. now we can continue as normal, and will have to interject just once
+        # #### when model, optimizer and scheduler are inited
 
     """
         Speaker ID logic | Genre ID logic
@@ -435,7 +486,7 @@ def run(
         This is because there is going to be a shape problem with the slow antecedent scorer.
         So for example, you gave ` -d codicrac-light -d2 ontonotes` (72 speakers and no speaker respectively)
         we will have 73 speakers where first 72 are for Light, and the last one is for Ontonotes (always constant).
-        
+    
         The genres also work in the same manner. We concat the dict, and offset values for subsequent domains
     """
     # This is to be given to a MultiDomainDataCombiner IF we are working in a multidomain setting.
@@ -449,10 +500,10 @@ def run(
             - prep loss scales
             - prep class weights (by instantiating a temp dataiter)
             - make suitable partials.
-
+    
         Then, IF d2 is specified, make a data combiner thing, otherwise just use this partial in the loop.
         Do the same for evaluators.
-
+    
     """
     train_ds, dev_ds = get_dataiter_partials(config, tasks, tokenizer=tokenizer)
     if _is_multidomain:
@@ -468,6 +519,7 @@ def run(
     # Init them once to note the length
     len_train = train_ds().__len__()
 
+
     """
         Prepare Context Object
         So far, we've done some common stuff. At this point, based on what was invoked, we can change a lot of things.
@@ -478,7 +530,6 @@ def run(
     ctx.obj['dir_encoder'] = dir_encoder
     ctx.obj['config'] = config
     ctx.obj['device'] = device
-    ctx.obj['lr_schedule'] = lr_schedule
     ctx.obj['tasks'] = tasks
     ctx.obj['tasks_2'] = tasks_2
     ctx.obj['tokenizer'] = tokenizer
@@ -487,16 +538,14 @@ def run(
     ctx.obj['genre_offsets'] = genre_offsets
     ctx.obj['save'] = save
     ctx.obj['resume_dir'] = resume_dir
-    ctx.obj['use_wandb'] = use_wandb
     ctx.obj['dataset'] = dataset
     ctx.obj['dataset_2'] = dataset_2
-    ctx.obj['wandb_comment'] = wandb_comment
-    ctx.obj['wandb_name'] = wandb_name
-    ctx.obj['wandb_trial'] = wandb_trial
     ctx.obj['trim'] = trim
     ctx.obj['train_ds'] = train_ds
     ctx.obj['dev_ds'] = dev_ds
     ctx.obj['len_train'] = len_train
+    ctx.obj['savedir'] = savedir
+    ctx.obj['save_config'] = save_config
 
 
 @run.command()
@@ -509,22 +558,27 @@ def train(ctx):
     dir_encoder = ctx.obj['dir_encoder']
     config = ctx.obj['config']
     device = ctx.obj['device']
-    lr_schedule = ctx.obj['lr_schedule']
     tasks = ctx.obj['tasks']
     tasks_2 = ctx.obj['tasks_2']
     _is_multidomain = ctx.obj['_is_multidomain']
     save = ctx.obj['save']
     resume_dir = ctx.obj['resume_dir']
-    use_wandb = ctx.obj['use_wandb']
     dataset = ctx.obj['dataset']
     dataset_2 = ctx.obj['dataset_2']
-    wandb_comment = ctx.obj['wandb_comment']
-    wandb_name = ctx.obj['wandb_name']
     wandb_trial = ctx.obj['wandb_trial']
     trim = ctx.obj['trim']
     train_ds = ctx.obj['train_ds']
     dev_ds = ctx.obj['dev_ds']
     len_train = ctx.obj['len_train']
+    savedir = ctx.obj['savedir']
+    save_config = ctx.obj['save_config']
+
+    if resume_dir < 0:
+        # We don't have a resume dir specified, we continue as normal
+        ...
+
+    else:
+        ...
 
     # Make the model
     model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
@@ -532,7 +586,6 @@ def train(ctx):
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     n_params = sum([param.nelement() for param in model.parameters()])
     print("Model params: ", n_params)
-    config.params = n_params
 
     # Make the optimizer
     # opt_base = torch.optim.Adam
@@ -548,8 +601,11 @@ def train(ctx):
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
-    scheduler_per_epoch, scheduler_per_iter = make_scheduler(opt, lr_schedule[0], lr_schedule[1],
-                                                             n_updates=len_train * config.trainer.epochs)
+    scheduler_per_epoch, scheduler_per_iter = make_scheduler(
+        opt=opt,
+        lr_schedule=config.trainer.lr_schedule,
+        lr_schedule_val=config.trainer.lr_schedule_param,
+        n_updates=len_train * config.trainer.epochs)
 
     # Collect all metrics
     metrics = {task.dataset: [] for task in [tasks, tasks_2]}
@@ -589,54 +645,30 @@ def train(ctx):
         model=model
     )
 
-    # Saving stuff
-    if save:
+    # WandB stuff
+    if config.wandb:
 
-        # TODO: check if we want to resume. If so, put the resume dir here instead after checking for consistency etc
-        # raise NotImplementedError
-        savedir = get_save_parent_dir(LOC.models, tasks=tasks, config=config, tasks_2=tasks_2)
-        savedir.mkdir(parents=True, exist_ok=True)
-
-        if resume_dir >= 0:
-            # We already know which dir to save the model to.
-            savedir = savedir / str(resume_dir)
-            assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
+        if resume_dir < 0:
+            # Its a new run
+            config.wandbid = wandb.util.generate_id()
+            wandb_config = config.to_dict()
+            wandb_config['dataset'] = dataset
+            wandb_config['dataset_2'] = dataset_2
+            wandb_config['tasks'] = list(tasks)
+            wandb_config['tasks_2'] = list(tasks_2)
+            wandb.init(project="entitymention-mtl", entity="magnet",
+                       notes=config.wandb_comment, name=config.wandb_name,
+                       id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
+            wandb.config.update(wandb_config, allow_val_change=True)
         else:
-            # This is a new run and we should just save the model in a new place
-            savedir = mt_save_dir(parentdir=savedir, _newdir=True)
 
-        save_config = config.to_dict()
-        # save_objs = [tosave('tokenizer.pkl', tokenizer), tosave('config.pkl', )]
-    else:
-        savedir, save_config, save_objs = None, None, None
-    config.savedir = str(savedir)
+            wandb.init(project="entitymention-mtl", entity="magnet",
+                       notes=config.wandb_comment, name=config.wandb_name,
+                       id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
 
-    # Resuming stuff
     if resume_dir >= 0:
-        # raise NotImplementedError
-        # We are resuming the model
-        savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, config=config,
-                                                            tasks_2=tasks_2), _newdir=False)
-
-        """
-            First check if the config matches. If not, then
-                - report the mismatches
-                - try to find other saved models which have the same config.
-
-            Get the WandB ID (if its there, and if WandB is enabled.)
-            Second, pull the model weights and put them on the model.            
-         """
-
-        # Check config
-        if not check_dumped_config(config, old=savedir, verbose=True):
-            raise ImproperDumpDir(f"No config.json file found in {savedir}. Exiting.")
-
-        # See WandB stuff
-        if use_wandb:
-            # Try to find WandB ID in saved stuff
-            config.wandbid = get_saved_wandb_id(savedir)
-
-        # Pull checkpoint and update opt, model
+        """ We're actually resuming a run. So now we need to load params, state dicts"""
+        assert config.params == n_params
         checkpoint = torch.load(savedir / 'torch.save')
         model.load_state_dict(checkpoint['model_state_dict'])
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -644,21 +676,8 @@ def train(ctx):
             scheduler_per_epoch.load_state_dict(checkpoint['scheduler_state_dict'])
         if scheduler_per_iter:
             scheduler_per_iter.load_state_dict(checkpoint['scheduler_state_dict'])
-        print(f"Successfully resuming training from Epoch {config.epochs_last_run}")
-
-    # WandB stuff
-    if use_wandb:
-        if 'wandbid' not in config.to_dict():
-            config.wandbid = wandb.util.generate_id()
-            save_config = config.to_dict()
-            save_config['dataset'] = dataset
-            save_config['dataset_2'] = dataset_2
-            save_config['tasks'] = list(tasks)
-            save_config['tasks_2'] = list(tasks_2)
-
-        wandb.init(project="entitymention-mtl", entity="magnet", notes=wandb_comment, name=wandb_name,
-                   id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
-        wandb.config.update(save_config, allow_val_change=True)
+    else:
+        config.params = n_params
 
     print(config)
     print("Training commences!")
@@ -674,7 +693,7 @@ def train(ctx):
         opt=opt,
         tasks=[tasks, tasks_2] if _is_multidomain else [tasks],
         # This is used only for bookkeeping. We're assuming empty entries in logs are fine.
-        flag_wandb=use_wandb,
+        flag_wandb=config.wandb,
         flag_save=save,
         save_dir=savedir,
         save_config=save_config,

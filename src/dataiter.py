@@ -481,6 +481,7 @@ class MultiTaskDataIter(Dataset):
 
         return coref_specific
 
+    # noinspection PyUnusedLocal
     def process_ner(
             self,
             instance: Document,
