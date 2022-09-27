@@ -565,7 +565,6 @@ def train(ctx):
     resume_dir = ctx.obj['resume_dir']
     dataset = ctx.obj['dataset']
     dataset_2 = ctx.obj['dataset_2']
-    wandb_trial = ctx.obj['wandb_trial']
     trim = ctx.obj['trim']
     train_ds = ctx.obj['train_ds']
     dev_ds = ctx.obj['dev_ds']
@@ -658,13 +657,13 @@ def train(ctx):
             wandb_config['tasks_2'] = list(tasks_2)
             wandb.init(project="entitymention-mtl", entity="magnet",
                        notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
+                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim else "main")
             wandb.config.update(wandb_config, allow_val_change=True)
         else:
 
             wandb.init(project="entitymention-mtl", entity="magnet",
                        notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if wandb_trial or trim else "main")
+                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim else "main")
 
     if resume_dir >= 0:
         """ We're actually resuming a run. So now we need to load params, state dicts"""
