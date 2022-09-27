@@ -1,5 +1,6 @@
 import json
 import random
+from copy import deepcopy
 from functools import partial
 from pathlib import Path
 from typing import List, Callable, Union, Optional, Tuple, Type
@@ -369,6 +370,10 @@ def run(
 
     if resume_dir < 0:
 
+        if epochs is None:
+            raise BadParameters("You never specified how many epochs you want to train this model."
+                                "This is fine when we're resuming something. Not when its a new run.")
+
         """
             Here we either go for train part of things, or we go to resume part (which just requires this stuff).
         """
@@ -459,13 +464,12 @@ def run(
     else:
 
         # Figure out where we pull the model and everything from
-        savedir = mt_save_dir(parentdir=get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2,
-                                                            trial=trim or debug), _newdir=False)
+        savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2, trial=trim or debug)
         savedir = savedir / str(resume_dir)
         assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
 
         with (savedir / 'config.json').open('r', encoding='utf8') as f:
-            config = json.load(f)
+            config = FancyDict(**json.load(f))
 
         # Pull config, tokenizer and encoder stuff from
         dir_config = config._config
@@ -475,7 +479,7 @@ def run(
 
         tokenizer = transformers.BertTokenizer.from_pretrained(dir_tokenizer)
         config = merge_configs(old=SerializedBertConfig(dir_config), new=config)
-        save_config = config.to_dict()
+        save_config = deepcopy(config)
 
         # There. now we can continue as normal, and will have to interject just once
         # #### when model, optimizer and scheduler are inited

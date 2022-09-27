@@ -417,7 +417,9 @@ def merge_configs(old, new):
 
     if type(new) is dict:
         new = FancyDict(new)
-        # new_caller = __getattribute__
+
+    if isinstance(old, BertConfig):
+        old = old.to_dict()
 
     for k, v in old.items():
 
