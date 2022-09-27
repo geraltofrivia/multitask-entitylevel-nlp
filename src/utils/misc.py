@@ -347,7 +347,8 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         '_encoder',
         '_sampling_ratio',
         'wandb_name',
-        'epochs_last_run'
+        'epochs_last_run',
+        'cwd'
     ]
 
     # If old is a dict, we don't need to pull

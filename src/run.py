@@ -1,4 +1,5 @@
 import json
+import os
 import random
 from copy import deepcopy
 from functools import partial
@@ -409,14 +410,14 @@ def run(
         config._encoder = dir_encoder
         config._sampling_ratio = sampling_ratio
 
+        config.cwd = os.uname().nodename + ':' + os.getcwd()
         config.max_span_width = max_span_width
         config.max_training_segments = max_training_segments
         config.use_speakers = use_speakers
         config.device = device
         config.trim = trim
         config.debug = debug
-        config.skip_instance_after_nspan = DEFAULTS[
-            'skip_instance_after_nspan'] if filter_candidates_pos else -1
+        config.skip_instance_after_nspan = DEFAULTS['skip_instance_after_nspan'] if filter_candidates_pos else -1
         config.wandb = use_wandb
         config.wandb_comment = wandb_comment
         config.wandb_trial = wandb_trial
@@ -456,8 +457,8 @@ def run(
                                           trial=config.trim or config.wandb_trial)
             savedir.mkdir(parents=True, exist_ok=True)
             savedir = mt_save_dir(parentdir=savedir, _newdir=True)
-            save_config = config.to_dict()
             config.savedir = str(savedir)
+            save_config = config.to_dict()
         else:
             savedir, save_config = None, None
 
@@ -483,6 +484,13 @@ def run(
 
         # There. now we can continue as normal, and will have to interject just once
         # #### when model, optimizer and scheduler are inited
+
+        # Saving stuff
+        if save:
+            config.savedir = str(savedir)
+            save_config = config.to_dict()
+        else:
+            savedir, save_config = None, None
 
     """
         Speaker ID logic | Genre ID logic
@@ -576,13 +584,6 @@ def train(ctx):
     savedir = ctx.obj['savedir']
     save_config = ctx.obj['save_config']
 
-    if resume_dir < 0:
-        # We don't have a resume dir specified, we continue as normal
-        ...
-
-    else:
-        ...
-
     # Make the model
     model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
                      **config.to_dict() if isinstance(config, SerializedBertConfig) else config).to(device)
@@ -654,6 +655,8 @@ def train(ctx):
         if resume_dir < 0:
             # Its a new run
             config.wandbid = wandb.util.generate_id()
+            if save_config:
+                save_config['wandbid'] = config.wandbid
             wandb_config = config.to_dict()
             wandb_config['dataset'] = dataset
             wandb_config['dataset_2'] = dataset_2
