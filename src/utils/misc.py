@@ -1,8 +1,9 @@
 import hashlib
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field, is_dataclass, asdict
 from pathlib import Path
-from typing import List, Union, Optional, Dict, Any
+from typing import List, Union, Optional, Dict, Any, Type
 
 import numpy as np
 import torch
@@ -349,9 +350,9 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
     ]
 
     # If old is a dict, we don't need to pull
-    if type(old) is dict:
+    if isinstance(old, dict):
         old_config = old
-    elif type(old) in [BertConfig, SerializedBertConfig]:
+    elif isinstance(old, BertConfig):
         old_config = old.to_dict()
     else:
         # Pull the old config
@@ -361,7 +362,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         except FileNotFoundError:
             return False
 
-    config_d = config.to_dict()
+    config_d = config.to_dict() if isinstance(config, BertConfig) else deepcopy(config)
     mismatches = {}
     for k, v in config_d.items():
 
@@ -493,3 +494,18 @@ def _get_duplicates_(spantuples: List[tuple]) -> (dict, list):
         ind_occ = [i for i in range(len(spantuples)) if spantuples[i] == tup]
         indices.append(ind_occ)
     return duplicates, indices
+
+
+def convert_to_fancydict(obj: Union[Type[BertConfig], Type[dict]]) -> FancyDict:
+    if isinstance(obj, BertConfig):
+        obj = obj.to_dict()
+
+    op = FancyDict()
+    for k, v in obj.items():
+        if isinstance(v, dict) or isinstance(v, BertConfig):
+            # noinspection PyTypeChecker
+            op[k] = convert_to_fancydict(v)
+        else:
+            op[k] = v
+
+    return op

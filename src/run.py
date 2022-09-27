@@ -22,7 +22,7 @@ from loops import training_loop
 from preproc.encode import PreEncoder
 from models.multitask import MTLModel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
-from utils.misc import merge_configs, SerializedBertConfig
+from utils.misc import merge_configs, SerializedBertConfig, convert_to_fancydict
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, DOMAIN_HAS_NER_MULTILABEL
 from utils.exceptions import BadParameters, UnknownDomainException
 from eval import Evaluator, NERAcc, NERSpanRecognitionMicro, PrunerPRMicro, CorefBCubed, CorefMUC, CorefCeafe, \
@@ -469,7 +469,7 @@ def run(
         assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
 
         with (savedir / 'config.json').open('r', encoding='utf8') as f:
-            config = FancyDict(**json.load(f))
+            config = convert_to_fancydict(json.load(f))
 
         # Pull config, tokenizer and encoder stuff from
         dir_config = config._config
@@ -585,7 +585,7 @@ def train(ctx):
 
     # Make the model
     model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
-                     **config.to_dict()).to(device)
+                     **config.to_dict() if isinstance(config, SerializedBertConfig) else config).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     n_params = sum([param.nelement() for param in model.parameters()])
     print("Model params: ", n_params)
@@ -671,7 +671,6 @@ def train(ctx):
 
     if resume_dir >= 0:
         """ We're actually resuming a run. So now we need to load params, state dicts"""
-        assert config.params == n_params
         checkpoint = torch.load(savedir / 'torch.save')
         model.load_state_dict(checkpoint['model_state_dict'])
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
