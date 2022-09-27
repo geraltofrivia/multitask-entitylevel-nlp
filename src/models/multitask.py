@@ -405,7 +405,7 @@ class MTLModel(nn.Module):
             speaker_ids=speaker_ids
         )
 
-        if 'coref' in tasks or 'pruner' in tasks:
+        if 'coref' in tasks:
 
             coref_specific = self.coref.forward(
                 attention_mask=attention_mask,
