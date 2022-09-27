@@ -511,6 +511,7 @@ def safely_pull_config(obj: Union[Type[BertConfig], Type[dict]]) -> FancyDict:
                 id2label[int(k)] = v
             else:
                 id2label[k] = v
+        obj['id2label'] = id2label
 
     op = FancyDict()
     for k, v in obj.items():
