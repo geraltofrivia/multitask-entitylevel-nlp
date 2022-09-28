@@ -630,7 +630,7 @@ def train(ctx):
                 NERSpanRecognitionMicro if task.dataset not in DOMAIN_HAS_NER_MULTILABEL else NERSpanRecognitionMicroMultiLabel,
                 # partial(NERSpanRecognitionMacro, n_classes=task.n_classes_ner, device=config.device)
             ]
-        if 'pruner' in task or 'coref' in task:
+        if 'pruner' in task:
             metrics[task.dataset] += [PrunerPRMicro]
         if 'coref' in task:
             metrics[task.dataset] += [CorefBCubed, CorefMUC, CorefCeafe]
