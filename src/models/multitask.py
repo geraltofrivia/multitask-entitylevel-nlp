@@ -405,8 +405,9 @@ class MTLModel(nn.Module):
             speaker_ids=speaker_ids
         )
 
-        if 'coref' in tasks:
+        if 'coref' in tasks or 'pruner' in tasks:
 
+            # TODO: make it so that we dont' need to do Coref if we only need pruner
             coref_specific = self.coref.forward(
                 attention_mask=attention_mask,
                 pruned_span_starts=pruner_outputs['pruned_span_starts'],

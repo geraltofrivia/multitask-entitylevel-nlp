@@ -601,7 +601,7 @@ class Tasks:
     def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]],
               use_speakers: bool = False, faux: bool = False):
 
-        if not type(datasrc) in [type(None), str]:
+        if not type(datasrc) in (type(None), str):
             raise BadParameters(
                 f"datasrc is not a string but {type(datasrc)}. Maybe you forgot to pass the data source?"
                 f"Ensure that you're calling Tasks(datasource, tuples=task_tuples) and not"
@@ -734,7 +734,7 @@ class Tasks:
             If any value is zero, we consider it as positive.
         """
 
-        if len(scales) == 0:
+        if not scales:
             return []
 
         all_neg = all([val < 0 for val in scales])
