@@ -13,7 +13,7 @@
 """
 import math
 from collections import Iterable
-from typing import Union, List
+from typing import Union, List, Optional
 
 import torch
 import torch.nn as nn
@@ -40,7 +40,8 @@ class Utils(object):
         return emb
 
     @staticmethod
-    def make_ffnn(input_dim: int, hidden_dim: Union[int, List[int]], output_dim: int, dropout: Union[float, nn.Module],
+    def make_ffnn(input_dim: int, hidden_dim: Optional[Union[int, List[int]]],
+                  output_dim: int, dropout: Union[float, nn.Module],
                   bias_in_last_layers: bool = True):
         if hidden_dim is None or hidden_dim == 0 or hidden_dim == [] or hidden_dim == [0]:
             return Utils.make_linear(input_dim, output_dim)
@@ -66,7 +67,44 @@ class Utils(object):
         return linear
 
     @staticmethod
-    def extract_spans(candidate_starts, candidate_ends, candidate_mention_scores, num_top_spans):
+    def extract_top_spans_hoi(candidate_idx_sorted, candidate_starts, candidate_ends, num_top_spans):
+        """ Keep top non-cross-overlapping candidates ordered by scores; compute on CPU because of loop """
+        selected_candidate_idx = []
+        start_to_max_end, end_to_min_start = {}, {}
+        for candidate_idx in candidate_idx_sorted:
+            if len(selected_candidate_idx) >= num_top_spans:
+                break
+            # Perform overlapping check
+            span_start_idx = candidate_starts[candidate_idx]
+            span_end_idx = candidate_ends[candidate_idx]
+            cross_overlap = False
+            for token_idx in range(span_start_idx, span_end_idx + 1):
+                max_end = start_to_max_end.get(token_idx, -1)
+                if token_idx > span_start_idx and max_end > span_end_idx:
+                    cross_overlap = True
+                    break
+                min_start = end_to_min_start.get(token_idx, -1)
+                if token_idx < span_end_idx and 0 <= min_start < span_start_idx:
+                    cross_overlap = True
+                    break
+            if not cross_overlap:
+                # Pass check; select idx and update dict stats
+                selected_candidate_idx.append(candidate_idx)
+                max_end = start_to_max_end.get(span_start_idx, -1)
+                if span_end_idx > max_end:
+                    start_to_max_end[span_start_idx] = span_end_idx
+                min_start = end_to_min_start.get(span_end_idx, -1)
+                if min_start == -1 or span_start_idx < min_start:
+                    end_to_min_start[span_end_idx] = span_start_idx
+        # Sort selected candidates by span idx
+        selected_candidate_idx = sorted(selected_candidate_idx,
+                                        key=lambda idx: (candidate_starts[idx], candidate_ends[idx]))
+        if len(selected_candidate_idx) < num_top_spans:  # Padding
+            selected_candidate_idx += ([selected_candidate_idx[0]] * (num_top_spans - len(selected_candidate_idx)))
+        return selected_candidate_idx
+
+    @staticmethod
+    def extract_spans_old(candidate_starts, candidate_ends, candidate_mention_scores, num_top_spans):
         """
         Extracts the candidate spans with the highest mention scores, who's spans don't cross over other spans.
 
@@ -246,14 +284,7 @@ class SharedDense(torch.nn.Module):
         return self.params(input)
 
 
-class SpanPruner(torch.nn.Module):
-    """
-        Give me your candidate starts, your candidate ends
-        Give me your transformer encoded tokens
-        Give me your constants like max span width
-        And I shall give you pruned span embeddings and corresponding maps.
-    """
-
+class SpanPrunerHOI(torch.nn.Module):
     def __init__(
             self,
             hidden_size: int,
@@ -261,7 +292,7 @@ class SpanPruner(torch.nn.Module):
             max_span_width: int,
             coref_metadata_feature_size: int,
             pruner_dropout: float,
-            pruner_use_width: bool,
+            pruner_use_metadata: bool,
             pruner_max_num_spans: int,
             bias_in_last_layers: bool,
             pruner_top_span_ratio: float,
@@ -270,127 +301,56 @@ class SpanPruner(torch.nn.Module):
 
         # Some constants
         self._dropout: float = pruner_dropout
-        self._use_width: bool = pruner_use_width
+        self._use_metadata: bool = pruner_use_metadata
         self._max_num_spans: int = pruner_max_num_spans
         self._top_span_ratio: float = pruner_top_span_ratio
+        self.dropout = nn.Dropout(p=self._dropout)
 
         # Parameter Time!
         _feat_dim = coref_metadata_feature_size
-        _span_dim = (hidden_size * 3) + _feat_dim
-        self.span_attend_projection = nn.Linear(hidden_size, 1)
-        self.span_scorer = nn.Sequential(
-            nn.Linear(_span_dim, unary_hdim),
-            nn.ReLU(),
-            nn.Dropout(self._dropout),
-            nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
-        )
+        _span_dim = (hidden_size * 3) + (_feat_dim if self._use_metadata else 0)
 
-        if self._use_width:
-            self.span_width_scorer = Utils.make_ffnn(_feat_dim, [unary_hdim], 1, self._dropout)
-            self.emb_span_width = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
+        self.span_emb_score_ffnn = Utils.make_ffnn(_span_dim, [unary_hdim], 1, self.dropout,
+                                                   bias_in_last_layers=bias_in_last_layers)
+
+        if self._use_metadata:
+            self.span_width_score_ffnn = Utils.make_ffnn(_feat_dim, [unary_hdim], 1, self.dropout)
             self.emb_span_width_prior = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
 
-    def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
-        """
+    def forward(self,
+                candidate_span_emb: torch.tensor,  # [num_cand, new emb size]
+                candidate_width_idx: torch.tensor,  # [num_cand, 1]
+                candidate_starts: torch.tensor,  # [num_cand, ]
+                candidate_ends: torch.tensor,  # [num_cand, ]
+                speaker_ids: torch.tensor,  # [num_swords, 1]
+                device: Union[str, torch.device],
+                num_words: int,
+                ):
 
-        Parameters
-        ----------
-        hidden_states: tensor of size (num_tokens, emb_size)
-            outputs of BERT model, reshaped
-        span_starts, span_ends: tensor of size (num_candidates)
-            indices of starts and ends of spans
+        # Get span score
+        candidate_mention_scores = torch.squeeze(self.span_emb_score_ffnn(candidate_span_emb), 1)
+        if self._use_metadata:
+            width_score = torch.squeeze(self.span_width_score_ffnn(self.emb_span_width_prior.weight), 1)
+            # noinspection PyUnboundLocalVariable
+            candidate_width_score = width_score[candidate_width_idx]
+            candidate_mention_scores += candidate_width_score
 
-        Returns
-        -------
-        tensor of size (num_candidates, span_embedding_size)
-        """
-        document_range = torch.arange(start=0, end=hidden_states.shape[0], device=hidden_states.device).unsqueeze(
-            0).repeat(span_starts.shape[0], 1)  # [num_cand, num_words]
-        # noinspection PyTypeChecker
-        token_mask = torch.logical_and(document_range >= span_starts.unsqueeze(1),
-                                       document_range <= span_ends.unsqueeze(1))  # [num_cand, num_words]
-        token_atten = self.span_attend_projection(hidden_states).squeeze(1).unsqueeze(0)  # [1, num_words]
-        token_attn = F.softmax(torch.log(token_mask.float()) + token_atten, 1)  # [num_cand, num_words]span
-        return token_attn
-
-    def get_span_embeddings(
-            self,
-            hidden_states: torch.Tensor,  # [num_swords, bert_emb_size] (2000, 732 e.g.)
-            span_starts: torch.Tensor,  # [num_cand, ]
-            span_ends: torch.Tensor  # [num_cand, ]
-    ):
-        """
-        Obtains representations of the spans
-
-        Parameters
-        ----------
-        hidden_states: tensor of size (num_tokens, bert_emb_size)
-            outputs of BERT model, reshaped
-        span_starts, span_ends: tensor of size (num_cand, )
-            indices of starts and ends of spans
-
-        Returns
-        -------
-        tensor of size (num_cand, span_embedding_size)
-        """
-        emb = [hidden_states[span_starts], hidden_states[span_ends]]
-
-        if self._use_width:
-            # Calculate span width embeddings
-            span_width = 1 + span_ends - span_starts  # [num_cand]
-            span_width_index = span_width - 1  # [num_cand]
-            span_width_emb = self.emb_span_width(span_width_index)  # [num_cand, emb_size]
-            span_width_emb = F.dropout(span_width_emb, p=self._dropout, training=self.training)
-
-            # Append to Emb
-            emb.append(span_width_emb)
-
-        # Calculate attention weighted summary of different tokens
-        token_attention_scores = self.get_span_word_attention_scores(hidden_states, span_starts,
-                                                                     span_ends)  # [num_cand, num_words]
-        attended_word_representations = torch.mm(token_attention_scores, hidden_states)  # [num_cand, emb_size]
-        emb.append(attended_word_representations)
-        return torch.cat(emb, dim=1)
-
-    def forward(
-            self,
-            hidden_states: torch.tensor,  # [num_swords, bert_emb_size]
-            candidate_starts: torch.tensor,  # [num_cand, ]
-            candidate_ends: torch.tensor,  # [num_cand, ]
-            speaker_ids: torch.tensor,  # [num_swords, 1]
-
-    ):
-        _num_words: int = hidden_states.shape[0]
-        span_emb = self.get_span_embeddings(hidden_states, candidate_starts, candidate_ends)  # [num_cand, emb_size]
-        span_scores = self.span_scorer(span_emb).squeeze(1)  # [num_cand,]
-
-        if self._use_width:
-            # Get span with scores (using embeddings with priors), and add them to candidate scores
-            span_width_indices = candidate_ends - candidate_starts
-            span_width_emb = self.emb_span_width_prior(span_width_indices)  # [num_cand, meta]
-            span_width_scores = self.span_width_scorer(span_width_emb).squeeze(1)  # [num_cand, ]
-            span_scores += span_width_scores  # [num_cand, ]
-
-        # Get beam size (its a function of top span ratio, and length of document, capped by a threshold
-        # noinspection PyTypeChecker
-        num_top_spans = int(min(self._max_num_spans, _num_words * self._top_span_ratio))
-
-        # Get top mention scores and sort by span order
-
-        pruned_span_indices = Utils.extract_spans(candidate_starts, candidate_ends, span_scores, num_top_spans)
-        pruned_span_starts = candidate_starts[pruned_span_indices]
-        pruned_span_ends = candidate_ends[pruned_span_indices]
-        pruned_span_emb = span_emb[pruned_span_indices]
-        pruned_span_scores = span_scores[pruned_span_indices]
-
-        if speaker_ids is not None:
-            pruned_span_speaker_ids = speaker_ids[pruned_span_starts]
-        else:
-            pruned_span_speaker_ids = None
+        # Extract top spans
+        candidate_idx_sorted_by_score = torch.argsort(candidate_mention_scores, descending=True).tolist()
+        candidate_starts_cpu, candidate_ends_cpu = candidate_starts.tolist(), candidate_ends.tolist()
+        num_top_spans = int(min(self._max_num_spans, num_words * self._top_span_ratio))
+        selected_idx_cpu = Utils.extract_top_spans_hoi(candidate_idx_sorted_by_score, candidate_starts_cpu,
+                                                       candidate_ends_cpu, num_top_spans)
+        assert len(selected_idx_cpu) == num_top_spans
+        selected_idx = torch.tensor(selected_idx_cpu, device=device)
+        pruned_span_starts, pruned_span_ends = candidate_starts[selected_idx], candidate_ends[selected_idx]
+        pruned_span_emb = candidate_span_emb[selected_idx]
+        # top_span_cluster_ids = candidate_labels[selected_idx] if do_loss else None  #TODO: move this line
+        pruned_span_scores = candidate_mention_scores[selected_idx]
+        pruned_span_speaker_ids = speaker_ids[pruned_span_starts]
 
         return {
-            'span_emb': span_emb,
-            'pruned_span_indices': pruned_span_indices,  # HOI calls it 'selected_idx'
+            'pruned_span_indices': selected_idx,  # HOI calls it 'selected_idx'
             'pruned_span_starts': pruned_span_starts,
             'pruned_span_ends': pruned_span_ends,
             'pruned_span_emb': pruned_span_emb,
@@ -398,6 +358,162 @@ class SpanPruner(torch.nn.Module):
             'pruned_span_speaker_ids': pruned_span_speaker_ids,
             'num_top_spans': num_top_spans
         }
+
+
+# class SpanPrunerMangoes(torch.nn.Module):
+#     """
+#         Give me your candidate starts, your candidate ends
+#         Give me your transformer encoded tokens
+#         Give me your constants like max span width
+#         And I shall give you pruned span embeddings and corresponding maps.
+#     """
+#
+#     def __init__(
+#             self,
+#             hidden_size: int,
+#             unary_hdim: int,
+#             max_span_width: int,
+#             coref_metadata_feature_size: int,
+#             pruner_dropout: float,
+#             pruner_use_metadata: bool,
+#             pruner_max_num_spans: int,
+#             bias_in_last_layers: bool,
+#             pruner_top_span_ratio: float,
+#     ):
+#         super().__init__()
+#
+#         # Some constants
+#         self._dropout: float = pruner_dropout
+#         self._use_metadata: bool = pruner_use_metadata
+#         self._max_num_spans: int = pruner_max_num_spans
+#         self._top_span_ratio: float = pruner_top_span_ratio
+#
+#         # Parameter Time!
+#         _feat_dim = coref_metadata_feature_size
+#         _span_dim = (hidden_size * 3) + (_feat_dim if self._use_metadata else 0)
+#
+#         self.span_attend_projection = nn.Linear(hidden_size, 1)
+#         self.span_scorer = nn.Sequential(
+#             nn.Linear(_span_dim, unary_hdim),
+#             nn.ReLU(),
+#             nn.Dropout(self._dropout),
+#             nn.Linear(unary_hdim, 1, bias=bias_in_last_layers),
+#         )
+#
+#         if self._use_metadata:
+#             self.span_width_scorer = Utils.make_ffnn(_feat_dim, [unary_hdim], 1, self._dropout)
+#             self.emb_span_width = Utils.make_embedding(max_span_width, coref_metadata_feature_size, )
+#             self.emb_span_width_prior = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
+#
+#     def get_span_word_attention_scores(self, hidden_states, span_starts, span_ends):
+#         """
+#
+#         Parameters
+#         ----------
+#         hidden_states: tensor of size (num_tokens, emb_size)
+#             outputs of BERT model, reshaped
+#         span_starts, span_ends: tensor of size (num_candidates)
+#             indices of starts and ends of spans
+#
+#         Returns
+#         -------
+#         tensor of size (num_candidates, span_embedding_size)
+#         """
+#         document_range = torch.arange(start=0, end=hidden_states.shape[0], device=hidden_states.device).unsqueeze(
+#             0).repeat(span_starts.shape[0], 1)  # [num_cand, num_words]
+#         # noinspection PyTypeChecker
+#         token_mask = torch.logical_and(document_range >= span_starts.unsqueeze(1),
+#                                        document_range <= span_ends.unsqueeze(1))  # [num_cand, num_words]
+#         token_atten = self.span_attend_projection(hidden_states).squeeze(1).unsqueeze(0)  # [1, num_words]
+#         token_attn = F.softmax(torch.log(token_mask.float()) + token_atten, 1)  # [num_cand, num_words]span
+#         return token_attn
+#
+#     def get_span_embeddings(
+#             self,
+#             hidden_states: torch.Tensor,  # [num_swords, bert_emb_size] (2000, 732 e.g.)
+#             span_starts: torch.Tensor,  # [num_cand, ]
+#             span_ends: torch.Tensor  # [num_cand, ]
+#     ):
+#         """
+#         Obtains representations of the spans
+#
+#         Parameters
+#         ----------
+#         hidden_states: tensor of size (num_tokens, bert_emb_size)
+#             outputs of BERT model, reshaped
+#         span_starts, span_ends: tensor of size (num_cand, )
+#             indices of starts and ends of spans
+#
+#         Returns
+#         -------
+#         tensor of size (num_cand, span_embedding_size)
+#         """
+#         emb = [hidden_states[span_starts], hidden_states[span_ends]]
+#
+#         if self._use_metadata:
+#             # Calculate span width embeddings
+#             span_width = 1 + span_ends - span_starts  # [num_cand]
+#             span_width_index = span_width - 1  # [num_cand]
+#             span_width_emb = self.emb_span_width(span_width_index)  # [num_cand, emb_size]
+#             span_width_emb = F.dropout(span_width_emb, p=self._dropout, training=self.training)
+#
+#             # Append to Emb
+#             emb.append(span_width_emb)
+#
+#         # Calculate attention weighted summary of different tokens
+#         token_attention_scores = self.get_span_word_attention_scores(hidden_states, span_starts,
+#                                                                      span_ends)  # [num_cand, num_words]
+#         attended_word_representations = torch.mm(token_attention_scores, hidden_states)  # [num_cand, emb_size]
+#         emb.append(attended_word_representations)
+#         return torch.cat(emb, dim=1)
+#
+#     def forward(
+#             self,
+#             hidden_states: torch.tensor,  # [num_swords, bert_emb_size]
+#             candidate_starts: torch.tensor,  # [num_cand, ]
+#             candidate_ends: torch.tensor,  # [num_cand, ]
+#             speaker_ids: torch.tensor,  # [num_swords, 1]
+#             device: Union[str, torch.device]
+#
+#     ):
+#         _num_words: int = hidden_states.shape[0]
+#         span_emb = self.get_span_embeddings(hidden_states, candidate_starts, candidate_ends)  # [num_cand, emb_size]
+#         span_scores = self.span_scorer(span_emb).squeeze(1)  # [num_cand,]
+#
+#         if self._use_metadata:
+#             # Get span with scores (using embeddings with priors), and add them to candidate scores
+#             span_width_indices = candidate_ends - candidate_starts
+#             span_width_emb = self.emb_span_width_prior(span_width_indices)  # [num_cand, meta]
+#             span_width_scores = self.span_width_scorer(span_width_emb).squeeze(1)  # [num_cand, ]
+#             span_scores += span_width_scores  # [num_cand, ]
+#
+#         # Get beam size (its a function of top span ratio, and length of document, capped by a threshold
+#         # noinspection PyTypeChecker
+#         num_top_spans = int(min(self._max_num_spans, _num_words * self._top_span_ratio))
+#
+#         # Get top mention scores and sort by span order
+#
+#         pruned_span_indices = Utils.extract_spans(candidate_starts, candidate_ends, span_scores, num_top_spans)
+#         pruned_span_starts = candidate_starts[pruned_span_indices]
+#         pruned_span_ends = candidate_ends[pruned_span_indices]
+#         pruned_span_emb = span_emb[pruned_span_indices]
+#         pruned_span_scores = span_scores[pruned_span_indices]
+#
+#         if speaker_ids is not None:
+#             pruned_span_speaker_ids = speaker_ids[pruned_span_starts]
+#         else:
+#             pruned_span_speaker_ids = None
+#
+#         return {
+#             'span_emb': span_emb,
+#             'pruned_span_indices': pruned_span_indices,  # HOI calls it 'selected_idx'
+#             'pruned_span_starts': pruned_span_starts,
+#             'pruned_span_ends': pruned_span_ends,
+#             'pruned_span_emb': pruned_span_emb,
+#             'pruned_span_scores': pruned_span_scores,
+#             'pruned_span_speaker_ids': pruned_span_speaker_ids,
+#             'num_top_spans': num_top_spans
+#         }
 
 
 class CorefDecoderHOI(torch.nn.Module):
@@ -870,6 +986,7 @@ class CorefDecoderHOI(torch.nn.Module):
                 loss = loss_cm
 
         return loss
+
 
 class CorefDecoderMangoes(torch.nn.Module):
 

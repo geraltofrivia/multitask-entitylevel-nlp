@@ -128,7 +128,6 @@ DEFAULTS: dict = FancyDict({
 
     'pruner_top_span_ratio': 0.4,
     'pruner_max_num_spans': 250,  # Can never have more than this number of spans post pruning
-    'pruner_use_width': True,  # if False, we ignore span width as a feature in span width embeddings and pruning spans.
     'coref_higher_order': 'cluster_merging',
     # attended_antecedent, max_antecedent, entity_equalization, span_clustering, cluster_merging
     'coref_cluster_reduce': 'mean',  # For cluster_merging

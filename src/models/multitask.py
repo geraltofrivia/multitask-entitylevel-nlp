@@ -20,7 +20,7 @@ except ImportError:
 from utils.data import Tasks
 from config import _SEED_ as SEED, DOMAIN_HAS_NER_MULTILABEL
 from preproc.encode import Retriever
-from models.modules import SpanPruner, CorefDecoderHOI as CorefDecoder, SharedDense, Utils
+from models.modules import SpanPrunerHOI as SpanPruner, CorefDecoderHOI as CorefDecoder, SharedDense, Utils
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
 random.seed(SEED)
@@ -52,14 +52,13 @@ class MTLModel(nn.Module):
 
             # Pruner Specific Params
             pruner_dropout: float,
-            pruner_use_width: bool,
             pruner_max_num_spans: int,
             pruner_top_span_ratio: float,
 
             # Coref Specific Params
             coref_dropout: float,
             coref_loss_mean: bool,
-            coref_higher_order: int,
+            coref_higher_order: str,
             coref_metadata_feature_size: int,
             coref_depth: int,
             coref_easy_cluster_first: bool,
@@ -68,7 +67,7 @@ class MTLModel(nn.Module):
             coref_num_speakers: int,
             coref_num_genres: int,
             coref_use_metadata: bool,
-            coref_loss_type: bool,
+            coref_loss_type: str,
             coref_false_new_delta: float,
 
             # NER specific Params
@@ -94,6 +93,18 @@ class MTLModel(nn.Module):
         # Convert task, task2 to Tasks object again (for now)
         task_1 = Tasks(**task_1)
         task_2 = Tasks(**task_2)
+        self._use_metadata = coref_use_metadata
+        self.max_span_width = max_span_width
+        self.max_top_antecedents = max_top_antecedents
+        self.max_training_segments = max_training_segments
+        self.coref_higher_order = coref_higher_order
+        self.coref_loss_mean = coref_loss_mean
+        self.ner_n_classes = {task.dataset: task.n_classes_ner for task in [task_1, task_2]}
+        self._skip_instance_after_nspan = skip_instance_after_nspan
+        self._use_speaker = use_speakers
+        self._freeze_encoder = freeze_encoder
+        self._tasks_: List[Tasks] = [task_1, task_2]
+        self._dropout = pruner_dropout  # this is the one we use for span embedding stuff
 
         if not freeze_encoder:
             self.bert = BertModel.from_pretrained(enc_nm)
@@ -117,7 +128,13 @@ class MTLModel(nn.Module):
                                   dropout_factor=encoder_dropout)
 
         # Hidden size is now compressed
+        # NOTE: In your OCD stuff DO NOT move this. This needs to happen after self.shared, and before other things
         hidden_size = hidden_size // 3 if shared_compressor else hidden_size
+
+        # Now for some things that are only needed locally (regardless of any task; because this is a span level model)
+        self.emb_span_width = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
+        self.dropout = nn.Dropout(p=self._dropout)
+        self.mention_token_attn = Utils.make_ffnn(hidden_size, None, 1, self.dropout)
 
         self.pruner = SpanPruner(
             hidden_size=hidden_size,
@@ -125,7 +142,7 @@ class MTLModel(nn.Module):
             max_span_width=max_span_width,
             coref_metadata_feature_size=coref_metadata_feature_size,
             pruner_dropout=pruner_dropout,
-            pruner_use_width=pruner_use_width,
+            pruner_use_metadata=coref_use_metadata,
             pruner_max_num_spans=pruner_max_num_spans,
             pruner_top_span_ratio=pruner_top_span_ratio,
             bias_in_last_layers=bias_in_last_layers
@@ -201,20 +218,6 @@ class MTLModel(nn.Module):
                 self.ner_loss[task.dataset] = nn.functional.cross_entropy
         self.pos_loss = nn.functional.cross_entropy
 
-        self.max_span_width = max_span_width
-        self.max_top_antecedents = max_top_antecedents
-        self.max_training_segments = max_training_segments
-        self.coref_depth = coref_higher_order
-        self.coref_loss_mean = coref_loss_mean
-        self.ner_n_classes = {task.dataset: task.n_classes_ner for task in [task_1, task_2]}
-        self._skip_instance_after_nspan = skip_instance_after_nspan
-        self._use_speaker = use_speakers
-        self._freeze_encoder = freeze_encoder
-        self._tasks_: List[Tasks] = [task_1, task_2]
-
-        # TODO: replace this
-        # self.init_weights()
-
     def task_separate_gradient_clipping(self):
         # noinspection PyAttributeOutsideInit
         self.clip_grad_norm_ = self.separate_max_norm_base_task
@@ -247,8 +250,8 @@ class MTLModel(nn.Module):
         else:
             return nn.functional.binary_cross_entropy_with_logits(logits, labels)
 
-
-    def todel_get_predicted_antecedents(self, antecedent_idx, antecedent_scores):
+    @staticmethod
+    def todel_get_predicted_antecedents(antecedent_idx, antecedent_scores):
         """ CPU list input """
         predicted_antecedents = []
         for i, idx in enumerate(np.argmax(antecedent_scores, axis=1) - 1):
@@ -377,9 +380,10 @@ class MTLModel(nn.Module):
         num_seg, len_seg, len_emb = hidden_states.shape
 
         # Re-arrange BERT outputs and input_ids to be a flat list: [num_words, *] from [num_segments, max_seg_len, *]
-        hidden_states = torch.masked_select(hidden_states.view(num_seg * len_seg, len_emb),
-                                            attention_mask.bool().view(-1, 1)).view(-1,
-                                                                                    len_emb)  # [num_words, emb_len]
+        hidden_states = torch.masked_select(
+            hidden_states.view(num_seg * len_seg, len_emb),
+            attention_mask.bool().view(-1, 1)
+        ).view(-1, len_emb)  # [num_words, emb_len]
         flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
         if speaker_ids is not None:
             speaker_ids = torch.masked_select(speaker_ids.view(num_seg * len_seg),
@@ -390,46 +394,73 @@ class MTLModel(nn.Module):
 
         """
             Shared Parameter Stuff
+            NOTE: We by and large don't do this now. Functionality isn't removed but this doesn't get inited.
         """
-        hidden_states = self.shared(hidden_states)
+        # hidden_states = self.shared(hidden_states)
 
         """
-            That's the Span Pruner.
-            Next we need to break out into Coref and NER parts
+            Step 1: Compute span embeddings (not pruning)
+            NOTE: This used to be a part of pruner
         """
+        _num_words: int = hidden_states.shape[0]
+        _num_candidates = candidate_starts.shape[0]
 
-        pruner_outputs = self.pruner(
-            hidden_states=hidden_states,
-            candidate_starts=candidate_starts,
-            candidate_ends=candidate_ends,
-            speaker_ids=speaker_ids
-        )
+        span_start_emb, span_end_emb = hidden_states[candidate_starts], hidden_states[candidate_ends]
+        candidate_emb_list = [span_start_emb, span_end_emb]
+        if self._use_metadata:
+            candidate_width_idx = candidate_ends - candidate_starts
+            candidate_width_emb = self.emb_span_width(candidate_width_idx)
+            candidate_width_emb = self.dropout(candidate_width_emb)
+            candidate_emb_list.append(candidate_width_emb)
+        else:
+            candidate_width_idx, candidate_width_emb = None, None
+
+        # Use attended head or avg token
+        candidate_tokens = torch.unsqueeze(torch.arange(0, _num_words, device=device), 0).repeat(_num_candidates, 1)
+        candidate_tokens_mask = (candidate_tokens >= torch.unsqueeze(candidate_starts, 1)) & (
+                candidate_tokens <= torch.unsqueeze(candidate_ends, 1))
+        token_attn = torch.squeeze(self.mention_token_attn(hidden_states), 1)
+        candidate_tokens_attn_raw = torch.log(candidate_tokens_mask.to(torch.float)) + torch.unsqueeze(token_attn, 0)
+        candidate_tokens_attn = nn.functional.softmax(candidate_tokens_attn_raw, dim=1)
+        head_attn_emb = torch.matmul(candidate_tokens_attn, hidden_states)
+        candidate_emb_list.append(head_attn_emb)
+        candidate_span_emb = torch.cat(candidate_emb_list, dim=1)
 
         if 'coref' in tasks or 'pruner' in tasks:
-
-            # TODO: make it so that we dont' need to do Coref if we only need pruner
-            coref_specific = self.coref.forward(
-                attention_mask=attention_mask,
-                pruned_span_starts=pruner_outputs['pruned_span_starts'],
-                pruned_span_ends=pruner_outputs['pruned_span_ends'],
-                pruned_span_indices=pruner_outputs['pruned_span_indices'],
-                pruned_span_scores=pruner_outputs['pruned_span_scores'],
-                pruned_span_speaker_ids=pruner_outputs['pruned_span_speaker_ids'],
-                pruned_span_emb=pruner_outputs['pruned_span_emb'],
-                num_top_spans=pruner_outputs['num_top_spans'],
-                num_segments=num_seg,
-                len_segment=len_seg,
-                domain=domain,
-                genre=genre,
+            pruner_outputs = self.pruner(
+                candidate_span_emb=candidate_span_emb,
+                candidate_width_idx=candidate_width_idx,
+                num_words=_num_words,
+                candidate_starts=candidate_starts,
+                candidate_ends=candidate_ends,
+                speaker_ids=speaker_ids,
                 device=device
             )
+            if 'coref' in tasks:
+                coref_specific = self.coref.forward(
+                    attention_mask=attention_mask,
+                    pruned_span_starts=pruner_outputs['pruned_span_starts'],
+                    pruned_span_ends=pruner_outputs['pruned_span_ends'],
+                    pruned_span_indices=pruner_outputs['pruned_span_indices'],
+                    pruned_span_scores=pruner_outputs['pruned_span_scores'],
+                    pruned_span_speaker_ids=pruner_outputs['pruned_span_speaker_ids'],
+                    pruned_span_emb=pruner_outputs['pruned_span_emb'],
+                    num_top_spans=pruner_outputs['num_top_spans'],
+                    num_segments=num_seg,
+                    len_segment=len_seg,
+                    domain=domain,
+                    genre=genre,
+                    device=device
+                )
+            else:
+                coref_specific = {}
         else:
-            coref_specific = {}
+            pruner_specific, coref_specific = {}, {}
 
         if 'ner' in tasks:
             # We just need span embeddings here
 
-            fc1 = self.unary_ner_common(pruner_outputs['span_emb'])
+            fc1 = self.unary_ner_common(candidate_span_emb)
 
             # Depending on the domain, select the right decoder
             logits = self.unary_ner_specific[domain](fc1)
@@ -636,6 +667,7 @@ class MTLModel(nn.Module):
                 current_ids = []
                 current_start_end = []
                 for mention_index in cluster_mentions:
+                    # TODO: check if you need IDS or hidden states
                     current_ids.append(ids[pruned_span_starts[mention_index]:pruned_span_ends[mention_index] + 1])
                     current_start_end.append(
                         (pruned_span_starts[mention_index].item(), pruned_span_ends[mention_index].item()))
@@ -722,6 +754,7 @@ class MTLModel(nn.Module):
             outputs["ner"] = {"logits": ner_logits, "labels": ner_labels}
 
         return outputs
+
 
 if __name__ == "__main__":
     ...
