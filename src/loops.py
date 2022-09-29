@@ -144,6 +144,8 @@ def training_loop(
             if scheduler_per_iter is not None:
                 scheduler_per_iter.step()
 
+            trn_dataset[i] = change_device(instance, 'cpu')
+
         model.eval()
         # Evaluation (on the validation set)
         dev_eval.run()
