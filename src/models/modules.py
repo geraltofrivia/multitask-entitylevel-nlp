@@ -906,21 +906,18 @@ class CorefDecoderHOI(torch.nn.Module):
             "coref_top_antecedents_mask": top_antecedent_mask,
             "coref_top_pairwise_scores": top_pairwise_scores,
             "coref_cluster_merging_scores": cluster_merging_scores,  # only valid when cluster merging
-            "pruned_candidate_mention_scores": pruned_span_scores,
-            "pruned_span_starts": pruned_span_starts,
-            "pruned_span_ends": pruned_span_ends,
-            "pruned_span_indices": pruned_span_indices,
             # "coref_top_span_cluster_ids": top_span_cluster_ids,
         }
 
     def get_coref_loss(
             self,
-            candidate_starts: torch.tensor,
-            candidate_ends: torch.tensor,
-            gold_starts: torch.tensor,
-            gold_ends: torch.tensor,
-            gold_cluster_ids: torch.tensor,
-            top_span_indices: torch.tensor,
+            # candidate_starts: torch.tensor,
+            # candidate_ends: torch.tensor,
+            # gold_starts: torch.tensor,
+            # gold_ends: torch.tensor,
+            # gold_cluster_ids: torch.tensor,
+            # top_span_indices: torch.tensor,
+            top_span_cluster_ids: torch.tensor,
             top_antecedents: torch.tensor,
             top_antecedents_mask: torch.tensor,
             top_antecedents_score: torch.tensor,
@@ -934,11 +931,6 @@ class CorefDecoderHOI(torch.nn.Module):
             AGAIN: THIS DOES NOT CALL FORWARD INSIDE IT. Call it from your 'main' module, whatever that is.
         """
         # same as their `candidate_labels`
-        gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
-                                                                gold_starts, gold_ends,
-                                                                gold_cluster_ids)
-
-        top_span_cluster_ids = gold_candidate_cluster_ids[top_span_indices]
         top_antecedent_cluster_ids = top_span_cluster_ids[top_antecedents]
         top_antecedent_cluster_ids += (top_antecedents_mask.to(
             torch.long) - 1) * 100000  # Mask id on invalid antecedents
@@ -1250,9 +1242,5 @@ class CorefDecoderMangoes(torch.nn.Module):
             "coref_top_antecedents": top_ante,
             "coref_top_antecedents_score": top_ante_scores,
             "coref_top_antecedents_mask": top_ante_mask,
-            "pruned_candidate_mention_scores": pruned_span_scores,
-            "pruned_span_starts": pruned_span_starts,
-            "pruned_span_ends": pruned_span_ends,
-            "pruned_span_indices": pruned_span_indices,
             # "coref_top_span_cluster_ids": top_span_cluster_ids,
         }

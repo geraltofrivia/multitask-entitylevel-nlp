@@ -427,7 +427,7 @@ class MTLModel(nn.Module):
         candidate_span_emb = torch.cat(candidate_emb_list, dim=1)
 
         if 'coref' in tasks or 'pruner' in tasks:
-            pruner_outputs = self.pruner(
+            pruner_specific = self.pruner(
                 candidate_span_emb=candidate_span_emb,
                 candidate_width_idx=candidate_width_idx,
                 num_words=_num_words,
@@ -439,13 +439,13 @@ class MTLModel(nn.Module):
             if 'coref' in tasks:
                 coref_specific = self.coref.forward(
                     attention_mask=attention_mask,
-                    pruned_span_starts=pruner_outputs['pruned_span_starts'],
-                    pruned_span_ends=pruner_outputs['pruned_span_ends'],
-                    pruned_span_indices=pruner_outputs['pruned_span_indices'],
-                    pruned_span_scores=pruner_outputs['pruned_span_scores'],
-                    pruned_span_speaker_ids=pruner_outputs['pruned_span_speaker_ids'],
-                    pruned_span_emb=pruner_outputs['pruned_span_emb'],
-                    num_top_spans=pruner_outputs['num_top_spans'],
+                    pruned_span_starts=pruner_specific['pruned_span_starts'],
+                    pruned_span_ends=pruner_specific['pruned_span_ends'],
+                    pruned_span_indices=pruner_specific['pruned_span_indices'],
+                    pruned_span_scores=pruner_specific['pruned_span_scores'],
+                    pruned_span_speaker_ids=pruner_specific['pruned_span_speaker_ids'],
+                    pruned_span_emb=pruner_specific['pruned_span_emb'],
+                    num_top_spans=pruner_specific['num_top_spans'],
                     num_segments=num_seg,
                     len_segment=len_seg,
                     domain=domain,
@@ -483,7 +483,7 @@ class MTLModel(nn.Module):
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
             "flattened_ids": flattened_ids,
-            "num_top_spans": pruner_outputs['num_top_spans'],
+            **pruner_specific,
             **coref_specific,
             **ner_specific,
             **pos_specific
@@ -544,41 +544,60 @@ class MTLModel(nn.Module):
             "num_candidates": candidate_starts.shape[0]
         }
 
+        if "pruner" in tasks or "coref" in tasks:
+            ...
+
         if "pruner" in tasks:
             pred_starts = predictions["pruned_span_starts"]
             pred_ends = predictions["pruned_span_ends"]
             pred_indices = predictions["pruned_span_indices"]
+            pred_scores = predictions["pruned_span_scores"]
             gold_starts = pruner["gold_starts"]
             gold_ends = pruner["gold_ends"]
+            gold_labels = pruner["gold_label_values"]
 
-            logits_after_pruning = torch.zeros_like(candidate_starts, device=candidate_starts.device, dtype=torch.float)
-            logits_after_pruning[pred_indices] = 1
+            """ THE HOI Way of doing this """
+            gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+                                                                    pruner['gold_starts'], coref['gold_ends'],
+                                                                    coref['gold_label_values'])
 
-            # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
-            cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
-                                        candidate_starts.unsqueeze(1))
-            cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
-                                      candidate_ends.unsqueeze(1))
-            # noinspection PyArgumentList
-            labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
+            pruned_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
+            gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
+            non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
 
-            # Calculate the loss !
-            if self.is_unweighted(task='pruner', domain=domain):
-                pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
-            else:
-                pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
+            pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
+            pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+            #
+            #
+            # logits_after_pruning = torch.zeros_like(\, device=candidate_starts.device, dtype=torch.float)
+            # logits_after_pruning[pred_indices] = 1
+            #
+            # # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
+            # cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
+            #                             candidate_starts.unsqueeze(1))
+            # cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
+            #                           candidate_ends.unsqueeze(1))
+            # # noinspection PyArgumentList
+            # labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
+            #
+            # # Calculate the loss !
+            # if self.is_unweighted(task='pruner', domain=domain):
+            #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
+            # else:
+            #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
 
             # DEBUG
-            try:
-                assert not torch.isnan(pruner_loss), \
-                    f"Found nan in loss. Here are some details - \n\tLogits shape: {logits_after_pruning.shape}, " \
-                    f"\n\tLabels shape: {labels_after_pruning.shape}, " \
-                    f"\n\tNonZero lbls: {labels_after_pruning[labels_after_pruning != 0].shape}"
-            except AssertionError as e:
-                raise e
+            # try:
+            #     assert not torch.isnan(pruner_loss), \
+            #         f"Found nan in loss. Here are some details - \n\tLogits shape: {logits_after_pruning.shape}, " \
+            #         f"\n\tLabels shape: {labels_after_pruning.shape}, " \
+            #         f"\n\tNonZero lbls: {labels_after_pruning[labels_after_pruning != 0].shape}"
+            # except AssertionError as e:
+            #     raise e
 
             outputs["loss"]["pruner"] = pruner_loss
-            outputs["pruner"] = {"logits": logits_after_pruning, "labels": labels_after_pruning}
+            outputs["pruner"] = {"logits": pruned_space_cluster_ids,
+                                 "labels": torch.ones_like(pruned_space_cluster_ids)}
 
             # labels_after_pruning = Utils.get_candidate_labels(candidate_starts, candidate_ends,
             #                                                  gold_starts, gold_ends,)
@@ -592,12 +611,6 @@ class MTLModel(nn.Module):
 
             # Compute Loss
             coref_loss = self.coref.get_coref_loss(
-                candidate_starts=predictions['candidate_starts'],
-                candidate_ends=predictions['candidate_ends'],
-                gold_starts=coref['gold_starts'],
-                gold_ends=coref['gold_ends'],
-                gold_cluster_ids=coref['gold_label_values'],
-                top_span_indices=predictions['pruned_span_indices'],
                 top_antecedents=predictions['coref_top_antecedents'],
                 top_antecedents_mask=predictions['coref_top_antecedents_mask'],
                 top_antecedents_score=predictions['coref_top_antecedents_score'],
