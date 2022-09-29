@@ -911,12 +911,6 @@ class CorefDecoderHOI(torch.nn.Module):
 
     def get_coref_loss(
             self,
-            # candidate_starts: torch.tensor,
-            # candidate_ends: torch.tensor,
-            # gold_starts: torch.tensor,
-            # gold_ends: torch.tensor,
-            # gold_cluster_ids: torch.tensor,
-            # top_span_indices: torch.tensor,
             top_span_cluster_ids: torch.tensor,
             top_antecedents: torch.tensor,
             top_antecedents_mask: torch.tensor,

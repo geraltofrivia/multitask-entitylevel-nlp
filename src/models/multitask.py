@@ -558,8 +558,7 @@ class MTLModel(nn.Module):
 
             """ THE HOI Way of doing this """
             gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
-                                                                    pruner['gold_starts'], coref['gold_ends'],
-                                                                    coref['gold_label_values'])
+                                                                    gold_starts, gold_ends, gold_labels)
 
             pruned_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
             gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
@@ -608,9 +607,18 @@ class MTLModel(nn.Module):
             # same_spans = torch.logical_and(start_eq, end_eq)
 
         if "coref" in tasks:
+            gold_starts = coref["gold_starts"]
+            gold_ends = coref["gold_ends"]
+            gold_labels = coref["gold_label_values"]
+            pred_indices = predictions["pruned_span_indices"]
+
+            gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+                                                                    gold_starts, gold_ends, gold_labels)
+            top_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
 
             # Compute Loss
             coref_loss = self.coref.get_coref_loss(
+                top_span_cluster_ids=top_space_cluster_ids,
                 top_antecedents=predictions['coref_top_antecedents'],
                 top_antecedents_mask=predictions['coref_top_antecedents_mask'],
                 top_antecedents_score=predictions['coref_top_antecedents_score'],
