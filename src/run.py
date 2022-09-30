@@ -253,7 +253,7 @@ def get_dataiter_partials(
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
               help="lr for task stuff. defaults to 2e-4")
-@click.option("--encoder-learning-rate", "-rlr", type=float, default=DEFAULTS.trainer.encoder_learning_rate,
+@click.option("--encoder-learning-rate", "-elr", type=float, default=DEFAULTS.trainer.encoder_learning_rate,
               help="lr for encoder (bert stuff). defaults to 1e-5")
 @click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
               help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule."
