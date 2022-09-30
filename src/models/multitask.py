@@ -544,9 +544,6 @@ class MTLModel(nn.Module):
             "num_candidates": candidate_starts.shape[0]
         }
 
-        if "pruner" in tasks or "coref" in tasks:
-            ...
-
         if "pruner" in tasks:
             pred_starts = predictions["pruned_span_starts"]
             pred_ends = predictions["pruned_span_ends"]

@@ -252,7 +252,9 @@ def get_dataiter_partials(
                    "(0.5, 1.0) would only get half instances from the first. ")
 @click.option("--epochs", "-e", type=int, default=None, help="Specify the number of epochs for which to train.")
 @click.option("--learning-rate", "-lr", type=float, default=DEFAULTS.trainer.learning_rate,
-              help="Learning rate. Defaults to 0.005.")
+              help="lr for task stuff. defaults to 2e-4")
+@click.option("--encoder-learning-rate", "-rlr", type=float, default=DEFAULTS.trainer.encoder_learning_rate,
+              help="lr for encoder (bert stuff). defaults to 1e-5")
 @click.option("--lr-schedule", "-lrs", default=(None, None), type=(str, float),
               help="Write 'gamma' to decay the lr. Add another param to init the hyperparam for this lr schedule."
                    "E.g.: `gamma 0.98`. \nTODO: add more recipes here")
@@ -329,6 +331,7 @@ def run(
         lr_schedule: (str, float),
         sampling_ratio: (float, float),
         learning_rate: float,
+        encoder_learning_rate: float,
         max_span_width: int,
         max_training_segments: int,
         coref_loss_mean: bool,
@@ -440,6 +443,7 @@ def run(
         # Make a trainer dict and also
         config.trainer = FancyDict()
         config.trainer.learning_rate = learning_rate
+        config.trainer.encoder_learning_rate = encoder_learning_rate
         config.trainer.epochs = epochs
         config.trainer.lr_schedule = lr_schedule[0]
         config.trainer.lr_schedule_param = lr_schedule[1]
