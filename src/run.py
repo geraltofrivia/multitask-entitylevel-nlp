@@ -685,9 +685,9 @@ def train(ctx):
         model.load_state_dict(checkpoint['model_state_dict'])
         opt.load_state_dict(checkpoint['optimizer_state_dict'])
         if scheduler_per_epoch:
-            scheduler_per_epoch.load_state_dict(checkpoint['scheduler_state_dict'])
+            scheduler_per_epoch.load_state_dict(checkpoint['scheduler_per_epoch_state_dict'])
         if scheduler_per_iter:
-            scheduler_per_iter.load_state_dict(checkpoint['scheduler_state_dict'])
+            scheduler_per_iter.load_state_dict(checkpoint['scheduler_per_iter_state_dict'])
     else:
         config.params = n_params
 
