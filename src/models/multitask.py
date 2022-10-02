@@ -561,8 +561,12 @@ class MTLModel(nn.Module):
             gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
             non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
 
-            pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
-            pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+            if self.is_unweighted(task='pruner', domain=domain):
+                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
+                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+            else:
+                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
+                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * pruner['weights'][0]
             #
             #
             # logits_after_pruning = torch.zeros_like(\, device=candidate_starts.device, dtype=torch.float)
