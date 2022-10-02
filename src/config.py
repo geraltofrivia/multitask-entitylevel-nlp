@@ -115,7 +115,7 @@ LOSS_RATIO_CP = [0.001, 1.0]  # Loss ratio to use to train coref, and pruner
 LOSS_RATIO_CN = [1.0, 1.0]  # Loss ratio to use to train coref, and pruner
 DEFAULTS: dict = FancyDict({
     'skip_instance_after_nspan': 15000,
-    'max_span_width~': 30,  # we need to push this to 30 somehow :shrug:
+    'max_span_width': 30,  # we need to push this to 30 somehow :shrug:
     'coref_metadata_feature_size': 20,  # self explanatory
     'max_training_segments': 5,  # used to determine max in segment distance part of coref
     'coref_dropout': 0.3,
