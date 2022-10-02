@@ -188,16 +188,8 @@ def make_scheduler(opt, lr_schedule: Optional[str], lr_schedule_val: Optional[fl
         scheduler_per_epoch = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda_1)
         scheduler_per_iter = None
     elif lr_schedule == 'warmup':
-        # TODO: model both optimizers here
         warmup_ratio = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['warmup']['warmup']
         warmup_steps = int(n_updates * warmup_ratio)
-
-        def lr_lambda_bert(current_step):
-            if current_step < warmup_steps:
-                return float(current_step) / float(max(1, warmup_steps))
-            return max(
-                0.0, float(n_updates - current_step) / float(max(1, n_updates - warmup_steps))
-            )
 
         def lr_lambda_task(current_step):
             return max(0.0, float(n_updates - current_step) / float(max(1, n_updates)))
