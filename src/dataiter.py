@@ -33,8 +33,10 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
+
+
+# torch.backends.cudnn.benchmark = False
+# torch.backends.cudnn.deterministic = True
 
 
 class MultiTaskDataIter(Dataset):
@@ -147,9 +149,17 @@ class MultiTaskDataIter(Dataset):
             # Write this to disk
             self.write_to_disk()
 
-        if self.config.trim:
+        if self.config.trim <= 0:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
-            self.data = self.data[:50]
+            if self.config.trim_deterministic:
+                # No randomness, always look at the first n sentences
+                self.data = self.data[:self.config.trim]
+            else:
+                # We do the trimming in a way that makes it properly random.
+                offset = np.random.randint(len(self.data) - self.config.trim)
+                data = self.data[offset:offset + self.config.trim]
+                np.random.shuffle(data)
+                self.data = data
 
     def estimate_class_weights(self, task: str) -> List[float]:
         """

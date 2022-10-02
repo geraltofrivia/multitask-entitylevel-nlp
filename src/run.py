@@ -34,8 +34,10 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 torch.cuda.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
+
+
+# torch.backends.cudnn.benchmark = False
+# torch.backends.cudnn.deterministic = True
 
 
 def make_optimizer(
@@ -262,9 +264,11 @@ def get_dataiter_partials(
 @click.option("--tokenizer", "-tok", type=str, default=None, help="Put in value here in case value differs from enc")
 @click.option("--device", "-dv", type=str, default='cuda' if torch.cuda.is_available() else 'cpu',
               help="Force a device- ('cpu'/'cuda'). If not specified, defaults to cuda if available else cpu.")
-@click.option('--trim', is_flag=True,
-              help="If True, We only consider 50 documents in one dataset. For quick iterations. NOTE:"
+@click.option('--trim', type=int, default=-1,
+              help="If True, We only consider <n> documents in one dataset. NOTE:"
                    "if d1, d2 are both provided, documents are trimmed for both.")
+@click.option('--trim-deterministic', is_flag=True,
+              help="If given, you will also see first <trim> instances, not randomly shuffled everytime.")
 @click.option('--debug', is_flag=True,
               help="If True, we may break code where previously we would have paved through regardless. More verbose.")
 @click.option('--train-encoder', type=bool, default=False,
@@ -313,7 +317,8 @@ def run(
         encoder: str,
         epochs: int,
         device: str,
-        trim: bool,
+        trim: int,
+        trim_deterministic: bool,
         dense_layers: int,
         dataset: str,
         tasks: List[Tuple[str, float, bool]],
@@ -393,7 +398,7 @@ def run(
                                 f"also want to have zero (specifically: {dense_layers}) layers. That's not going to work.")
 
         # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
-        wandb_trial = trim or debug
+        wandb_trial = trim <= 0 or debug
 
         if not use_speakers:
             tasks.n_speakers = -1
@@ -422,6 +427,7 @@ def run(
         config.use_speakers = use_speakers
         config.device = device
         config.trim = trim
+        config.trim_deterministic = trim_deterministic
         config.debug = debug
         config.skip_instance_after_nspan = DEFAULTS['skip_instance_after_nspan'] if filter_candidates_pos else -1
         config.wandb = use_wandb
@@ -462,7 +468,7 @@ def run(
         # Saving stuff
         if save:
             savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2,
-                                          trial=config.trim or config.wandb_trial)
+                                          trial=config.trim <= 0 or config.wandb_trial)
             savedir.mkdir(parents=True, exist_ok=True)
             savedir = mt_save_dir(parentdir=savedir, _newdir=True)
             config.savedir = str(savedir)
@@ -473,7 +479,7 @@ def run(
     else:
 
         # Figure out where we pull the model and everything from
-        savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2, trial=trim or debug)
+        savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2, trial=trim <= 0 or debug)
         savedir = savedir / str(resume_dir)
         assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
 
@@ -541,7 +547,6 @@ def run(
 
     # Init them once to note the length
     len_train = train_ds().__len__()
-
 
     """
         Prepare Context Object
@@ -675,13 +680,13 @@ def train(ctx):
             wandb_config['tasks_2'] = list(tasks_2)
             wandb.init(project="entitymention-mtl", entity="magnet",
                        notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim else "main")
+                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim <= 0 else "main")
             wandb.config.update(wandb_config, allow_val_change=True)
         else:
 
             wandb.init(project="entitymention-mtl", entity="magnet",
                        notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim else "main")
+                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim <= 0 else "main")
 
     if resume_dir >= 0:
         """ We're actually resuming a run. So now we need to load params, state dicts"""
