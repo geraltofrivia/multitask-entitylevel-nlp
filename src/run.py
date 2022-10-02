@@ -337,7 +337,8 @@ def run(
         max_span_width: int,
         max_training_segments: int,
         coref_loss_mean: bool,
-        coref_higher_order: int,
+        coref_higher_order: str,
+        coref_depth: int,
         pruner_top_span_ratio: float,
         train_on_dev: bool
 ):
@@ -436,6 +437,7 @@ def run(
         config.coref_higher_order = coref_higher_order
         config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
         config.coref_num_genres = sum(task.n_genres for task in [tasks, tasks_2])
+        config.coref_depth = coref_depth
         config.vocab_size = tokenizer.get_vocab().__len__()
         config.freeze_encoder = not train_encoder
         config.train_on_dev = train_on_dev
