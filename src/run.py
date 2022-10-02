@@ -73,7 +73,7 @@ def make_optimizer_hoi(
     ]
     optimizers = [
         AdamW(grouped_bert_param, lr=encoder_learning_rate, eps=adam_epsilon),
-        Adam(task_param, lr=task_learning_rate, eps=adam_epsilon, weight_decay=0)
+        Adam(model.get_params()[1], lr=task_learning_rate, eps=adam_epsilon, weight_decay=0)
     ]
     return optimizers
 
@@ -136,7 +136,7 @@ def make_optimizer(
 
 
 def make_scheduler_hoi(opts, lr_schedule: Optional[str], lr_schedule_val: Optional[float], n_updates: int) \
-        -> Optional[List[Type[_LRScheduler]], List[Type[_LRScheduler]]]:
+        -> Optional[Tuple[List[Type[_LRScheduler]], List[Type[_LRScheduler]]]]:
     # TODO: implement gamma and other things as well
     if not lr_schedule:
         return None, None
