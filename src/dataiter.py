@@ -149,7 +149,7 @@ class MultiTaskDataIter(Dataset):
             # Write this to disk
             self.write_to_disk()
 
-        if self.config.trim <= 0:
+        if self.config.trim > 0:
             warnings.warn("The dataset has been trimmed to only 50 instances. This is NOT a legit experiment any more!")
             if self.config.trim_deterministic:
                 # No randomness, always look at the first n sentences
