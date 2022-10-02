@@ -398,7 +398,7 @@ def run(
                                 f"also want to have zero (specifically: {dense_layers}) layers. That's not going to work.")
 
         # If trim OR debug is enabled, we WILL turn the wandb_trial flag on
-        wandb_trial = trim <= 0 or debug
+        wandb_trial = trim > 0 or debug
 
         if not use_speakers:
             tasks.n_speakers = -1
@@ -468,7 +468,7 @@ def run(
         # Saving stuff
         if save:
             savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2,
-                                          trial=config.trim <= 0 or config.wandb_trial)
+                                          trial=config.trim > 0 or config.wandb_trial)
             savedir.mkdir(parents=True, exist_ok=True)
             savedir = mt_save_dir(parentdir=savedir, _newdir=True)
             config.savedir = str(savedir)
@@ -479,7 +479,7 @@ def run(
     else:
 
         # Figure out where we pull the model and everything from
-        savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2, trial=trim <= 0 or debug)
+        savedir = get_save_parent_dir(LOC.models, tasks=tasks, tasks_2=tasks_2, trial=trim > 0 or debug)
         savedir = savedir / str(resume_dir)
         assert savedir.exists(), f"No subfolder {resume_dir} in {savedir.parent}. Can not resume!"
 
@@ -680,13 +680,13 @@ def train(ctx):
             wandb_config['tasks_2'] = list(tasks_2)
             wandb.init(project="entitymention-mtl", entity="magnet",
                        notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim <= 0 else "main")
+                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim > 0 else "main")
             wandb.config.update(wandb_config, allow_val_change=True)
         else:
 
             wandb.init(project="entitymention-mtl", entity="magnet",
                        notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim <= 0 else "main")
+                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim > 0 else "main")
 
     if resume_dir >= 0:
         """ We're actually resuming a run. So now we need to load params, state dicts"""
