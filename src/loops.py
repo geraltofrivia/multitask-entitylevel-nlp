@@ -89,6 +89,8 @@ def training_loop(
     if flag_save:
         atexit.register(goodbye, save_dir)
 
+    bert_params, task_params = model.get_params()
+
     # Epoch level
     for e in range(epochs_last_run + 1, epochs + epochs_last_run + 1):
 
@@ -106,7 +108,7 @@ def training_loop(
         for i, instance in enumerate(tqdm(trn_dataset)):
 
             # Reset the gradients.
-            opt.zero_grad()
+            model.zero_grad()
 
             instance["prep_coref_eval"] = True
 
@@ -128,11 +130,13 @@ def training_loop(
 
             # Clip Gradients
             if clip_grad_norm > 0:
-                torch.nn.utils.clip_grad_norm_([param for group in opt.param_groups for param in group['params']],
-                                               clip_grad_norm)
+                torch.nn.utils.clip_grad_norm_(bert_params, clip_grad_norm)
+                torch.nn.utils.clip_grad_norm_(task_params, clip_grad_norm)
 
             # Backward Pass
-            opt.step()
+            # opt.step()
+            for optimizer in opt:
+                optimizer.step()
 
             # Throw the outputs to the eval benchmark also
             train_eval.update(instance=instance, outputs=outputs)
@@ -141,8 +145,9 @@ def training_loop(
                 per_epoch_loss[instance['domain']][task_nm].append(outputs["loss"][task_nm].item())
 
             # If LR scheduler is provided, run it
-            if scheduler_per_iter is not None:
-                scheduler_per_iter.step()
+            if scheduler_per_iter:
+                scheduler_per_iter[0].step()
+                scheduler_per_iter[1].step()
 
             trn_dataset[i] = change_device(instance, 'cpu')
 
@@ -151,8 +156,9 @@ def training_loop(
         dev_eval.run()
 
         # If LR scheduler (per epoch) is provided, run it
-        if scheduler_per_epoch is not None:
-            scheduler_per_epoch.step()
+        if scheduler_per_epoch:
+            scheduler_per_epoch[0].step()
+            scheduler_per_epoch[1].step()
 
         # Bookkeeping (summarise the train and valid evaluations, and the loss)
         train_metrics = train_eval.aggregate_reports(train_metrics, train_eval.report())
@@ -167,7 +173,7 @@ def training_loop(
 
         for k in skipped.keys():
             skipped[k].append(per_epoch_skipped[k])
-        lrs = [param_group['lr'] for param_group in opt.param_groups]
+        lrs = [pg['lr'] for pg in opt[0].param_groups] + [pg['lr'] for pg in opt[1].param_groups]
         if flag_wandb:
             wandb.log({"train": train_eval.report(), "valid": dev_eval.report()}, step=e)
             wandb.log({f'lr_{i}': lrs[i] for i in range(len(lrs))}, step=e)
@@ -204,9 +210,16 @@ def training_loop(
             torch.save({
                 'epochs_last_run': e,
                 'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': opt.state_dict(),
-                'scheduler_per_epoch_state_dict': scheduler_per_epoch.state_dict() if scheduler_per_epoch else None,
-                'scheduler_per_iter_state_dict': scheduler_per_iter.state_dict() if scheduler_per_iter else None,
+                'optimizer_bert_state_dict': opt[0].state_dict(),
+                'optimizer_task_state_dict': opt[1].state_dict(),
+                'scheduler_per_epoch_bert_state_dict': scheduler_per_epoch[
+                    0].state_dict() if scheduler_per_epoch else None,
+                'scheduler_per_epoch_task_state_dict': scheduler_per_epoch[
+                    0].state_dict() if scheduler_per_epoch else None,
+                'scheduler_per_iter_bert_state_dict': scheduler_per_iter[
+                    0].state_dict() if scheduler_per_iter else None,
+                'scheduler_per_iter_task_state_dict': scheduler_per_iter[
+                    1].state_dict() if scheduler_per_iter else None,
             }, Path(save_dir) / 'torch.save')
             print(f"Model saved on Epoch {e} at {save_dir}.")
 

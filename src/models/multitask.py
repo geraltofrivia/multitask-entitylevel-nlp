@@ -218,6 +218,17 @@ class MTLModel(nn.Module):
                 self.ner_loss[task.dataset] = nn.functional.cross_entropy
         self.pos_loss = nn.functional.cross_entropy
 
+    def get_params(self, named=False):
+        bert_based_param, task_param = [], []
+        for name, param in self.named_parameters():
+            if name.startswith('bert'):
+                to_add = (name, param) if named else param
+                bert_based_param.append(to_add)
+            else:
+                to_add = (name, param) if named else param
+                task_param.append(to_add)
+        return bert_based_param, task_param
+
     def task_separate_gradient_clipping(self):
         # noinspection PyAttributeOutsideInit
         self.clip_grad_norm_ = self.separate_max_norm_base_task
@@ -312,7 +323,7 @@ class MTLModel(nn.Module):
         log_norm = torch.logsumexp(top_antecedent_scores, 1)  # [top_cand]
         return log_norm - marginalized_gold_scores  # [top_cand]
 
-    def get_coref_loss(
+    def todel_get_coref_loss(
             self,
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,

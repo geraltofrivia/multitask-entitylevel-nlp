@@ -12,6 +12,8 @@ import torch
 import transformers
 import wandb
 from mytorch.utils.goodies import mt_save_dir, FancyDict
+from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import _LRScheduler
 
 # Local imports
 try:
@@ -36,6 +38,44 @@ torch.cuda.manual_seed(SEED)
 torch.cuda.manual_seed_all(SEED)
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
+
+
+def make_optimizer_hoi(
+        model: MTLModel,
+        base_keyword: str,
+        task_weight_decay: Optional[float],
+        task_learning_rate: Optional[float],
+        adam_beta1: float = 0.9,
+        adam_beta2: float = 0.999,
+        adam_epsilon: float = 1e-6,
+        encoder_learning_rate: float = 2e-05,
+        encoder_weight_decay: float = 0.0,
+        freeze_encoder: bool = False,
+        optimizer_class: Callable = torch.optim.AdamW,
+):
+    no_decay = ['bias', 'LayerNorm.weight']
+    bert_param, task_param = model.get_params(named=True)
+    if task_learning_rate is None:
+        task_learning_rate = encoder_learning_rate
+    if task_weight_decay is None:
+        task_weight_decay = encoder_weight_decay
+
+    grouped_bert_param = [
+        {
+            'params': [p for n, p in bert_param if not any(nd in n for nd in no_decay)],
+            'lr': encoder_learning_rate,
+            'weight_decay': encoder_weight_decay
+        }, {
+            'params': [p for n, p in bert_param if any(nd in n for nd in no_decay)],
+            'lr': encoder_learning_rate,
+            'weight_decay': 0.0
+        }
+    ]
+    optimizers = [
+        AdamW(grouped_bert_param, lr=encoder_learning_rate, eps=adam_epsilon),
+        Adam(task_param, lr=task_learning_rate, eps=adam_epsilon, weight_decay=0)
+    ]
+    return optimizers
 
 
 def make_optimizer(
@@ -93,6 +133,47 @@ def make_optimizer(
 
     optimizer_kwargs = {"betas": (adam_beta1, adam_beta2), "eps": adam_epsilon, "lr": encoder_learning_rate}
     return optimizer_class(optimizer_grouped_parameters, **optimizer_kwargs)
+
+
+def make_scheduler_hoi(opts, lr_schedule: Optional[str], lr_schedule_val: Optional[float], n_updates: int) \
+        -> Optional[List[Type[_LRScheduler]], List[Type[_LRScheduler]]]:
+    # TODO: implement gamma and other things as well
+    if not lr_schedule:
+        return None, None
+
+    if lr_schedule == 'gamma':
+        hyperparam = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['gamma']['decay_rate']
+        lambda_1 = lambda epoch: hyperparam ** epoch
+        scheduler_per_epoch = torch.optim.lr_scheduler.LambdaLR(opts, lr_lambda=lambda_1)
+        scheduler_per_iter = None
+        raise NotImplementedError
+    elif lr_schedule == 'warmup':
+        # TODO: model both optimizers here
+        warmup_ratio = lr_schedule_val if lr_schedule_val >= 0 else SCHEDULER_CONFIG['warmup']['warmup']
+        warmup_steps = int(n_updates * warmup_ratio)
+
+        def lr_lambda_bert(current_step):
+            if current_step < warmup_steps:
+                return float(current_step) / float(max(1, warmup_steps))
+            return max(
+                0.0, float(n_updates - current_step) / float(max(1, n_updates - warmup_steps))
+            )
+
+        def lr_lambda_task(current_step):
+            return max(0.0, float(n_updates - current_step) / float(max(1, n_updates)))
+
+        scheduler_per_iter = [
+            torch.optim.lr_scheduler.LambdaLR(opts[0], lr_lambda_bert),
+            torch.optim.lr_scheduler.LambdaLR(opts[1], lr_lambda_task)
+        ]
+        scheduler_per_epoch = None
+    else:
+        raise BadParameters(f"Unknown LR Schedule Recipe Name - {lr_schedule}")
+
+    if scheduler_per_iter is not None and scheduler_per_epoch is not None:
+        raise ValueError(f"Both Scheduler per iter and Scheduler per epoch are non-none. This won't fly.")
+
+    return scheduler_per_epoch, scheduler_per_iter
 
 
 # noinspection PyProtectedMember
@@ -600,7 +681,7 @@ def train(ctx):
 
     # Make the optimizer
     # opt_base = torch.optim.Adam
-    opt = make_optimizer(
+    opts = make_optimizer_hoi(
         model=model,
         task_learning_rate=config.trainer.learning_rate,
         freeze_encoder=config.freeze_encoder,
@@ -612,8 +693,8 @@ def train(ctx):
         adam_beta2=config.trainer.adam_beta2,
         adam_epsilon=config.trainer.adam_epsilon,
     )
-    scheduler_per_epoch, scheduler_per_iter = make_scheduler(
-        opt=opt,
+    scheduler_per_epoch, scheduler_per_iter = make_scheduler_hoi(
+        opts=opts,
         lr_schedule=config.trainer.lr_schedule,
         lr_schedule_val=config.trainer.lr_schedule_param,
         n_updates=len_train * config.trainer.epochs)
@@ -683,11 +764,14 @@ def train(ctx):
         """ We're actually resuming a run. So now we need to load params, state dicts"""
         checkpoint = torch.load(savedir / 'torch.save')
         model.load_state_dict(checkpoint['model_state_dict'])
-        opt.load_state_dict(checkpoint['optimizer_state_dict'])
+        opts[0].load_state_dict(checkpoint['optimizer_bert_state_dict'])
+        opts[1].load_state_dict(checkpoint['optimizer_task_state_dict'])
         if scheduler_per_epoch:
-            scheduler_per_epoch.load_state_dict(checkpoint['scheduler_state_dict'])
+            scheduler_per_epoch[0].load_state_dict(checkpoint['scheduler_per_epoch_bert_state_dict'])
+            scheduler_per_epoch[1].load_state_dict(checkpoint['scheduler_per_epoch_task_state_dict'])
         if scheduler_per_iter:
-            scheduler_per_iter.load_state_dict(checkpoint['scheduler_state_dict'])
+            scheduler_per_iter[0].load_state_dict(checkpoint['scheduler_per_iter_bert_state_dict'])
+            scheduler_per_iter[1].load_state_dict(checkpoint['scheduler_per_iter_task_state_dict'])
     else:
         config.params = n_params
 
@@ -702,7 +786,7 @@ def train(ctx):
         device=device,
         train_eval=train_eval,
         dev_eval=dev_eval,
-        opt=opt,
+        opt=opts,
         tasks=[tasks, tasks_2] if _is_multidomain else [tasks],
         # This is used only for bookkeeping. We're assuming empty entries in logs are fine.
         flag_wandb=config.wandb,
