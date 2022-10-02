@@ -289,6 +289,8 @@ def get_dataiter_partials(
               help='If True, coref loss will range from -1 to 1, where it normally can go in tens of thousands.')
 @click.option('--coref-higher-order', '-cho', type=str, default=DEFAULTS['coref_higher_order'],
               help='Whether we do cluster merging or something else for higher order aggregation')
+@click.option('--coref-depth', type=int, default=DEFAULTS['coref_depth'],
+              help="Number of times we run the higher order loop. Defaults to one.")
 @click.option('--use-speakers', type=bool, default=True,
               help="If False, we ignore speaker ID info even if we have access to it")
 @click.option('--use-pretrained-model', default=None, type=str,
