@@ -587,8 +587,7 @@ class MTLModel(nn.Module):
                            f"\n\t max               : {non_gold_mention_scores.max()}" \
                            f"\n\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}" \
                            f"\n\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}" \
-                           f"\n\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}" \
- \
+                           f"\n\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}"
                 print(message)
                 raise NANsFound("Found in Pruner. See message above for details")
             #
