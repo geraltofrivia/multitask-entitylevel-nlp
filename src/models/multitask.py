@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from termcolor import colored
 from transformers import BertModel
 
 # Local imports
@@ -562,11 +563,34 @@ class MTLModel(nn.Module):
             non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
 
             if self.is_unweighted(task='pruner', domain=domain):
+                # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
                 pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
                 pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
             else:
                 pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
                 pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * pruner['weights'][0]
+
+            if torch.isnan(pruner_loss):
+                message = colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold'])
+                message += f"\nWeighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}" \
+                           f"\n\t Weights (ignore if unweighted): {pruner['weights']}" \
+                           f"\n**Gold Mention Stuff:" \
+                           f"\n\t shape             : {gold_mention_scores.shape}, " \
+                           f"\n\t min               : {gold_mention_scores.min()}" \
+                           f"\n\t max               : {gold_mention_scores.max()}" \
+                           f"\n\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}" \
+                           f"\n\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}" \
+                           f"\n\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}" \
+                           f"\n**Non Gold Mention Stuff:" \
+                           f"\n\t shape             : {non_gold_mention_scores.shape}, " \
+                           f"\n\t min               : {non_gold_mention_scores.min()}" \
+                           f"\n\t max               : {non_gold_mention_scores.max()}" \
+                           f"\n\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}" \
+                           f"\n\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}" \
+                           f"\n\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}" \
+ \
+                print(message)
+                raise NANsFound("Found in Pruner. See message above for details")
             #
             #
             # logits_after_pruning = torch.zeros_like(\, device=candidate_starts.device, dtype=torch.float)
@@ -587,13 +611,6 @@ class MTLModel(nn.Module):
             #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
 
             # DEBUG
-            # try:
-            #     assert not torch.isnan(pruner_loss), \
-            #         f"Found nan in loss. Here are some details - \n\tLogits shape: {logits_after_pruning.shape}, " \
-            #         f"\n\tLabels shape: {labels_after_pruning.shape}, " \
-            #         f"\n\tNonZero lbls: {labels_after_pruning[labels_after_pruning != 0].shape}"
-            # except AssertionError as e:
-            #     raise e
 
             outputs["loss"]["pruner"] = pruner_loss
             outputs["pruner"] = {"logits": pruned_space_cluster_ids,
@@ -628,6 +645,9 @@ class MTLModel(nn.Module):
                 num_top_spans=predictions['num_top_spans'],
                 device=input_ids.device
             )
+
+            if torch.isnan(coref_loss):
+                raise NANsFound("Found in Coref.")
 
             if self.coref_loss_mean:
                 coref_loss = torch.mean(coref_loss)
