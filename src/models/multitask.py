@@ -568,14 +568,14 @@ class MTLModel(nn.Module):
                     pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
                 else:
                     pruner_loss = 0
-                if non_gold_mention_scores.nelement():
+                if non_gold_mention_scores.nelement() != 0:
                     pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
             else:
-                if gold_mention_scores.nelement():
+                if gold_mention_scores.nelement() != 0:
                     pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
                 else:
                     pruner_loss = 0
-                if non_gold_mention_scores.nelement():
+                if non_gold_mention_scores.nelement() != 0:
                     pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
                                    pruner['weights'][0]
 
