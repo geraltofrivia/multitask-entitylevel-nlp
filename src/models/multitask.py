@@ -564,13 +564,23 @@ class MTLModel(nn.Module):
 
             if self.is_unweighted(task='pruner', domain=domain):
                 # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
-                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
-                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+                if gold_mention_scores.nelement() != 0:
+                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
+                else:
+                    pruner_loss = 0
+                if non_gold_mention_scores.nelement():
+                    pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
             else:
-                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
-                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * pruner['weights'][0]
+                if gold_mention_scores.nelement():
+                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
+                else:
+                    pruner_loss = 0
+                if non_gold_mention_scores.nelement():
+                    pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
+                                   pruner['weights'][0]
 
-            if torch.isnan(pruner_loss):
+            if True:
+                # if torch.isnan(pruner_loss):
                 message = colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold'])
                 message += f"\nWeighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}" \
                            f"\n\t Weights (ignore if unweighted): {pruner['weights']}" \
