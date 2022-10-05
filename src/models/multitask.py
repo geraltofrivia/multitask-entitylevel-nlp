@@ -580,24 +580,23 @@ class MTLModel(nn.Module):
                                    pruner['weights'][0]
 
             if torch.isnan(pruner_loss):
-                message = colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold'])
-                message += f"\nWeighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}" \
-                           f"\n\t Weights (ignore if unweighted): {pruner['weights']}" \
-                           f"\n**Gold Mention Stuff:" \
-                           f"\n\t shape             : {gold_mention_scores.shape}, " \
-                           f"\n\t min               : {gold_mention_scores.min()}" \
-                           f"\n\t max               : {gold_mention_scores.max()}" \
-                           f"\n\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}" \
-                           f"\n\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}" \
-                           f"\n\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}" \
-                           f"\n**Non Gold Mention Stuff:" \
-                           f"\n\t shape             : {non_gold_mention_scores.shape}, " \
-                           f"\n\t min               : {non_gold_mention_scores.min()}" \
-                           f"\n\t max               : {non_gold_mention_scores.max()}" \
-                           f"\n\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}" \
-                           f"\n\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}" \
-                           f"\n\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}"
-                print(message)
+                print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
+                print(f"Weighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}")
+                print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
+                print(f"**Gold Mention Stuff:")
+                print(f"\t shape             : {gold_mention_scores.shape}")
+                print(f"\t min               : {gold_mention_scores.min()}")
+                print(f"\t max               : {gold_mention_scores.max()}")
+                print(f"\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}")
+                print(f"\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}")
+                print(f"\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}")
+                print(f"**Non Gold Mention Stuff:")
+                print(f"\t shape             : {non_gold_mention_scores.shape}")
+                print(f"\t min               : {non_gold_mention_scores.min()}")
+                print(f"\t max               : {non_gold_mention_scores.max()}")
+                print(f"\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}")
+                print(f"\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}")
+                print(f"\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}")
                 raise NANsFound("Found in Pruner. See message above for details")
             #
             #
