@@ -300,6 +300,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
 
     keys_to_ignore: List[str] = [
         'trim',
+        'trim_deterministic',
         'loss_scales',
         'epochs',
         'lr',
