@@ -10,7 +10,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from termcolor import colored
 from transformers import BertModel
 
 # Local imports
@@ -55,6 +54,7 @@ class MTLModel(nn.Module):
             pruner_dropout: float,
             pruner_max_num_spans: int,
             pruner_top_span_ratio: float,
+            pruner_loss_nll: bool,
 
             # Coref Specific Params
             coref_dropout: float,
@@ -210,7 +210,7 @@ class MTLModel(nn.Module):
             })  # every token must have a pos tag and so we don't add a faux class here
 
         # Loss management for pruner
-        self.pruner_loss = self._rescaling_weights_bce_loss_
+        self.pruner_loss_nll = pruner_loss_nll
         self.ner_loss = {}
         for task in [task_1, task_2]:
             if task.dataset in DOMAIN_HAS_NER_MULTILABEL:
@@ -546,83 +546,33 @@ class MTLModel(nn.Module):
         }
 
         if "pruner" in tasks:
-            pred_starts = predictions["pruned_span_starts"]
-            pred_ends = predictions["pruned_span_ends"]
-            pred_indices = predictions["pruned_span_indices"]
-            pred_scores = predictions["pruned_span_scores"]
-            gold_starts = pruner["gold_starts"]
-            gold_ends = pruner["gold_ends"]
-            gold_labels = pruner["gold_label_values"]
 
-            """ THE HOI Way of doing this """
-            gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
-                                                                    gold_starts, gold_ends, gold_labels)
-
-            pruned_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
-            gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
-            non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
-
-            if self.is_unweighted(task='pruner', domain=domain):
-                # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
-                if gold_mention_scores.nelement() != 0:
-                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
-                else:
-                    pruner_loss = 0
-                if non_gold_mention_scores.nelement() != 0:
-                    pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+            if self.pruner_loss_nll:
+                loss, logits, labels = self.pruner.loss_nll(
+                    candidate_starts=candidate_starts,
+                    candidate_ends=candidate_ends,
+                    gold_starts=pruner["gold_starts"],
+                    gold_ends=pruner["gold_ends"],
+                    gold_labels=pruner["gold_label_values"],
+                    pred_indices=predictions["pruned_span_indices"],
+                    pred_scores=predictions["pruned_span_scores"],
+                    class_weights=pruner["weights"],
+                    is_unweighted=self.is_unweighted(task='pruner', domain=domain)
+                )
             else:
-                if gold_mention_scores.nelement() != 0:
-                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
-                else:
-                    pruner_loss = 0
-                if non_gold_mention_scores.nelement() != 0:
-                    pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
-                                   pruner['weights'][0]
+                loss, logits, labels = self.pruner.loss_bce(
+                    candidate_starts=candidate_starts,
+                    candidate_ends=candidate_ends,
+                    gold_starts=pruner["gold_starts"],
+                    gold_ends=pruner["gold_ends"],
+                    pred_indices=predictions["pruned_span_indices"],
+                    class_weights=pruner["weights"],
+                    is_unweighted=self.is_unweighted(task='pruner', domain=domain)
+                )
 
-            if True:
-                # if torch.isnan(pruner_loss):
-                print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
-                print(f"Weighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}")
-                print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
-                print(f"**Gold Mention Stuff:")
-                print(f"\t shape             : {gold_mention_scores.shape}")
-                print(f"\t min               : {gold_mention_scores.min()}")
-                print(f"\t max               : {gold_mention_scores.max()}")
-                print(f"\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}")
-                print(f"\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}")
-                print(f"\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}")
-                print(f"**Non Gold Mention Stuff:")
-                print(f"\t shape             : {non_gold_mention_scores.shape}")
-                print(f"\t min               : {non_gold_mention_scores.min()}")
-                print(f"\t max               : {non_gold_mention_scores.max()}")
-                print(f"\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}")
-                print(f"\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}")
-                print(f"\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}")
-                raise NANsFound("Found in Pruner. See message above for details")
-            #
-            #
-            # logits_after_pruning = torch.zeros_like(\, device=candidate_starts.device, dtype=torch.float)
-            # logits_after_pruning[pred_indices] = 1
-            #
-            # # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
-            # cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
-            #                             candidate_starts.unsqueeze(1))
-            # cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
-            #                           candidate_ends.unsqueeze(1))
-            # # noinspection PyArgumentList
-            # labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
-            #
-            # # Calculate the loss !
-            # if self.is_unweighted(task='pruner', domain=domain):
-            #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
-            # else:
-            #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
-
-            # DEBUG
-
-            outputs["loss"]["pruner"] = pruner_loss
-            outputs["pruner"] = {"logits": pruned_space_cluster_ids,
-                                 "labels": torch.ones_like(pruned_space_cluster_ids)}
+            outputs["loss"]["pruner"] = loss
+            outputs["pruner"] = {"logits": logits,
+                                 "labels": labels}
 
             # labels_after_pruning = Utils.get_candidate_labels(candidate_starts, candidate_ends,
             #                                                  gold_starts, gold_ends,)

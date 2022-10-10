@@ -307,6 +307,8 @@ class SpanPrunerHOI(torch.nn.Module):
         self._top_span_ratio: float = pruner_top_span_ratio
         self.dropout = nn.Dropout(p=self._dropout)
 
+        self._loss_fn = self._rescaling_weights_bce_loss_
+
         # Parameter Time!
         _feat_dim = coref_metadata_feature_size
         _span_dim = (hidden_size * 3) + (_feat_dim if self._use_metadata else 0)
@@ -360,10 +362,40 @@ class SpanPrunerHOI(torch.nn.Module):
             'num_top_spans': num_top_spans
         }
 
-    # def loss_
-
-    def loss_nll(
+    def loss_bce(
             self,
+            candidate_starts,
+            candidate_ends,
+            gold_starts,
+            gold_ends,
+            pred_indices,
+            class_weights,
+            is_unweighted: bool,
+    ):
+        logits_after_pruning = torch.zeros_like(candidate_starts, device=candidate_starts.device, dtype=torch.float)
+        logits_after_pruning[pred_indices] = 1
+
+        # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
+        cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
+                                    candidate_starts.unsqueeze(1))
+        cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
+                                  candidate_ends.unsqueeze(1))
+        # noinspection PyArgumentList
+        labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
+
+        # Calculate the loss !
+        if is_unweighted:
+            loss = self._loss_fn(logits_after_pruning, labels_after_pruning)
+        else:
+            loss = self._loss_fn(logits_after_pruning, labels_after_pruning, weight=class_weights)
+
+        logits = logits_after_pruning
+        labels = labels_after_pruning
+
+        return loss, logits, labels
+
+    @staticmethod
+    def loss_nll(
             candidate_starts,
             candidate_ends,
             gold_starts,
@@ -386,21 +418,21 @@ class SpanPrunerHOI(torch.nn.Module):
         if is_unweighted:
             # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
             if gold_mention_scores.nelement() != 0:
-                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
+                loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
             else:
-                pruner_loss = 0
+                loss = 0
             if non_gold_mention_scores.nelement() != 0:
-                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+                loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
         else:
             if gold_mention_scores.nelement() != 0:
-                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * class_weights[1]
+                loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * class_weights[1]
             else:
-                pruner_loss = 0
+                loss = 0
             if non_gold_mention_scores.nelement() != 0:
-                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
-                               class_weights[0]
+                loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
+                        class_weights[0]
 
-        if gold_mention_scores.nelement() == 0 or non_gold_mention_scores.nelement() == 0 or torch.isnan(pruner_loss):
+        if gold_mention_scores.nelement() == 0 or non_gold_mention_scores.nelement() == 0 or torch.isnan(loss):
             # if torch.isnan(pruner_loss):
             print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
             print(f"Weighted or Unweighted: {is_unweighted}")
@@ -421,6 +453,10 @@ class SpanPrunerHOI(torch.nn.Module):
             print(f"\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}")
             raise NANsFound("Found in Pruner. See message above for details")
 
+        logits = pruned_space_cluster_ids
+        labels = torch.ones_like(pruned_space_cluster_ids)
+
+        return loss, logits, labels
 
 # class SpanPrunerMangoes(torch.nn.Module):
 #     """

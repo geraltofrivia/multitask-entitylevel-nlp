@@ -349,7 +349,8 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         '_sampling_ratio',
         'wandb_name',
         'epochs_last_run',
-        'cwd'
+        'cwd',
+        'pruner_loss_nll'
     ]
 
     # If old is a dict, we don't need to pull
