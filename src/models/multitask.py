@@ -579,7 +579,8 @@ class MTLModel(nn.Module):
                     pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
                                    pruner['weights'][0]
 
-            if torch.isnan(pruner_loss):
+            if True:
+                # if torch.isnan(pruner_loss):
                 print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
                 print(f"Weighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}")
                 print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
