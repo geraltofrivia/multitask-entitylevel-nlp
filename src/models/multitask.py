@@ -643,7 +643,7 @@ class MTLModel(nn.Module):
             top_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
 
             # Compute Loss
-            coref_loss = self.coref.get_coref_loss(
+            coref_loss = self.coref.loss(
                 top_span_cluster_ids=top_space_cluster_ids,
                 top_antecedents=predictions['coref_top_antecedents'],
                 top_antecedents_mask=predictions['coref_top_antecedents_mask'],

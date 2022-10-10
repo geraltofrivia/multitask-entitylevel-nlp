@@ -19,13 +19,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
+from termcolor import colored
 
 # Local imports
 try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.exceptions import BadParameters
+from utils.exceptions import BadParameters, NANsFound
 
 
 class Utils(object):
@@ -358,6 +359,67 @@ class SpanPrunerHOI(torch.nn.Module):
             'pruned_span_speaker_ids': pruned_span_speaker_ids,
             'num_top_spans': num_top_spans
         }
+
+    # def loss_
+
+    def loss_nll(
+            self,
+            candidate_starts,
+            candidate_ends,
+            gold_starts,
+            gold_ends,
+            gold_labels,
+            pred_indices,
+            pred_scores,
+            class_weights,
+            is_unweighted: bool,
+    ):
+
+        """ THE HOI Way of doing this """
+        gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+                                                                gold_starts, gold_ends, gold_labels)
+
+        pruned_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
+        gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
+        non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
+
+        if is_unweighted:
+            # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
+            if gold_mention_scores.nelement() != 0:
+                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
+            else:
+                pruner_loss = 0
+            if non_gold_mention_scores.nelement() != 0:
+                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+        else:
+            if gold_mention_scores.nelement() != 0:
+                pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * class_weights[1]
+            else:
+                pruner_loss = 0
+            if non_gold_mention_scores.nelement() != 0:
+                pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
+                               class_weights[0]
+
+        if gold_mention_scores.nelement() == 0 or non_gold_mention_scores.nelement() == 0 or torch.isnan(pruner_loss):
+            # if torch.isnan(pruner_loss):
+            print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
+            print(f"Weighted or Unweighted: {is_unweighted}")
+            print(f"\t Weights (ignore if unweighted): {class_weights}")
+            print(f"**Gold Mention Stuff:")
+            print(f"\t shape             : {gold_mention_scores.shape}")
+            print(f"\t min               : {gold_mention_scores.min()}")
+            print(f"\t max               : {gold_mention_scores.max()}")
+            print(f"\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}")
+            print(f"\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}")
+            print(f"\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}")
+            print(f"**Non Gold Mention Stuff:")
+            print(f"\t shape             : {non_gold_mention_scores.shape}")
+            print(f"\t min               : {non_gold_mention_scores.min()}")
+            print(f"\t max               : {non_gold_mention_scores.max()}")
+            print(f"\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}")
+            print(f"\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}")
+            print(f"\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}")
+            raise NANsFound("Found in Pruner. See message above for details")
 
 
 # class SpanPrunerMangoes(torch.nn.Module):
@@ -909,7 +971,7 @@ class CorefDecoderHOI(torch.nn.Module):
             # "coref_top_span_cluster_ids": top_span_cluster_ids,
         }
 
-    def get_coref_loss(
+    def loss(
             self,
             top_span_cluster_ids: torch.tensor,
             top_antecedents: torch.tensor,
