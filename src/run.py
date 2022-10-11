@@ -314,7 +314,8 @@ def get_dataiter_partials(
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
 @click.option('--wandb-name', '-wbname', type=str, default=None,
               help="You can specify a short name for the run here as well. ")
-@click.option('--wandb-tags', '-wbtags', type=list, default=None, help="Space seperated tags, as many as you want!")
+@click.option('--wandb-tags', '-wt', type=str, default=None, multiple=True,
+              help="Space seperated tags, as many as you want!")
 @click.option('--train-on-dev', is_flag=True, help="If enabled, test<-dev & train<-train+dev set.")
 def run(
         ctx,  # The ctx obj click uses to pass things around in commands
