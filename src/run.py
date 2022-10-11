@@ -312,6 +312,7 @@ def get_dataiter_partials(
               help="If use-wandb is enabled, whatever comment you write will be included in WandB runs.")
 @click.option('--wandb-name', '-wbname', type=str, default=None,
               help="You can specify a short name for the run here as well. ")
+@click.option('--wandb-tags', '-wbtags', type=list, default=None, help="Space seperated tags, as many as you want!")
 @click.option('--train-on-dev', is_flag=True, help="If enabled, test<-dev & train<-train+dev set.")
 def run(
         ctx,  # The ctx obj click uses to pass things around in commands
@@ -332,6 +333,7 @@ def run(
         use_wandb: bool,
         wandb_comment: str,
         wandb_name: str,
+        wandb_tags: List[str],
         filter_candidates_pos: bool,
         use_speakers: bool,
         shared_compressor: bool,
@@ -681,10 +683,14 @@ def train(ctx):
             wandb_config['dataset_2'] = dataset_2
             wandb_config['tasks'] = list(tasks)
             wandb_config['tasks_2'] = list(tasks_2)
-            wandb.init(project="entitymention-mtl", entity="magnet",
-                       notes=config.wandb_comment, name=config.wandb_name,
-                       id=config.wandbid, resume="allow", group="trial" if config.wandb_trial or trim > 0 else "main")
+            run = wandb.init(project="entitymention-mtl", entity="magnet",
+                             notes=config.wandb_comment, name=config.wandb_name,
+                             id=config.wandbid, resume="allow",
+                             group="trial" if config.wandb_trial or trim > 0 else "main")
             wandb.config.update(wandb_config, allow_val_change=True)
+
+            if wandb_tags:
+                run.tags = run.tags + wandb_tags
         else:
 
             wandb.init(project="entitymention-mtl", entity="magnet",
