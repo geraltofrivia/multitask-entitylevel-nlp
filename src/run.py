@@ -280,6 +280,8 @@ def get_dataiter_partials(
               help="Specify the num of segments (n*512 word pieces) to keep. Only holds for train split.")
 @click.option('--dense-layers', '-dl', type=int, default=DEFAULTS['dense_layers'],
               help="Specify the number of n cross n FFNN layers right after encoder. They're task agnostic.")
+@click.option('--unary-hdim', type=int, default=DEFAULTS['unary_hdim'],
+              help="Specify the dimensions for unary hdim. Its used in multiple places and may trim some fat")
 @click.option('--save', '-s', is_flag=True, default=False, help="If true, the model is dumped to disk at every epoch.")
 @click.option('--resume-dir', default=-1, type=int,
               help="In case you want to continue from where we left off, give the folder number. The lookup will go: "
@@ -320,6 +322,7 @@ def run(
         trim: int,
         trim_deterministic: bool,
         dense_layers: int,
+        unary_hdim: int,
         dataset: str,
         tasks: List[Tuple[str, float, bool]],
         dataset_2: str,
@@ -436,6 +439,7 @@ def run(
         config.wandb_name = wandb_name
         config.coref_loss_mean = coref_loss_mean
         config.dense_layers = dense_layers
+        config.unary_hdim = unary_hdim
         config.shared_compressor = shared_compressor
         config.uncased = encoder.endswith('uncased')
         config.pruner_top_span_ratio = pruner_top_span_ratio
@@ -447,7 +451,7 @@ def run(
         config.freeze_encoder = not train_encoder
         config.train_on_dev = train_on_dev
         if config.shared_compressor:
-            config.unary_hdim = DEFAULTS.unary_hdim // 3
+            config.unary_hdim = unary_hdim // 3
 
         # Make a trainer dict and also
         config.trainer = FancyDict()
