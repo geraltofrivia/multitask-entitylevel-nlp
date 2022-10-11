@@ -297,6 +297,8 @@ def get_dataiter_partials(
               help='Whether we do cluster merging or something else for higher order aggregation')
 @click.option('--coref-depth', type=int, default=DEFAULTS['coref_depth'],
               help="Number of times we run the higher order loop. Defaults to one.")
+@click.option('--coref-use-taskemb', type=bool, default=DEFAULTS['coref_use_taskemb'],
+              help="If true, NER embeddings (output of fc1 is given to coref as embeddings)")
 @click.option('--use-speakers', type=bool, default=True,
               help="If False, we ignore speaker ID info even if we have access to it")
 @click.option('--use-pretrained-model', default=None, type=str,
@@ -349,6 +351,7 @@ def run(
         coref_loss_mean: bool,
         coref_higher_order: str,
         coref_depth: int,
+        coref_use_taskemb: bool,
         pruner_top_span_ratio: float,
         train_on_dev: bool
 ):
@@ -449,6 +452,7 @@ def run(
         config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
         config.coref_num_genres = sum(task.n_genres for task in [tasks, tasks_2])
         config.coref_depth = coref_depth
+        config.coref_use_taskemb = coref_use_taskemb
         config.vocab_size = tokenizer.get_vocab().__len__()
         config.freeze_encoder = not train_encoder
         config.train_on_dev = train_on_dev
