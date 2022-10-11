@@ -458,8 +458,8 @@ class MTLModel(nn.Module):
                 TODO: case 2. after pruner before coref:  
             """
 
-            # if self.coref_use_taskemb:
-            # candidate_span_emb = torch.cat(candidate_emb_list, dim=1)
+            if self.coref_use_taskemb:
+                candidate_span_emb = torch.hstack([candidate_span_emb, ner_specific['ner_emb']])
 
             pruner_specific = self.pruner(
                 candidate_span_emb=candidate_span_emb,
