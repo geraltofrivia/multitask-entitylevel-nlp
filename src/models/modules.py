@@ -293,6 +293,7 @@ class SpanPrunerHOI(torch.nn.Module):
             coref_metadata_feature_size: int,
             pruner_dropout: float,
             pruner_use_metadata: bool,
+            pruner_use_taskemb: bool,
             pruner_max_num_spans: int,
             bias_in_last_layers: bool,
             pruner_top_span_ratio: float,
@@ -309,6 +310,7 @@ class SpanPrunerHOI(torch.nn.Module):
         # Parameter Time!
         _feat_dim = coref_metadata_feature_size
         _span_dim = (hidden_size * 3) + (_feat_dim if self._use_metadata else 0)
+        _span_dim += _feat_dim if pruner_use_taskemb else 0
 
         self.span_emb_score_ffnn = Utils.make_ffnn(_span_dim, [unary_hdim], 1, self.dropout,
                                                    bias_in_last_layers=bias_in_last_layers)
@@ -535,6 +537,7 @@ class CorefDecoderHOI(torch.nn.Module):
             coref_cluster_dloss: bool,
             bias_in_last_layers: bool,
             coref_use_metadata: bool,
+            coref_use_taskemb: bool,
             coref_loss_type: str,
             coref_false_new_delta: float,
             coref_num_speakers: int = 2,
@@ -562,6 +565,7 @@ class CorefDecoderHOI(torch.nn.Module):
 
         _feat_dim = coref_metadata_feature_size
         _span_dim = (hidden_size * 3) + (_feat_dim if self._use_metadata else 0)
+        _span_dim += unary_hdim if coref_use_taskemb else 0
         _pair_dim = _span_dim * 3 + (_feat_dim * 2 if self._use_metadata else 0) + \
                     (_feat_dim * 2 if self._use_speakers else 0)
 
