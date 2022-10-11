@@ -242,16 +242,6 @@ class MTLModel(nn.Module):
         torch.nn.utils.clip_grad_norm_(task_params, max_norm)
 
     @staticmethod
-    def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.tensor] = None):
-        # if weights are provided, scale them based on labels
-        if weight is not None:
-            _weight = torch.zeros_like(labels, dtype=torch.float) + weight[0]
-            _weight[labels == 1] = weight[1]
-            return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
-        else:
-            return nn.functional.binary_cross_entropy_with_logits(logits, labels)
-
-    @staticmethod
     def todel_get_predicted_antecedents(antecedent_idx, antecedent_scores):
         """ CPU list input """
         predicted_antecedents = []

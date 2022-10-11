@@ -320,6 +320,16 @@ class SpanPrunerHOI(torch.nn.Module):
             self.span_width_score_ffnn = Utils.make_ffnn(_feat_dim, [unary_hdim], 1, self.dropout)
             self.emb_span_width_prior = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
 
+    @staticmethod
+    def _rescaling_weights_bce_loss_(logits, labels, weight: Optional[torch.tensor] = None):
+        # if weights are provided, scale them based on labels
+        if weight is not None:
+            _weight = torch.zeros_like(labels, dtype=torch.float) + weight[0]
+            _weight[labels == 1] = weight[1]
+            return nn.functional.binary_cross_entropy_with_logits(logits, labels, _weight)
+        else:
+            return nn.functional.binary_cross_entropy_with_logits(logits, labels)
+
     def forward(self,
                 candidate_span_emb: torch.tensor,  # [num_cand, new emb size]
                 candidate_width_idx: torch.tensor,  # [num_cand, 1]
