@@ -280,8 +280,8 @@ class SharedDense(torch.nn.Module):
         else:
             raise BadParameters(f"Depth of {depth} not understood!")
 
-    def forward(self, input: torch.tensor) -> torch.tensor:
-        return self.params(input)
+    def forward(self, input_tensor: torch.tensor) -> torch.tensor:
+        return self.params(input_tensor)
 
 
 class SpanPrunerHOI(torch.nn.Module):
@@ -714,7 +714,7 @@ class CorefDecoderHOI(torch.nn.Module):
         num_top_spans, max_top_antecedents = top_antecedent_idx.shape[0], top_antecedent_idx.shape[1]
         predicted_antecedents = []
         top_antecedent_scores = torch.cat([torch.zeros(num_top_spans, 1, device=device), top_antecedent_scores], dim=1)
-        for i, idx in enumerate((torch.argmax(top_antecedent_scores, axis=1) - 1).tolist()):
+        for i, idx in enumerate((torch.argmax(top_antecedent_scores, dim=1) - 1).tolist()):
             if idx < 0:
                 predicted_antecedents.append(-1)
             else:

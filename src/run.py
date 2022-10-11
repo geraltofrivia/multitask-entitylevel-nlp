@@ -421,7 +421,7 @@ def run(
         config._encoder = dir_encoder
         config._sampling_ratio = sampling_ratio
 
-        config.cwd = os.uname().nodename + ':' + os.getcwd()
+        config.curdir = os.uname().nodename + ':' + os.getcwd()
         config.max_span_width = max_span_width
         config.max_training_segments = max_training_segments
         config.use_speakers = use_speakers
@@ -438,7 +438,6 @@ def run(
         config.dense_layers = dense_layers
         config.shared_compressor = shared_compressor
         config.uncased = encoder.endswith('uncased')
-        config.curdir = str(Path('.').absolute())
         config.pruner_top_span_ratio = pruner_top_span_ratio
         config.coref_higher_order = coref_higher_order
         config.coref_num_speakers = tasks.n_speakers + tasks_2.n_speakers if config.use_speakers else 0
