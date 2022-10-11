@@ -579,6 +579,7 @@ def run(
     ctx.obj['len_train'] = len_train
     ctx.obj['savedir'] = savedir
     ctx.obj['save_config'] = save_config
+    ctx.obj['wandb_tags'] = wandb_tags
 
 
 @run.command()
@@ -604,6 +605,7 @@ def train(ctx):
     len_train = ctx.obj['len_train']
     savedir = ctx.obj['savedir']
     save_config = ctx.obj['save_config']
+    wandb_tags = ctx.obj['wandb_tags']
 
     # Make the model
     model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
