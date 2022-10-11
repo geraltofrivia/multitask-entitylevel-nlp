@@ -182,12 +182,7 @@ class MTLModel(nn.Module):
                 
                 The two layers of NER will be broken down into a common, and domain specific variant.
             """
-            self.unary_ner_common = nn.Sequential(
-                nn.Linear(span_embedding_dim, unary_hdim),
-                nn.ReLU(),
-                nn.Dropout(ner_dropout),
-                # nn.Linear(ffnn_hidden_size, n_classes_ner, bias=bias_in_last_layers)
-            )
+            self.unary_ner_common = Utils.make_ffnn(span_embedding_dim, None, unary_hdim, dropout=ner_dropout)
             self.unary_ner_specific = nn.ModuleDict({
                 task.dataset: nn.Linear(unary_hdim, task.n_classes_ner + 1, bias=bias_in_last_layers)
                 for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
@@ -466,7 +461,7 @@ class MTLModel(nn.Module):
             # Depending on the domain, select the right decoder
             logits = self.unary_ner_specific[domain](fc1)
             # logits = torch.nn.functional.softmax(logits, dim=1)
-            ner_specific = {"ner_logits": logits}
+            ner_specific = {"ner_logits": logits, "ner_emb": fc1}
 
         else:
             ner_specific = {}
