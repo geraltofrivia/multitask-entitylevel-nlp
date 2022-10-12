@@ -342,6 +342,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         'coref_depth',
         'coref_use_metadata',
         'coref_loss_type',
+        'coref_use_taskemb',
         'train_on_dev',
         '_config',
         '_tokenizer',
