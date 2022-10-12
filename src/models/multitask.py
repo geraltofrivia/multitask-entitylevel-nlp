@@ -188,9 +188,9 @@ class MTLModel(nn.Module):
                 
                 The two layers of NER will be broken down into a common, and domain specific variant.
             """
-            self.unary_ner_common = Utils.make_ffnn(ner_span_embedding_dim, None, unary_hdim, dropout=ner_dropout)
+            self.unary_ner_common = Utils.make_ffnn(ner_span_embedding_dim, None, unary_hdim // 10, dropout=ner_dropout)
             self.unary_ner_specific = nn.ModuleDict({
-                task.dataset: nn.Linear(unary_hdim, task.n_classes_ner + 1, bias=bias_in_last_layers)
+                task.dataset: nn.Linear(unary_hdim // 10, task.n_classes_ner + 1, bias=bias_in_last_layers)
                 for task in [task_1, task_2] if (not task.isempty() and 'ner' in task)
             })  # classes + 1 -> not an entity (class zero)
 
