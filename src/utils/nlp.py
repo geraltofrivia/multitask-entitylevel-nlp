@@ -5,6 +5,7 @@ import spacy
 import torch
 import transformers
 from spacy.tokens import Doc
+from unidecode import unidecode
 
 try:
     from spacy.util import DummyTokenizer
@@ -137,10 +138,13 @@ def match_subwords_to_words(
         input_ids: dict,
         tokenizer: transformers.BertTokenizer,
         ignore_cases: bool = True,
+        ignore_accents: bool = False,
 ) -> Dict[int, int]:
     """
     Create a dictionary that matches subword indices to word indices
     Expects the subwords to be done by a BertTokenizer.
+
+    Hotfixes are dicts like {'ö': 'o'} to do in-place replacements in tokens so that they match up.
     """
 
     sw2w = {}
@@ -153,6 +157,7 @@ def match_subwords_to_words(
     # We also need to remove accents since the HF tokenizer removes them as well.
     # ### And if we try to match vis-à-vis with vis-a-vis, the program crashes.
     tokens = [token.lower() for token in tokens[:]] if ignore_cases else tokens[:]
+
     # tokens = [unidecode.unidecode(token) for token in tokens]
     curr_sw_index = 0
     curr_w_index = 0
@@ -184,8 +189,8 @@ def match_subwords_to_words(
 
                 # DEBUG: every time there are more than 8 sw in a word, figure out what's up!
                 # noinspection SpellCheckingInspection
-                if sw_selected > 8 and not (
-                        sw_phrase.startswith("http")
+                if sw_selected > 5 and not (
+                        sw_phrase.startswith("http", )
                         or sw_phrase.startswith("<http")
                         or "@yahoo" in sw_phrase
                         or "@hotmail" in sw_phrase
@@ -204,10 +209,11 @@ def match_subwords_to_words(
                         or sw_phrase.startswith('<$BlogBack')
                         or sw_phrase.startswith('christopher')
                 ):
-                    print('potato')
                     print("TOO LONG: ", sw_phrase)
 
                 if sw_phrase == tokens[0]:
+                    break
+                elif sw_phrase == unidecode(tokens[0], "utf-8") and ignore_accents:
                     break
 
             for i in range(sw_selected + 1):

@@ -611,12 +611,18 @@ class MultiTaskDataIter(Dataset):
         n_subwords = tokenized.attention_mask.sum().item()
 
         """
-            Find the word and sentence corresponding to each subword in the tokenized document
+            Find the word and sentence corresponding to each subword in the tokenized 
+            
+            Edgecase: if uncased tokenizer, ö cant be handled. So we manually replace them with just 'o' (in tokens)
+                Apparently, only in dwie stuff. So we make the following conversions using unidecode lib
+                    {'ö': 'o', 'ü': 'u', 'é': 'e', 'ä': 'a', 'ç': 'c', 'í':'i'} (and others) 
         """
+
         # Create a subword id to word id dictionary
         subword2word = match_subwords_to_words(
             tokens, tokenized.input_ids, self.tokenizer,
-            ignore_cases=self.uncased
+            ignore_cases=self.uncased,
+            ignore_accents=self._src_ in ['dwie'] and self.uncased
         )
         word2subword_all = {}
         for sw_id, w_id in subword2word.items():
