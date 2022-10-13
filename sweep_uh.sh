@@ -1,0 +1,4 @@
+# python src/run.py -d ontonotes -t coref 1.0 False -enc bert-base-uncased -e 40 -dv cuda -wb --wandb-name sweepuhdim-cr-on-trim-50 --unary-hdim 50 --train-encoder True -tok bert-base-uncased --trim 100 -wt cr -wt trim -wt sweep -wt sweep-uh train
+python src/run.py -d ontonotes -t coref 1.0 False -enc bert-base-uncased -e 40 -dv cuda -wb --wandb-name sweepuhdim-cr-on-trim-100 --unary-hdim 100 --train-encoder True -tok bert-base-uncased --trim 100 -wt trim -wt sweep -wt sweep-uh train
+python src/run.py -d ontonotes -t coref 1.0 False -enc bert-base-uncased -e 40 -dv cuda -wb --wandb-name sweepuhdim-cr-on-trim-500 --unary-hdim 500 --train-encoder True -tok bert-base-uncased --trim 100 -wt trim -wt sweep -wt sweep-uh train
+python src/run.py -d ontonotes -t coref 1.0 False -enc bert-base-uncased -e 40 -dv cuda -wb --wandb-name sweepuhdim-cr-on-trim-1000 --unary-hdim 1000 --train-encoder True -tok bert-base-uncased --trim 100 -wt trim -wt sweep -wt sweep-uh train
