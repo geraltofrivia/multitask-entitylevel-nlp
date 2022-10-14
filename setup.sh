@@ -1,4 +1,5 @@
 echo "This script can't download CODICRAC/Ontonotes or ACE datasets for you. Please see src/playing-with-data-codicrac.ipynb to see what they should be arranged like."
+set -e  # any error will cause the script to exit immediately
 
 mkdir data
 mkdir data/raw
