@@ -56,25 +56,25 @@ wget https://nlp.stanford.edu/data/glove.6B.zip -P models/glove
 unzip models/glove/glove.6B.zip -d models/glove/
 
 # For DWIE corpora
-cd modules/dwie
+cd src/dwie
 python src/dwie_download.py
 cd ../..
-# now move the raw data far from the `modules` dir, into the `raw` dir
+# now move the raw data far from the `src/dwie` dir, into the `raw` dir
 mkdir -pv data/raw/dwie
-mv modules/dwie/data/annos_with_content/* data/raw/
+mv src/dwie/data/annos_with_content/* data/raw/
 
 # For ACE 2005 Corpora
-mkdir modules/ace2005-toolkit/ace_2005
-mkdir modules/ace2005-toolkit/output
-tar zxvf data/raw/ace2005/ace_2005_td_v7_LDC2006T06.tgz -C modules/ace2005-toolkit/ace_2005/
-mv modules/ace2005-toolkit/ace_2005/ace_2005_td_v7/* modules/ace2005-toolkit/ace_2005
-rm -r modules/ace2005-toolkit/ace_2005/ace_2005_td_v7/
-cd modules/ace2005-toolkit/
+mkdir src/ace2005-toolkit/ace_2005
+mkdir src/ace2005-toolkit/output
+tar zxvf data/raw/ace2005/ace_2005_td_v7_LDC2006T06.tgz -C src/ace2005-toolkit/ace_2005/
+mv src/ace2005-toolkit/ace_2005/ace_2005_td_v7/* src/ace2005-toolkit/ace_2005
+rm -r src/ace2005-toolkit/ace_2005/ace_2005_td_v7/
+cd src/ace2005-toolkit/
 pip install -r requirements.txt
 chmod +x run.sh
 ./run.sh en     # Now we need a user prompt. Say 'y' for yes at the time.
 cd ../..
-mv modules/ace2005-toolkit/cache_data/English/* data/raw/ace2005
+mv src/ace2005-toolkit/cache_data/English/* data/raw/ace2005
 ./preproc.sh
 
 # ###### Stuff to update submodules

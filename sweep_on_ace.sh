@@ -1,0 +1,6 @@
+# Sweep containing NER from ACE and Coref from Ontonotes
+python src/run.py -d ontonotes -t coref 1.0 False -d2 ace -t2 ner 1.0 True -enc bert-base-uncased -tok bert-base-uncased -e 45 -dv cuda -wb --wandb-name sweep+acenr-cr-on-nr-ace-1 --train-encoder True -wt cronnrace -wt ontonotes -wt ace -wt MDMT train
+python src/run.py -d ontonotes -t coref 1.0 False -d2 ace -t2 ner 10.0 True -enc bert-base-uncased -tok bert-base-uncased -e 45 -dv cuda -wb --wandb-name sweep+acenr-cr-on-nr-ace-10 --train-encoder True -wt cronnrace -wt ontonotes -wt ace -wt MDMT train
+python src/run.py -d ontonotes -t coref 1.0 False -d2 ace -t2 ner 100.0 True -enc bert-base-uncased -tok bert-base-uncased -e 45 -dv cuda -wb --wandb-name sweep+acenr-cr-on-nr-ace-100 --train-encoder True -wt cronnrace -wt ontonotes -wt ace -wt MDMT train
+python src/run.py -d ontonotes -t coref 1.0 False -d2 ace -t2 ner 0.1 True -enc bert-base-uncased -tok bert-base-uncased -e 45 -dv cuda -wb --wandb-name sweep+acenr-cr-on-nr-ace-0.1 --train-encoder True -wt cronnrace -wt ontonotes -wt ace -wt MDMT train
+python src/run.py -d ontonotes -t coref 1.0 False -d2 ace -t2 ner 0.01 True -enc bert-base-uncased -tok bert-base-uncased -e 45 -dv cuda -wb --wandb-name sweep+acenr-cr-on-nr-ace-0.01 --train-encoder True -wt cronnrace -wt ontonotes -wt ace -wt MDMT train

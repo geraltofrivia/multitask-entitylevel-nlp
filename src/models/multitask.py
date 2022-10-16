@@ -21,7 +21,8 @@ except ImportError:
 from utils.data import Tasks
 from config import _SEED_ as SEED, DOMAIN_HAS_NER_MULTILABEL
 from preproc.encode import Retriever
-from models.modules import SpanPrunerHOI as SpanPruner, CorefDecoderHOI as CorefDecoder, SharedDense, Utils
+from models.modules import SpanPrunerHOI as SpanPruner, SharedDense, Utils
+from models.coref import CorefDecoderHOI as CorefDecoder
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
 random.seed(SEED)

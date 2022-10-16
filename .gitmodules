@@ -1,6 +1,6 @@
 [submodule "modules/dwie"]
-	path = modules/dwie
+	path = src/dwie
 	url = git@github.com:klimzaporojets/DWIE.git
 [submodule "modules/ace2005-toolkit"]
-	path = modules/ace2005-toolkit
+	path = src/ace2005-toolkit
 	url = git@github.com:geraltofrivia/ACE2005-toolkit.git
