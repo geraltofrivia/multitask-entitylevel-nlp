@@ -64,6 +64,7 @@ class MTLModelWordLevel(nn.Module):
             coref_spanemb_size: int,
             coref_loss_type: str,
             coref_false_new_delta: float,
+            coref_a_scoring_batch_size: int,
 
             # NER specific Params
             ner_dropout: float,
@@ -127,7 +128,8 @@ class MTLModelWordLevel(nn.Module):
                 coref_dropout=coref_dropout,
                 coref_num_genres=coref_num_genres,
                 coref_use_metadata=coref_use_metadata,
-                coref_spanemb_size=coref_spanemb_size
+                coref_spanemb_size=coref_spanemb_size,
+                coref_a_scoring_batch_size=coref_a_scoring_batch_size
             )
 
         ner_span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
@@ -201,12 +203,14 @@ class MTLModelWordLevel(nn.Module):
             attention_mask: torch.tensor,
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
+            word2subword_starts: torch.tensor,
+            word2subword_ends: torch.tensor,
             sentence_map: List[int],
             tasks: Iterable[str],
             domain: str,
             hash: int,
             genre: int,
-            speaker_ids: Optional[torch.tensor] = None,
+            speaker_ids: Optional[torch.tensor] = None,  # are word level, NOT subword level
             *args,
             **kwargs
     ):
@@ -218,9 +222,14 @@ class MTLModelWordLevel(nn.Module):
         if 0 < self._skip_instance_after_nspan < candidate_starts.shape[0]:
             raise AnticipateOutOfMemException(f"There are {candidate_starts.shape[0]} candidates", device)
 
-        # Pass through Text Encoder
+        """
+            Step 0:
+            Pass the tokenized subwords through BERT/BERT-esque transformer.
+            However, if the encoder is frozen, it'll try and pull them from disk instead.
+        """
         if not self._freeze_encoder:
-            hidden_states = self.bert(input_ids, attention_mask)[0]  # [num_seg, max_seg_len, emb_len]
+            hidden_states, _ = self.bert(input_ids, attention_mask)  # [num_seg, max_seg_len, emb_len]
+            del _
         else:
             hidden_states = self.retriever.load(domain=domain, hash=hash)  # [num_seg, max_seg_len, emb_len]
         num_seg, len_seg, len_emb = hidden_states.shape
@@ -239,10 +248,36 @@ class MTLModelWordLevel(nn.Module):
         num_words = hidden_states.shape[0]
 
         """
+            Step 0.5
             Shared Parameter Stuff
             NOTE: We by and large don't do this now. Functionality isn't removed but this doesn't get inited.
         """
         # hidden_states = self.shared(hidden_states)
+
+        """
+            Step 1:
+            Word Encoder Stuff
+            
+            input: last hidden states (i.e., `hidden_states`)
+            input: word2subword_starts (i.e., k: wordID, v: subword start ID)
+            input: word2subword_ends (i.e., k: wordID, v: subword end ID)
+            
+            output:
+        """
+        word_starts = torch.tensor(list(word2subword_starts.values()), device=device)
+        word_ends = torch.tensor(list(word2subword_ends.values()), device=device)
+
+        if 'coref' in tasks:
+            # Forward things to the WL coref module.
+            self.coref(
+                hidden_states=hidden_states,
+                word_starts=word_starts,
+                word_ends=word_ends,
+                speaker_ids=speaker_ids,
+                genre=genre
+            )
+        else:
+            ...
 
         raise NotImplementedError()
 
@@ -345,6 +380,8 @@ class MTLModelWordLevel(nn.Module):
             token_type_ids: torch.tensor,
             candidate_starts: torch.tensor,
             candidate_ends: torch.tensor,
+            word2subword_starts: torch.tensor,
+            word2subword_ends: torch.tensor,
             sentence_map: List[int],
             word_map: List[int],
             n_words: int,
@@ -369,6 +406,8 @@ class MTLModelWordLevel(nn.Module):
             token_type_ids=token_type_ids,
             candidate_starts=candidate_starts,
             candidate_ends=candidate_ends,
+            word2subword_starts=word2subword_starts,
+            word2subword_ends=word2subword_ends,
             sentence_map=sentence_map,
             word_map=word_map,
             n_words=n_words,
@@ -891,6 +930,7 @@ class MTLModel(nn.Module):
         ).view(-1, len_emb)  # [num_words, emb_len]
         flattened_ids = torch.masked_select(input_ids, attention_mask.bool()).view(-1)  # [num_words]
         if speaker_ids is not None:
+            # Flatten speaker IDs as well
             speaker_ids = torch.masked_select(speaker_ids.view(num_seg * len_seg),
                                               attention_mask.bool().view(-1))
 

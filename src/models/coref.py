@@ -2,7 +2,7 @@
     Here we keep all our coref models.
 
 """
-from typing import Union
+from typing import Union, Tuple, List
 
 import torch
 import torch.nn as nn
@@ -34,6 +34,7 @@ class CorefDecoderWL(torch.nn.Module):
             coref_use_metadata: bool,
             coref_dropout: float,
             coref_spanemb_size: int,
+            coref_a_scoring_batch_size: int
 
     ):
         super().__init__()
@@ -43,6 +44,7 @@ class CorefDecoderWL(torch.nn.Module):
         self._use_speakers = use_speakers
         self._max_training_segments = max_training_segments
         self._dropout = coref_dropout
+        self._a_scoring_batch_size = coref_a_scoring_batch_size
 
         self.dropout = nn.Dropout(self._dropout)
 
@@ -71,7 +73,7 @@ class CorefDecoderWL(torch.nn.Module):
          Word Encoder stuff
             Receives bert contextual embeddings of a text, extracts all the possible mentions in that text.
         """
-        self.attn = Utils.make_linear(hidden_size, 1)
+        self.subword_attn = Utils.make_linear(hidden_size, 1)
 
         """
             Rough Scorer stuff
@@ -92,16 +94,300 @@ class CorefDecoderWL(torch.nn.Module):
         )
         self.emb_span_pred = Utils.make_embedding(128, coref_spanemb_size)
 
+    def _wordencoder_attn_scores(
+            self,
+            hidden_states: torch.Tensor,
+            word_starts: torch.Tensor,
+            word_ends: torch.Tensor) -> torch.Tensor:
+        """
+        Calculates attention scores for each of the mentions.
+
+        Args:
+            hidden_states (torch.Tensor): [n_subwords, bert_emb], bert embeddings
+                for each of the subwords in the document
+            word_starts (torch.Tensor): [n_words], start indices of words
+            word_ends (torch.Tensor): [n_words], end indices of words
+
+        Returns:
+            torch.Tensor: [description]
+        """
+        n_subtokens = len(hidden_states)
+        n_words = len(word_starts)
+
+        # [n_mentions, n_subtokens]
+        # with 0 at positions belonging to the words and -inf elsewhere
+        attn_mask = torch.arange(0, n_subtokens, device=hidden_states.device).expand((n_words, n_subtokens))
+        attn_mask = ((attn_mask >= word_starts.unsqueeze(1))
+                     * (attn_mask < word_ends.unsqueeze(1)))
+        attn_mask = torch.log(attn_mask.to(torch.float))
+
+        attn_scores = self.subword_attn(hidden_states).T  # [1, n_subtokens]
+        attn_scores = attn_scores.expand((n_words, n_subtokens))
+        attn_scores = attn_mask + attn_scores
+        del attn_mask
+        return torch.softmax(attn_scores, dim=1)
+
+    def _prune(self,
+               rough_scores: torch.Tensor
+               ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Selects top-k rough antecedent scores for each mention.
+
+        Args:
+            rough_scores: tensor of shape [n_mentions, n_mentions], containing
+                rough antecedent scores of each mention-antecedent pair.
+
+        Returns:
+            FloatTensor of shape [n_mentions, k], top rough scores
+            LongTensor of shape [n_mentions, k], top indices
+        """
+
+        # TODO: move this 50 to config if need be, LATER!
+
+        top_scores, indices = torch.topk(rough_scores,
+                                         k=min(50, len(rough_scores)),
+                                         dim=1, sorted=False)
+        return top_scores, indices
+
+    @staticmethod
+    def add_dummy(tensor: torch.Tensor, eps: bool = False):
+        """ Prepends zeros (or a very small value if eps is True)
+        to the first (not zeroth) dimension of tensor.
+        """
+        kwargs = dict(device=tensor.device, dtype=tensor.dtype)
+        shape: List[int] = list(tensor.shape)
+        shape[1] = 1
+        if not eps:
+            dummy = torch.zeros(shape, **kwargs)  # type: ignore
+        else:
+            dummy = torch.full(shape, EPSILON, **kwargs)  # type: ignore
+        return torch.cat((dummy, tensor), dim=1)
+
+    @staticmethod
+    def _get_pair_matrix(all_mentions: torch.Tensor,
+                         mentions_batch: torch.Tensor,
+                         pw_batch: torch.Tensor,
+                         top_indices_batch: torch.Tensor,
+                         ) -> torch.Tensor:
+        """
+        Builds the matrix used as input for AnaphoricityScorer.
+
+        Args:
+            all_mentions (torch.Tensor): [n_mentions, mention_emb],
+                all the valid mentions of the document,
+                can be on a different device
+            mentions_batch (torch.Tensor): [batch_size, mention_emb],
+                the mentions of the current batch,
+                is expected to be on the current device
+            pw_batch (torch.Tensor): [batch_size, n_ants, pw_emb],
+                pairwise features of the current batch,
+                is expected to be on the current device
+            top_indices_batch (torch.Tensor): [batch_size, n_ants],
+                indices of antecedents of each mention
+
+        Returns:
+            torch.Tensor: [batch_size, n_ants, pair_emb]
+        """
+        emb_size = mentions_batch.shape[1]
+        n_ants = pw_batch.shape[1]
+
+        a_mentions = mentions_batch.unsqueeze(1).expand(-1, n_ants, emb_size)
+        b_mentions = all_mentions[top_indices_batch]
+        similarity = a_mentions * b_mentions
+
+        out = torch.cat((a_mentions, b_mentions, similarity, pw_batch), dim=2)
+        return out
+
+    def _anaphoricity_scorer(
+            self,
+            all_mentions: torch.Tensor,
+            mentions_batch: torch.Tensor,
+            pw_batch: torch.Tensor,
+            top_indices_batch: torch.Tensor,
+            top_rough_scores_batch: torch.Tensor
+    ) -> torch.Tensor:
+        """ Builds a pairwise matrix, scores the pairs and returns the scores.
+
+        Args:
+            all_mentions (torch.Tensor): [n_mentions, mention_emb]
+            mentions_batch (torch.Tensor): [batch_size, mention_emb]
+            pw_batch (torch.Tensor): [batch_size, n_ants, pw_emb]
+            top_indices_batch (torch.Tensor): [batch_size, n_ants]
+            top_rough_scores_batch (torch.Tensor): [batch_size, n_ants]
+
+        Returns:
+            torch.Tensor [batch_size, n_ants + 1]
+                anaphoricity scores for the pairs + a dummy column
+        """
+        # [batch_size, n_ants, pair_emb]
+        pair_matrix = self._get_pair_matrix(
+            all_mentions, mentions_batch, pw_batch, top_indices_batch)
+
+        # [batch_size, n_ants]
+        scores = top_rough_scores_batch + self.anaphoricity_ffnn_hidden(pair_matrix).squeeze(2)
+        scores = self.add_dummy(scores, eps=True)
+
+        return scores
+
     def forward(
-            self
+            self,
+            hidden_states,
+            word_starts,
+            word_ends,
+            speaker_ids,
+            genre: int,
     ):
         """
+            hidden_states: BERT's last hidden states: n_swords, hdim
+            word_starts: index is word, value is subword: n_words, 1
+            word_ends: index is word, value is subword: n_words, 1
+            speaker_ids: speaker ID for each subword: n_swords, 1
+            genre: an int indicating the genre
+
+
             Input document may have all these fields
 
             dict_keys(['document_id', 'cased_words', 'sent_id', 'part_id', 'speaker', 'pos', 'deprel', 'head',
             'head2span', 'word_clusters', 'span_clusters', 'word2subword', 'subwords', 'word_id'])
 
         :return:
+        """
+        device = hidden_states.device
+        n_words = word_starts.shape[0]
+
+        """
+        Step 1: WordEncoder stuff: 
+            From subword emb to word emb
+            words       [n_words, hdim]    
+        """
+        words = self._wordencoder_attn_scores(hidden_states, word_starts, word_ends).mm(hidden_states)
+        words = self.dropout(words)  # n_words, hdim
+
+        """
+        Step 2: RoughScorer stuff
+            Obtain bilinear scores and leave only top-k antecedents for each word
+            top_rough_scores  [n_words_pruned, n_ants]
+            top_indices       [n_words_pruned, n_ants]
+        """
+        pair_mask = torch.arange(words.shape[0])
+        pair_mask = pair_mask.unsqueeze(1) - pair_mask.unsqueeze(0)
+        pair_mask = torch.log((pair_mask > 0).to(torch.float))
+        pair_mask = pair_mask.to(words.device)
+
+        bilinear_scores = self.dropout(self.bilinear(words)).mm(words.T)
+        rough_scores = pair_mask + bilinear_scores
+        top_rough_scores, top_indices = self._prune(rough_scores)
+
+        """
+        Step 3: Pairwise Feature stuff
+            input: top_indices: [n_words_pruned, n_ants]
+            
+        """
+        word_ids = torch.arange(0, n_words, device=device)
+
+        # Some pairwise features
+
+        # Bucket and process distance (on a word level -_-)
+        distance = (word_ids.unsqueeze(1) - word_ids[top_indices]
+                    ).clamp_min_(min=1)
+        log_distance = distance.to(torch.float).log2().floor_()
+        log_distance = log_distance.clamp_max_(max=6).to(torch.long)
+        distance = torch.where(distance < 5, distance - 1, log_distance + 2)
+        distance = self.emb_segment_distance(distance)
+
+        genre = self.genre_emb(genre) if self._use_metadata else None
+        same_speaker = (speaker_ids[top_indices] == speaker_ids.unsqueeze(1)) if self._use_speakers else None
+
+        if self._use_speakers and self._use_metadata:
+            # noinspection PyTypeChecker
+            pairwise_feats = self.dropout(torch.cat((same_speaker, distance, genre), dim=2))
+        elif self._use_speakers and not self._use_metadata:
+            # noinspection PyTypeChecker
+            pairwise_feats = self.dropout(torch.cat((same_speaker, distance), dim=2))
+        elif not self._use_speakers and self._use_metadata:
+            # noinspection PyTypeChecker
+            pairwise_feats = self.dropout(torch.cat((distance, genre), dim=2))
+        else:
+            pairwise_feats = self.dropout(distance)
+
+        a_scores_lst: List[torch.Tensor] = []
+
+        for i in range(0, len(words), self._a_scoring_batch_size):
+            pw_batch = pairwise_feats[i:i + self._a_scoring_batch_size]
+            words_batch = words[i:i + self._a_scoring_batch_size]
+            top_indices_batch = top_indices[i:i + self._a_scoring_batch_size]
+            top_rough_scores_batch = top_rough_scores[i:i + self._a_scoring_batch_size]
+
+            # a_scores_batch    [batch_size, n_ants]
+            """
+                Step 4: Anaphoricity Scorer stuff
+            """
+            a_scores_batch = self._anaphoricity_scorer(
+                all_mentions=words, mentions_batch=words_batch,
+                pw_batch=pw_batch, top_indices_batch=top_indices_batch,
+                top_rough_scores_batch=top_rough_scores_batch
+            )
+            a_scores_lst.append(a_scores_batch)
+
+        return {
+            'words': words
+        }
+
+    def post_forward(
+            self,
+            pred_stuff: dict,
+            gold_stuff: dict,
+    ):
+        """
+            input: everything model_forward outputs.
+            input: coref specific label information
+        """
+        pred_words = pred_stuff['words']
+
+        gold_clusters = ...
+        # need to be something like
+        # tensor([ 0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  2,  0,  0,  0,  3,  0,  0,  4,
+        #          0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  6,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  7,  0,  0,  0,  0,  0,  0,
+        #          8,  0,  0,  0,  0,  0,  7,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  6,  0,
+        #          0,  0,  0,  2,  0,  0,  0,  0,  1,  0,  0,  0,  6,  0,  0,  0,  0,  0,
+        #          1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  4,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  4,  0,  9,  0,  5,  0,  0,  6,  0,  0,  0,  9,
+        #          0,  0,  0,  0,  0,  9,  0,  0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  3,
+        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,
+        #          4,  0,  0,  0,  0,  0,  0,  0,  1,  0,  3,  0,  0,  1,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  6,  0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  0,  4,
+        #          0,  0,  3,  0,  0,  0,  0,  0,  0, 10,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  4,  0, 10,  0,  0,  3,  0, 10,  0,  3,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  3,  0,  0,  0,  3,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,
+        #          3,  0,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
+        #          0,  8,  0,  0,  0,  0,  0,  0,  0])
+
+        """
+            Some other stuff that needs to be done
+            res = CorefResult()
+    
+            # coref_scores  [n_spans, n_ants]
+            res.coref_scores = torch.cat(a_scores_lst, dim=0)
+    
+            res.coref_y = self._get_ground_truth(
+                cluster_ids, top_indices, (top_rough_scores > float("-inf")))
+            res.word_clusters = self._clusterize(doc, res.coref_scores,
+                                                 top_indices)
+            res.span_scores, res.span_y = self.sp.get_training_data(doc, words)
+    
+            if not self.training:
+                res.span_clusters = self.sp.predict(doc, words, res.word_clusters)
+    
+            return res
+
         """
 
 
@@ -413,19 +699,23 @@ class CorefDecoderHOI(torch.nn.Module):
                 top_antecedent_speaker_id = pruned_span_speaker_ids[top_antecedent_idx]
                 same_speaker = torch.unsqueeze(pruned_span_speaker_ids, 1) == top_antecedent_speaker_id
                 same_speaker_emb = self.emb_same_speaker(same_speaker.to(torch.long))
+
+            if self._use_metadata:
                 genre_emb = self.emb_genre(genre)
                 genre_emb = torch.unsqueeze(torch.unsqueeze(genre_emb, 0), 0).repeat(num_top_spans,
                                                                                      num_top_antecedents, 1)
-            if self._use_metadata:
-                num_segs, seg_len = attention_mask.shape[0], attention_mask.shape[1]
-                token_seg_ids = torch.arange(0, num_segs, device=device).unsqueeze(1).repeat(1, seg_len)
-                token_seg_ids = token_seg_ids[attention_mask]
-                top_span_seg_ids = token_seg_ids[pruned_span_starts]
-                top_antecedent_seg_ids = token_seg_ids[pruned_span_starts[top_antecedent_idx]]
-                top_antecedent_seg_distance = torch.unsqueeze(top_span_seg_ids, 1) - top_antecedent_seg_ids
-                top_antecedent_seg_distance = torch.clamp(top_antecedent_seg_distance, 0,
-                                                          self._max_training_segments - 1)
-                seg_distance_emb = self.emb_segment_distance(top_antecedent_seg_distance)
+
+            # Compute segment distance embedding
+            num_segs, seg_len = attention_mask.shape[0], attention_mask.shape[1]
+            token_seg_ids = torch.arange(0, num_segs, device=device).unsqueeze(1).repeat(1, seg_len)
+            token_seg_ids = token_seg_ids[attention_mask]
+            top_span_seg_ids = token_seg_ids[pruned_span_starts]
+            top_antecedent_seg_ids = token_seg_ids[pruned_span_starts[top_antecedent_idx]]
+            top_antecedent_seg_distance = torch.unsqueeze(top_span_seg_ids, 1) - top_antecedent_seg_ids
+            top_antecedent_seg_distance = torch.clamp(top_antecedent_seg_distance, 0,
+                                                      self._max_training_segments - 1)
+            seg_distance_emb = self.emb_segment_distance(top_antecedent_seg_distance)
+
             # if conf['use_features']:  # Antecedent distance
             top_antecedent_distance = Utils.bucket_distance(top_antecedent_offsets)
             top_antecedent_distance_emb = self.emb_top_antecedent_distance(top_antecedent_distance)

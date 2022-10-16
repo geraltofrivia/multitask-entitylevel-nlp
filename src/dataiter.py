@@ -630,6 +630,9 @@ class MultiTaskDataIter(Dataset):
         word2subword_starts = {k: v[0] for k, v in word2subword_all.items()}
         word2subword_ends = {k: v[-1] for k, v in word2subword_all.items()}
 
+        # WL: word2subword = [(sw_start, sw_end)_1, (sw_start, sw_end)_2, ..., (sw_start, sw_end)_{words}]
+        # WL: word_id: subword2word.values()    (i think)
+
         wordid_for_subword = torch.tensor(
             [subword2word[subword_id] for subword_id in range(n_subwords)],
             dtype=torch.long,
@@ -751,6 +754,8 @@ class MultiTaskDataIter(Dataset):
             "attention_mask": attention_mask,
             "token_type_ids": token_type_ids,
             "word_map": wordid_for_subword,
+            "word2subword_starts": word2subword_starts,
+            "word2subword_ends": word2subword_ends,
             "speaker_ids": speaker_ids,
             "sentence_map": sentid_for_subword,
             "genre": genre,
