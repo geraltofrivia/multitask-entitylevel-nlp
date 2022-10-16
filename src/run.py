@@ -420,6 +420,8 @@ def run(
         """
         if dir_config == 'SpanBERT/spanbert-large-cased':
             config.hidden_size = 1024
+        elif dir_config == 'bert-base-cased' or dir_config == 'bert-base-uncased':
+            config.hidden_size = 1024
 
         # These things are stored to help restoring down the line
         config._config = dir_config
