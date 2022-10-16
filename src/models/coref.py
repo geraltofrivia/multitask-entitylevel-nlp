@@ -91,25 +91,18 @@ class CorefDecoderWL(torch.nn.Module):
             torch.nn.Conv1d(4, 2, 3, 1, 1)
         )
         self.emb_span_pred = Utils.make_embedding(128, coref_spanemb_size)
-        '''self.ffnn = torch.nn.Sequential(
-            torch.nn.Linear(input_size * 2 + 64, input_size),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(input_size, 256),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(256, 64),
-        )
-        self.conv = torch.nn.Sequential(
-            torch.nn.Conv1d(64, 4, 3, 1, 1),
-            torch.nn.Conv1d(4, 2, 3, 1, 1)
-        )
-        self.emb = torch.nn.Embedding(128, distance_emb_size) # [-63, 63] + too_far'''
 
     def forward(
             self
     ):
-        ...
+        """
+            Input document may have all these fields
+
+            dict_keys(['document_id', 'cased_words', 'sent_id', 'part_id', 'speaker', 'pos', 'deprel', 'head',
+            'head2span', 'word_clusters', 'span_clusters', 'word2subword', 'subwords', 'word_id'])
+
+        :return:
+        """
 
 
 class CorefDecoderHOI(torch.nn.Module):
