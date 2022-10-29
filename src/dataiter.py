@@ -466,10 +466,10 @@ class MultiTaskDataIter(Dataset):
         gold_starts, gold_ends, gold_cluster_ids = [], [], []
         for cluster_id, cluster in enumerate(instance.coref.spans):
             for span in cluster:
-
-                if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
+                # TODO: made the change here span[1] - 1
+                if span[0] < len(word2subword_starts) and span[1] < len(word2subword_ends):
                     gold_starts.append(word2subword_starts[span[0]])
-                    gold_ends.append(word2subword_ends[span[1] - 1])
+                    gold_ends.append(word2subword_ends[span[1]])  # TODO: and here
                     gold_cluster_ids.append(cluster_id)
                 else:
                     if not is_split_train(dataset=self._src_, split=self._split_):
@@ -510,8 +510,8 @@ class MultiTaskDataIter(Dataset):
         """
         gold_starts, gold_ends, gold_labels = [], [], []
         for span, tags in zip(instance.ner.spans, instance.ner.tags):
-
-            if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
+            # TODO: made a change here
+            if span[0] < len(word2subword_starts) and span[1] < len(word2subword_ends):
                 gold_starts.append(word2subword_starts[span[0]])
                 gold_ends.append(word2subword_ends[span[1] - 1])
                 span_tags = [0] * (len(self.ner_tag_dict) + 1)
@@ -628,7 +628,7 @@ class MultiTaskDataIter(Dataset):
         for sw_id, w_id in subword2word.items():
             word2subword_all[w_id] = word2subword_all.get(w_id, []) + [sw_id]
         word2subword_starts = {k: v[0] for k, v in word2subword_all.items()}
-        word2subword_ends = {k: v[-1] for k, v in word2subword_all.items()}
+        word2subword_ends = {k: v[-1] + 1 for k, v in word2subword_all.items()}  # added a +1 here
 
         wordid_for_subword = torch.tensor(
             [subword2word[subword_id] for subword_id in range(n_subwords)],
@@ -673,9 +673,9 @@ class MultiTaskDataIter(Dataset):
                                         end=n_subwords,
                                         device="cpu").view(-1, 1) \
             .repeat(1, self.config.max_span_width)  # n_words, max_span_width
-        candidate_ends = candidate_starts + torch.arange(start=0, end=self.config.max_span_width,
-                                                         device="cpu").unsqueeze(
-            0)  # [num_words, max_span_width]
+        candidate_ends = candidate_starts + 1 + torch.arange(start=0, end=self.config.max_span_width,
+                                                             device="cpu").unsqueeze(
+            0)  # [num_words, max_span_width] # TODO: add +1 here as well
         candidate_start_sentence_indices = sentid_for_subword[candidate_starts]  # n_seq, max_span_width
         candidate_end_sentence_indices = sentid_for_subword[
             torch.clamp(candidate_ends, max=n_subwords - 1)]  # n_seq, max_span_width
