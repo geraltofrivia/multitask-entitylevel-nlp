@@ -21,7 +21,7 @@ except ImportError:
 from utils.data import Tasks
 from loops import training_loop
 from preproc.encode import PreEncoder
-from models.multitask import MTLModel
+from models.multitask import MTLModel, MTLModelWordLevel
 from dataiter import MultiTaskDataIter, MultiDomainDataCombiner
 from utils.misc import merge_configs, SerializedBertConfig, safely_pull_config
 from config import LOCATIONS as LOC, DEFAULTS, KNOWN_SPLITS, _SEED_ as SEED, SCHEDULER_CONFIG, DOMAIN_HAS_NER_MULTILABEL
@@ -609,8 +609,10 @@ def train(ctx):
     wandb_tags = ctx.obj['wandb_tags']
 
     # Make the model
-    model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
-                     **config.to_dict() if isinstance(config, SerializedBertConfig) else config).to(device)
+    model = MTLModelWordLevel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
+                              **config.to_dict() if isinstance(config, SerializedBertConfig) else config).to(device)
+    # model = MTLModel(dir_encoder, config=config, coref_false_new_delta=config.trainer.coref_false_new_delta,
+    #                  **config.to_dict() if isinstance(config, SerializedBertConfig) else config).to(device)
     # model = BasicMTL.from_pretrained(dir_encoder, config=config, **config.to_dict())
     n_params = sum([param.nelement() for param in model.parameters()])
     print("Model params: ", n_params)

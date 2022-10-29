@@ -58,9 +58,9 @@ class Utils(object):
         if not isinstance(dropout, nn.Module):
             dropout = nn.Dropout(p=dropout)
 
-        ffnn = [Utils.make_linear(input_dim, hidden_dim[0]), nonlin_fn, dropout]
+        ffnn = [Utils.make_linear(input_dim, hidden_dim[0]), nonlin_fn(), dropout]
         for i in range(1, len(hidden_dim)):
-            ffnn += [Utils.make_linear(hidden_dim[i - 1], hidden_dim[i]), nonlin_fn, dropout]
+            ffnn += [Utils.make_linear(hidden_dim[i - 1], hidden_dim[i]), nonlin_fn(), dropout]
         ffnn.append(Utils.make_linear(hidden_dim[-1], output_dim, bias=bias_in_last_layers))
         return nn.Sequential(*ffnn)
 

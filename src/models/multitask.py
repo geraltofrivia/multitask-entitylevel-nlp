@@ -210,7 +210,8 @@ class MTLModelWordLevel(nn.Module):
             domain: str,
             hash: int,
             genre: int,
-            speaker_ids: Optional[torch.tensor] = None,  # are word level, NOT subword level
+            speaker_ids: Optional[torch.tensor] = None,  # are SubWord level
+            speaker_ids_wl: Optional[torch.Tensor] = None,  # are word level
             *args,
             **kwargs
     ):
@@ -228,8 +229,7 @@ class MTLModelWordLevel(nn.Module):
             However, if the encoder is frozen, it'll try and pull them from disk instead.
         """
         if not self._freeze_encoder:
-            hidden_states, _ = self.bert(input_ids, attention_mask)  # [num_seg, max_seg_len, emb_len]
-            del _
+            hidden_states = self.bert(input_ids, attention_mask)[0]  # [num_seg, max_seg_len, emb_len]
         else:
             hidden_states = self.retriever.load(domain=domain, hash=hash)  # [num_seg, max_seg_len, emb_len]
         num_seg, len_seg, len_emb = hidden_states.shape
@@ -269,15 +269,15 @@ class MTLModelWordLevel(nn.Module):
 
         if 'coref' in tasks:
             # Forward things to the WL coref module.
-            self.coref(
+            coref_specific = self.coref(
                 hidden_states=hidden_states,
                 word_starts=word_starts,
                 word_ends=word_ends,
-                speaker_ids=speaker_ids,
+                speaker_ids_wl=speaker_ids_wl,
                 genre=genre
             )
         else:
-            ...
+            coref_specific = None
 
         raise NotImplementedError()
 
@@ -391,6 +391,7 @@ class MTLModelWordLevel(nn.Module):
             hash: int,
             genre: int,
             speaker_ids: Optional[torch.tensor] = None,
+            speaker_ids_wl: Optional[torch.tensor] = None,
             coref: dict = None,
             ner: dict = None,
             pruner: dict = None,
@@ -415,6 +416,7 @@ class MTLModelWordLevel(nn.Module):
             tasks=tasks,
             hash=hash,
             speaker_ids=speaker_ids,
+            speaker_ids_wl=speaker_ids_wl,
             n_subwords=n_subwords,
             genre=genre,
             coref_gold_starts=coref.get('gold_starts', None),

@@ -8,8 +8,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from config import EPSILON
 # Local imports
 from models.modules import Utils
+from utils.exceptions import NANsFound
 
 
 class CorefDecoderWL(torch.nn.Module):
@@ -58,7 +60,7 @@ class CorefDecoderWL(torch.nn.Module):
         """
         self.emb_genre = Utils.make_embedding(self._n_genres, _feat_dim) if self._use_metadata else None
         self.emb_same_speaker = Utils.make_embedding(2, _feat_dim) if self._use_speakers else None
-        self.emb_segment_distance = Utils.make_embedding(max_training_segments, _feat_dim)
+        self.emb_segment_distance = Utils.make_embedding(9, _feat_dim)
 
         """
         Anaphoricity Scorer stuff
@@ -107,12 +109,22 @@ class CorefDecoderWL(torch.nn.Module):
                 for each of the subwords in the document
             word_starts (torch.Tensor): [n_words], start indices of words
             word_ends (torch.Tensor): [n_words], end indices of words
+                Word Ends must not be shifted by one. I.e., if the first word is the first subword
+                    e.g. 'the', then it should be represented as [0,0]; not [0,1]
+                In other words if
+                    word_starts = [  0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  14,  15, ..., ]
+                    word_ends =   [  0,   1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  13,  14,  16, ..., ]
+                    and not
+                    word_ends !=  [  1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  14,  15, 17, ..., ]
 
         Returns:
             torch.Tensor: [description]
         """
         n_subtokens = len(hidden_states)
         n_words = len(word_starts)
+
+        # shift word ends to match the wl-coref scheme
+        word_ends += 1
 
         # [n_mentions, n_subtokens]
         # with 0 at positions belonging to the words and -inf elsewhere
@@ -125,7 +137,12 @@ class CorefDecoderWL(torch.nn.Module):
         attn_scores = attn_scores.expand((n_words, n_subtokens))
         attn_scores = attn_mask + attn_scores
         del attn_mask
-        return torch.softmax(attn_scores, dim=1)
+
+        op = torch.softmax(attn_scores, dim=1)
+        if op.isnan().any():
+            raise NANsFound
+
+        return op
 
     def _prune(self,
                rough_scores: torch.Tensor
@@ -231,11 +248,11 @@ class CorefDecoderWL(torch.nn.Module):
 
     def forward(
             self,
-            hidden_states,
-            word_starts,
-            word_ends,
-            speaker_ids,
-            genre: int,
+            hidden_states: torch.Tensor,
+            word_starts: torch.Tensor,
+            word_ends: torch.Tensor,
+            speaker_ids_wl: torch.Tensor,
+            genre: torch.Tensor,
     ):
         """
             hidden_states: BERT's last hidden states: n_swords, hdim
@@ -295,8 +312,12 @@ class CorefDecoderWL(torch.nn.Module):
         distance = torch.where(distance < 5, distance - 1, log_distance + 2)
         distance = self.emb_segment_distance(distance)
 
-        genre = self.genre_emb(genre) if self._use_metadata else None
-        same_speaker = (speaker_ids[top_indices] == speaker_ids.unsqueeze(1)) if self._use_speakers else None
+        genre = self.emb_genre(genre.expand_as(top_indices)) if self._use_metadata else None
+        if self._use_speakers:
+            same_speaker = (speaker_ids_wl[top_indices] == speaker_ids_wl.unsqueeze(1))
+            same_speaker = self.emb_same_speaker(same_speaker.to(torch.long))
+        else:
+            same_speaker = None
 
         if self._use_speakers and self._use_metadata:
             # noinspection PyTypeChecker
@@ -329,9 +350,16 @@ class CorefDecoderWL(torch.nn.Module):
             )
             a_scores_lst.append(a_scores_batch)
 
-        return {
-            'words': words
+        return_dict = {
+            'words': words,
+            'coref_scores': a_scores_lst
         }
+
+        for k, v in return_dict.items():
+            if isinstance(v, torch.Tensor) and v.isnan().any():
+                raise NANsFound(f"Found NaN in CorefDecoderWL forward for {k}.")
+
+        return return_dict
 
     def post_forward(
             self,
@@ -345,7 +373,7 @@ class CorefDecoderWL(torch.nn.Module):
         pred_words = pred_stuff['words']
 
         gold_clusters = ...
-        # need to be something like
+        # need to be something like (on word space)
         # tensor([ 0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  2,  0,  0,  0,  3,  0,  0,  4,
         #          0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  6,  0,  0,  0,  0,  0,  0,  0,
         #          0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  7,  0,  0,  0,  0,  0,  0,

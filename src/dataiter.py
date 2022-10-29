@@ -483,11 +483,16 @@ class MultiTaskDataIter(Dataset):
         gold_cluster_ids = torch.tensor(gold_cluster_ids, dtype=torch.long, device='cpu') + 1
         """ This +1 may be important, in distinguishing actual clusters from singletons/non mentions"""
 
+        # Here we also add gold_spanh (for word-level coref)
+        gold_spanhead_word = [span_head[0] for cluster in instance.coref.spans_head for span_head in cluster]
+        gold_spanhead_word = torch.tensor(gold_spanhead_word, dtype=torch.long, device='cpu')
+
         coref_specific = {  # Pred stuff
             # "gold_cluster_ids_on_candidates": cluster_labels,
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
             "gold_label_values": gold_cluster_ids,
+            "gold_spanhead_word": gold_spanhead_word
         }
 
         return coref_specific
@@ -644,6 +649,8 @@ class MultiTaskDataIter(Dataset):
             device="cpu",
         )
         speaker_ids = self._get_speaker_ids_(tokenized.attention_mask, sentid_for_subword, instance.speakers)
+        # TODO: what shape should they have. right now its (n_words,) should it be (1, n_words)?
+        speaker_ids_wl = torch.tensor(instance.sentence_map, dtype=torch.long)[instance.sentence_map]
 
         # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
         #                                          for word_id in range(len(word2subword_starts))],
@@ -757,6 +764,7 @@ class MultiTaskDataIter(Dataset):
             "word2subword_starts": word2subword_starts,
             "word2subword_ends": word2subword_ends,
             "speaker_ids": speaker_ids,
+            "speaker_ids_wl": speaker_ids_wl,
             "sentence_map": sentid_for_subword,
             "genre": genre,
             "n_words": n_words,
