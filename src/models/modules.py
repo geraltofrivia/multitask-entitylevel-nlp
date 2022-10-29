@@ -24,7 +24,7 @@ try:
     import _pathfix
 except ImportError:
     from . import _pathfix
-from utils.exceptions import BadParameters
+from utils.exceptions import BadParameters, NANsFound
 
 
 class Utils(object):
@@ -222,6 +222,28 @@ class Utils(object):
         else:
             candidate_labels = torch.mm(same_span.transpose(1, 0).float(), labels.float())  # [nclasses, num_candidates]
         return candidate_labels.squeeze(0)  # [num_candidates] or [nclasses, num_candidate]
+
+    @staticmethod
+    def check_for_nans(data: Union[dict, list, torch.Tensor]):
+
+        if isinstance(data, torch.Tensor) and data.isnan().any():
+            raise NANsFound
+
+        elif isinstance(data, dict):
+            for k, v in data.items():
+                if isinstance(v, torch.Tensor) and v.isnan().any():
+                    raise NANsFound(f"Found a NaN in the key `{k}`")
+
+                elif isinstance(v, list) or isinstance(v, dict):
+                    Utils.check_for_nans(v)
+
+        elif isinstance(data, list):
+            for item in data:
+                if isinstance(item, torch.Tensor) and item.isnan().any():
+                    raise NANsFound
+
+                elif isinstance(data, list) or isinstance(data, dict):
+                    Utils.check_for_nans(data)
 
 
 class SharedDense(torch.nn.Module):

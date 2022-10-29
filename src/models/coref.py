@@ -352,12 +352,11 @@ class CorefDecoderWL(torch.nn.Module):
 
         return_dict = {
             'words': words,
-            'coref_scores': a_scores_lst
+            'coref_scores': a_scores_lst,
+            'coref_indices': top_indices,
+            'coref_rough_scores': top_rough_scores
         }
-
-        for k, v in return_dict.items():
-            if isinstance(v, torch.Tensor) and v.isnan().any():
-                raise NANsFound(f"Found NaN in CorefDecoderWL forward for {k}.")
+        Utils.check_for_nans(return_dict)
 
         return return_dict
 
