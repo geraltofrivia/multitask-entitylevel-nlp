@@ -467,9 +467,10 @@ class MultiTaskDataIter(Dataset):
         for cluster_id, cluster in enumerate(instance.coref.spans):
             for span in cluster:
                 # TODO: made the change here span[1] - 1
-                if span[0] < len(word2subword_starts) and span[1] < len(word2subword_ends):
+                if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
                     gold_starts.append(word2subword_starts[span[0]])
-                    gold_ends.append(word2subword_ends[span[1]])  # TODO: and here
+                    gold_ends.append(word2subword_ends[span[1] if span[1] != len(word2subword_ends) else span[
+                                                                                                             1] - 1])  # TODO: and here
                     gold_cluster_ids.append(cluster_id)
                 else:
                     if not is_split_train(dataset=self._src_, split=self._split_):
