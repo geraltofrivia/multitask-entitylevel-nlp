@@ -597,9 +597,11 @@ class Tasks:
     n_speakers: Optional[int] = field(default_factory=int)
     n_genres = 0
 
+    shared_ner: bool = field(default_factory=bool)
+
     @classmethod
     def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]],
-              use_speakers: bool = False, faux: bool = False):
+              use_speakers: bool = False, faux: bool = False, shared_ner: bool = False):
 
         if not type(datasrc) in (type(None), str):
             raise BadParameters(
@@ -631,6 +633,9 @@ class Tasks:
         loss_scales = cls._parse_loss_scales_(names=names, scales=[arg[1] for arg in tuples])
         use_class_weights = [arg[2] for arg in tuples]
 
+        # Deciding if NER is a shared task
+        shared_ner: bool = 'ner' in names and shared_ner
+
         n_classes_ner = 0
         n_classes_pruner = 0
         n_classes_pos = 0
@@ -638,7 +643,7 @@ class Tasks:
 
         return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights, dataset=dataset,
                    n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_classes_pos=n_classes_pos,
-                   n_speakers=n_speakers)
+                   n_speakers=n_speakers, shared_ner=shared_ner)
 
     def __post_init__(self, *args, **kwargs):
 
