@@ -486,13 +486,21 @@ class MultiTaskDataIter(Dataset):
         # Here we also add gold_spanh (for word-level coref)
         gold_spanhead_word = [span_head[0] for cluster in instance.coref.spans_head for span_head in cluster]
         gold_spanhead_word = torch.tensor(gold_spanhead_word, dtype=torch.long, device='cpu')
+        gold_starts_word = [span[0] for cluster in instance.coref.spans for span in cluster]
+        gold_starts_word = torch.tensor(gold_starts_word, dtype=torch.long, device='cpu')
+        gold_ends_word = [span[1] for cluster in instance.coref.spans for span in cluster]
+        gold_ends_word = torch.tensor(gold_ends_word, dtype=torch.long, device='cpu')
 
+        # noinspection PyDictCreation
         coref_specific = {  # Pred stuff
-            # "gold_cluster_ids_on_candidates": cluster_labels,
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
             "gold_label_values": gold_cluster_ids,
-            "gold_spanhead_word": gold_spanhead_word
+
+            # This is used for word-level coref stuff
+            "gold_spanhead_word": gold_spanhead_word,
+            "gold_starts_word": gold_starts_word,
+            "gold_ends_word": gold_ends_word
         }
 
         return coref_specific

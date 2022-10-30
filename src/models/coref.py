@@ -8,9 +8,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from config import EPSILON
 # Local imports
+from config import EPSILON
 from models.modules import Utils
+from utils.data import GraphNode
 from utils.exceptions import NANsFound
 
 
@@ -143,6 +144,58 @@ class CorefDecoderWL(torch.nn.Module):
             raise NANsFound
 
         return op
+
+    @staticmethod
+    def _get_ground_truth(cluster_ids: torch.Tensor,
+                          top_indices: torch.Tensor,
+                          valid_pair_map: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            cluster_ids: tensor of shape [n_words], containing cluster indices
+                for each word. Non-gold words have cluster id of zero.
+            top_indices: tensor of shape [n_words, n_ants],
+                indices of antecedents of each word
+            valid_pair_map: boolean tensor of shape [n_words, n_ants],
+                whether for pair at [i, j] (i-th word and j-th word)
+                j < i is True
+
+        Returns:
+            tensor of shape [n_words, n_ants + 1] (dummy added),
+                containing 1 at position [i, j] if i-th and j-th words corefer.
+        """
+        y = cluster_ids[top_indices] * valid_pair_map  # [n_words, n_ants]
+        y[y == 0] = -1  # -1 for non-gold words
+        y = CorefDecoderWL.add_dummy(y)  # [n_words, n_cands + 1]
+        y = (y == cluster_ids.unsqueeze(1))  # True if coreferent
+        # For all rows with no gold antecedents setting dummy to True
+        y[y.sum(dim=1) == 0, 0] = True
+        return y.to(torch.float)
+
+    def _clusterize(self, n_words: int, scores: torch.Tensor, top_indices: torch.Tensor):
+        """ Again, not sure what it does but copied as is from Vladimir's codebase"""
+        antecedents = scores.argmax(dim=1) - 1
+        not_dummy = antecedents >= 0
+        coref_span_heads = torch.arange(0, len(scores))[not_dummy]
+        antecedents = top_indices[coref_span_heads, antecedents[not_dummy]]
+
+        nodes = [GraphNode(i) for i in range(n_words)]
+        for i, j in zip(coref_span_heads.tolist(), antecedents.tolist()):
+            nodes[i].link(nodes[j])
+            assert nodes[i] is not nodes[j]
+
+        clusters = []
+        for node in nodes:
+            if len(node.links) > 0 and not node.visited:
+                cluster = []
+                stack = [node]
+                while stack:
+                    current_node = stack.pop()
+                    current_node.visited = True
+                    cluster.append(current_node.id)
+                    stack.extend(link for link in current_node.links if not link.visited)
+                assert len(cluster) > 1
+                clusters.append(sorted(cluster))
+        return sorted(clusters)
 
     def _prune(self,
                rough_scores: torch.Tensor
@@ -352,7 +405,7 @@ class CorefDecoderWL(torch.nn.Module):
 
         return_dict = {
             'words': words,
-            'coref_scores': a_scores_lst,
+            'coref_scores': torch.cat(a_scores_lst, dim=0),
             'coref_indices': top_indices,
             'coref_rough_scores': top_rough_scores
         }
@@ -364,12 +417,25 @@ class CorefDecoderWL(torch.nn.Module):
             self,
             pred_stuff: dict,
             gold_stuff: dict,
+            n_words: int
     ):
         """
             input: everything model_forward outputs.
             input: coref specific label information
         """
         pred_words = pred_stuff['words']
+        pred_scores = pred_stuff['coref_scores']
+        pred_indices = pred_stuff['coref_indices']
+        pred_rough_scores = pred_stuff['coref_rough_scores']
+        gold_spanhead_word = gold_stuff['gold_spanhead_word']
+        gold_label_values = gold_stuff['gold_label_values']
+
+        # Cluster IDs: (num_words, ), [0, 0, 1, 0, 2 ... 0, 3, 1 ... ]
+        cluster_ids = Utils.get_candidate_labels_wl(gold_spanhead_word, gold_label_values, n_words=n_words)
+        coref_y = self._get_ground_truth(cluster_ids, pred_indices, (pred_rough_scores > float("-inf")))
+        word_clusters = self._clusterize(n_words=n_words, scores=pred_scores, top_indices=pred_indices)
+
+        print('potato')
 
         gold_clusters = ...
         # need to be something like (on word space)

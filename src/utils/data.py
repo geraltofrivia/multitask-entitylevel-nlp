@@ -6,7 +6,7 @@ import json
 import warnings
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union, Set
 
 from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
 from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
@@ -770,3 +770,19 @@ class Tasks:
 
     def isempty(self):
         return self.dataset is None and len(self) == 0
+
+
+class GraphNode:
+    """Not sure what it does but apparently Vladimir uses it in their codebase. For WLCoref. Added as is."""
+
+    def __init__(self, node_id: int):
+        self.id = node_id
+        self.links: Set[GraphNode] = set()
+        self.visited = False
+
+    def link(self, another: "GraphNode"):
+        self.links.add(another)
+        another.links.add(self)
+
+    def __repr__(self) -> str:
+        return str(self.id)

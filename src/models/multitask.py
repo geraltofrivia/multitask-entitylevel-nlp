@@ -21,7 +21,8 @@ except ImportError:
 from utils.data import Tasks
 from config import _SEED_ as SEED, DOMAIN_HAS_NER_MULTILABEL
 from preproc.encode import Retriever
-from models.modules import SpanPrunerHOI as SpanPruner, SharedDense, Utils
+from models.modules import SharedDense, Utils
+from models.spans import SpanPrunerHOI as SpanPruner
 from models.coref import CorefDecoderHOI as CorefDecoder, CorefDecoderWL
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
@@ -279,7 +280,7 @@ class MTLModelWordLevel(nn.Module):
         else:
             coref_specific = None
 
-        raise NotImplementedError()
+        # raise NotImplementedError()
 
         """
             # From Words to Spans
@@ -310,67 +311,68 @@ class MTLModelWordLevel(nn.Module):
         candidate_emb_list.append(head_attn_emb)
         candidate_span_emb = torch.cat(candidate_emb_list, dim=1)
 
-        if 'coref' in tasks or 'pruner' in tasks:
-            pruner_specific = self.pruner(
-                candidate_span_emb=candidate_span_emb,
-                candidate_width_idx=candidate_width_idx,
-                num_words=_num_words,
-                candidate_starts=candidate_starts,
-                candidate_ends=candidate_ends,
-                speaker_ids=speaker_ids,
-                device=device
-            )
-            if 'coref' in tasks:
-                coref_specific = self.coref.forward(
-                    attention_mask=attention_mask,
-                    pruned_span_starts=pruner_specific['pruned_span_starts'],
-                    pruned_span_ends=pruner_specific['pruned_span_ends'],
-                    pruned_span_indices=pruner_specific['pruned_span_indices'],
-                    pruned_span_scores=pruner_specific['pruned_span_scores'],
-                    pruned_span_speaker_ids=pruner_specific['pruned_span_speaker_ids'],
-                    pruned_span_emb=pruner_specific['pruned_span_emb'],
-                    num_top_spans=pruner_specific['num_top_spans'],
-                    num_segments=num_seg,
-                    len_segment=len_seg,
-                    domain=domain,
-                    genre=genre,
-                    device=device
-                )
-            else:
-                coref_specific = {}
-        else:
-            pruner_specific, coref_specific = {}, {}
-
-        if 'ner' in tasks:
-            # We just need span embeddings here
-
-            fc1 = self.unary_ner_common(candidate_span_emb)
-
-            # Depending on the domain, select the right decoder
-            logits = self.unary_ner_specific[domain](fc1)
-            # logits = torch.nn.functional.softmax(logits, dim=1)
-            ner_specific = {"ner_logits": logits, "ner_emb": fc1}
-
-        else:
-            ner_specific = {}
-
-        if 'pos' in tasks:
-            # We just need token embeddings here
-            fc1 = self.token_pos_common(hidden_states)
-            logits = self.token_pos_specific[domain](fc1)
-            pos_specific = {"pos_logits": logits}
-        else:
-            pos_specific = {}
+        # TODO: for now we stopped all other modules. We pick them up later.
+        # if 'coref' in tasks or 'pruner' in tasks:
+        #     pruner_specific = self.pruner(
+        #         candidate_span_emb=candidate_span_emb,
+        #         candidate_width_idx=candidate_width_idx,
+        #         num_words=_num_words,
+        #         candidate_starts=candidate_starts,
+        #         candidate_ends=candidate_ends,
+        #         speaker_ids=speaker_ids,
+        #         device=device
+        #     )
+        #     if 'coref' in tasks:
+        #         coref_specific = self.coref.forward(
+        #             attention_mask=attention_mask,
+        #             pruned_span_starts=pruner_specific['pruned_span_starts'],
+        #             pruned_span_ends=pruner_specific['pruned_span_ends'],
+        #             pruned_span_indices=pruner_specific['pruned_span_indices'],
+        #             pruned_span_scores=pruner_specific['pruned_span_scores'],
+        #             pruned_span_speaker_ids=pruner_specific['pruned_span_speaker_ids'],
+        #             pruned_span_emb=pruner_specific['pruned_span_emb'],
+        #             num_top_spans=pruner_specific['num_top_spans'],
+        #             num_segments=num_seg,
+        #             len_segment=len_seg,
+        #             domain=domain,
+        #             genre=genre,
+        #             device=device
+        #         )
+        #     else:
+        #         coref_specific = {}
+        # else:
+        #     pruner_specific, coref_specific = {}, {}
+        #
+        # if 'ner' in tasks:
+        #     # We just need span embeddings here
+        #
+        #     fc1 = self.unary_ner_common(candidate_span_emb)
+        #
+        #     # Depending on the domain, select the right decoder
+        #     logits = self.unary_ner_specific[domain](fc1)
+        #     # logits = torch.nn.functional.softmax(logits, dim=1)
+        #     ner_specific = {"ner_logits": logits, "ner_emb": fc1}
+        #
+        # else:
+        #     ner_specific = {}
+        #
+        # if 'pos' in tasks:
+        #     # We just need token embeddings here
+        #     fc1 = self.token_pos_common(hidden_states)
+        #     logits = self.token_pos_specific[domain](fc1)
+        #     pos_specific = {"pos_logits": logits}
+        # else:
+        #     pos_specific = {}
 
         # noinspection PyUnboundLocalVariable
         return {
             "candidate_starts": candidate_starts,
             "candidate_ends": candidate_ends,
             "flattened_ids": flattened_ids,
-            **pruner_specific,
+            # **pruner_specific,
             **coref_specific,
-            **ner_specific,
-            **pos_specific
+            # **ner_specific,
+            # **pos_specific
         }
 
     def pred_with_labels(
@@ -434,97 +436,107 @@ class MTLModelWordLevel(nn.Module):
             "num_candidates": candidate_starts.shape[0]
         }
 
-        if "pruner" in tasks:
-            pred_starts = predictions["pruned_span_starts"]
-            pred_ends = predictions["pruned_span_ends"]
-            pred_indices = predictions["pruned_span_indices"]
-            pred_scores = predictions["pruned_span_scores"]
-            gold_starts = pruner["gold_starts"]
-            gold_ends = pruner["gold_ends"]
-            gold_labels = pruner["gold_label_values"]
-
-            """ THE HOI Way of doing this """
-            gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
-                                                                    gold_starts, gold_ends, gold_labels)
-
-            pruned_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
-            gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
-            non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
-
-            if self.is_unweighted(task='pruner', domain=domain):
-                # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
-                if gold_mention_scores.nelement() != 0:
-                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
-                else:
-                    pruner_loss = 0
-                if non_gold_mention_scores.nelement() != 0:
-                    pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
-            else:
-                if gold_mention_scores.nelement() != 0:
-                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
-                else:
-                    pruner_loss = 0
-                if non_gold_mention_scores.nelement() != 0:
-                    pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
-                                   pruner['weights'][0]
-
-            if torch.isnan(pruner_loss):
-                print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
-                print(f"Weighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}")
-                print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
-                print(f"**Gold Mention Stuff:")
-                print(f"\t shape             : {gold_mention_scores.shape}")
-                print(f"\t min               : {gold_mention_scores.min()}")
-                print(f"\t max               : {gold_mention_scores.max()}")
-                print(f"\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}")
-                print(f"\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}")
-                print(f"\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}")
-                print(f"**Non Gold Mention Stuff:")
-                print(f"\t shape             : {non_gold_mention_scores.shape}")
-                print(f"\t min               : {non_gold_mention_scores.min()}")
-                print(f"\t max               : {non_gold_mention_scores.max()}")
-                print(f"\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}")
-                print(f"\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}")
-                print(f"\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}")
-                raise NANsFound("Found in Pruner. See message above for details")
-            #
-            #
-            # logits_after_pruning = torch.zeros_like(\, device=candidate_starts.device, dtype=torch.float)
-            # logits_after_pruning[pred_indices] = 1
-            #
-            # # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
-            # cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
-            #                             candidate_starts.unsqueeze(1))
-            # cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
-            #                           candidate_ends.unsqueeze(1))
-            # # noinspection PyArgumentList
-            # labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
-            #
-            # # Calculate the loss !
-            # if self.is_unweighted(task='pruner', domain=domain):
-            #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
-            # else:
-            #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
-
-            # DEBUG
-
-            outputs["loss"]["pruner"] = pruner_loss
-            outputs["pruner"] = {"logits": pruned_space_cluster_ids,
-                                 "labels": torch.ones_like(pruned_space_cluster_ids)}
-
-            # labels_after_pruning = Utils.get_candidate_labels(candidate_starts, candidate_ends,
-            #                                                  gold_starts, gold_ends,)
-
-            # # Repeat pred to gold dims and then collapse the eq.
-            # start_eq = torch.eq(pred_starts.repeat(gold_starts.shape[0],1), gold_starts.unsqueeze(1)).any(dim=0)
-            # end_eq = torch.eq(pred_ends.repeat(gold_ends.shape[0],1), gold_ends.unsqueeze(1)).any(dim=0)
-            # same_spans = torch.logical_and(start_eq, end_eq)
+        # if "pruner" in tasks:
+        #     pred_starts = predictions["pruned_span_starts"]
+        #     pred_ends = predictions["pruned_span_ends"]
+        #     pred_indices = predictions["pruned_span_indices"]
+        #     pred_scores = predictions["pruned_span_scores"]
+        #     gold_starts = pruner["gold_starts"]
+        #     gold_ends = pruner["gold_ends"]
+        #     gold_labels = pruner["gold_label_values"]
+        #
+        #     """ THE HOI Way of doing this """
+        #     gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+        #                                                             gold_starts, gold_ends, gold_labels)
+        #
+        #     pruned_space_cluster_ids = gold_candidate_cluster_ids[pred_indices]
+        #     gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
+        #     non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
+        #
+        #     if self.is_unweighted(task='pruner', domain=domain):
+        #         # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
+        #         if gold_mention_scores.nelement() != 0:
+        #             pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
+        #         else:
+        #             pruner_loss = 0
+        #         if non_gold_mention_scores.nelement() != 0:
+        #             pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
+        #     else:
+        #         if gold_mention_scores.nelement() != 0:
+        #             pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
+        #         else:
+        #             pruner_loss = 0
+        #         if non_gold_mention_scores.nelement() != 0:
+        #             pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
+        #                            pruner['weights'][0]
+        #
+        #     if torch.isnan(pruner_loss):
+        #         print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
+        #         print(f"Weighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}")
+        #         print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
+        #         print(f"**Gold Mention Stuff:")
+        #         print(f"\t shape             : {gold_mention_scores.shape}")
+        #         print(f"\t min               : {gold_mention_scores.min()}")
+        #         print(f"\t max               : {gold_mention_scores.max()}")
+        #         print(f"\t post sigmoid min  : {torch.sigmoid(gold_mention_scores).min()}")
+        #         print(f"\t post sigmoid max  : {torch.sigmoid(gold_mention_scores).max()}")
+        #         print(f"\t loss contribution : {-torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))}")
+        #         print(f"**Non Gold Mention Stuff:")
+        #         print(f"\t shape             : {non_gold_mention_scores.shape}")
+        #         print(f"\t min               : {non_gold_mention_scores.min()}")
+        #         print(f"\t max               : {non_gold_mention_scores.max()}")
+        #         print(f"\t post sigmoid min  : {torch.sigmoid(non_gold_mention_scores).min()}")
+        #         print(f"\t post sigmoid max  : {torch.sigmoid(non_gold_mention_scores).max()}")
+        #         print(f"\t loss contribution : {-torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))}")
+        #         raise NANsFound("Found in Pruner. See message above for details")
+        #     #
+        #     #
+        #     # logits_after_pruning = torch.zeros_like(\, device=candidate_starts.device, dtype=torch.float)
+        #     # logits_after_pruning[pred_indices] = 1
+        #     #
+        #     # # Find which candidates (in the unpruned candidate space) correspond to actual gold candidates
+        #     # cand_gold_starts = torch.eq(gold_starts.repeat(candidate_starts.shape[0], 1),
+        #     #                             candidate_starts.unsqueeze(1))
+        #     # cand_gold_ends = torch.eq(gold_ends.repeat(candidate_ends.shape[0], 1),
+        #     #                           candidate_ends.unsqueeze(1))
+        #     # # noinspection PyArgumentList
+        #     # labels_after_pruning = torch.logical_and(cand_gold_starts, cand_gold_ends).any(dim=1).float()
+        #     #
+        #     # # Calculate the loss !
+        #     # if self.is_unweighted(task='pruner', domain=domain):
+        #     #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning)
+        #     # else:
+        #     #     pruner_loss = self.pruner_loss(logits_after_pruning, labels_after_pruning, weight=pruner["weights"])
+        #
+        #     # DEBUG
+        #
+        #     outputs["loss"]["pruner"] = pruner_loss
+        #     outputs["pruner"] = {"logits": pruned_space_cluster_ids,
+        #                          "labels": torch.ones_like(pruned_space_cluster_ids)}
+        #
+        #     # labels_after_pruning = Utils.get_candidate_labels(candidate_starts, candidate_ends,
+        #     #                                                  gold_starts, gold_ends,)
+        #
+        #     # # Repeat pred to gold dims and then collapse the eq.
+        #     # start_eq = torch.eq(pred_starts.repeat(gold_starts.shape[0],1), gold_starts.unsqueeze(1)).any(dim=0)
+        #     # end_eq = torch.eq(pred_ends.repeat(gold_ends.shape[0],1), gold_ends.unsqueeze(1)).any(dim=0)
+        #     # same_spans = torch.logical_and(start_eq, end_eq)
 
         if "coref" in tasks:
-            gold_starts = coref["gold_starts"]
-            gold_ends = coref["gold_ends"]
+
+            # Just send everything to post forward for now
+            self.coref.post_forward(
+                pred_stuff=predictions,
+                gold_stuff=coref,
+                n_words=n_words
+            )
+
+            raise NotImplementedError
+
+            gold_starts = coref["gold_starts_word"]
+            gold_ends = coref["gold_ends_word"]
             gold_labels = coref["gold_label_values"]
-            pred_indices = predictions["pruned_span_indices"]
+            # pred_indices = predictions["pruned_span_indices"]
 
             gold_candidate_cluster_ids = Utils.get_candidate_labels(candidate_starts, candidate_ends,
                                                                     gold_starts, gold_ends, gold_labels)
