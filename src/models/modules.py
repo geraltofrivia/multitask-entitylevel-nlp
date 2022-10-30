@@ -315,7 +315,7 @@ class SpanPrunerHOI(torch.nn.Module):
 
         if self._use_metadata:
             self.span_width_score_ffnn = Utils.make_ffnn(_feat_dim, [unary_hdim], 1, self.dropout)
-            self.emb_span_width_prior = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
+            self.emb_span_width_prior = Utils.make_embedding(max_span_width + 1, coref_metadata_feature_size)
 
     def forward(self,
                 candidate_span_emb: torch.tensor,  # [num_cand, new emb size]

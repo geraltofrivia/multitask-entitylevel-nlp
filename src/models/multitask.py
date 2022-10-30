@@ -132,7 +132,7 @@ class MTLModel(nn.Module):
         hidden_size = hidden_size // 3 if shared_compressor else hidden_size
 
         # Now for some things that are only needed locally (regardless of any task; because this is a span level model)
-        self.emb_span_width = Utils.make_embedding(max_span_width, coref_metadata_feature_size)
+        self.emb_span_width = Utils.make_embedding(max_span_width + 1, coref_metadata_feature_size)
         self.dropout = nn.Dropout(p=self._dropout)
         self.mention_token_attn = Utils.make_ffnn(hidden_size, None, 1, self.dropout)
 
