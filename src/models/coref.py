@@ -97,6 +97,8 @@ class CorefDecoderWL(torch.nn.Module):
         )
         self.emb_span_pred = Utils.make_embedding(128, coref_spanemb_size)
 
+        self.loss_fn = CorefLoss(0.5)  # TODO: wire this up in the config
+
     def _wordencoder_attn_scores(
             self,
             hidden_states: torch.Tensor,
@@ -431,12 +433,12 @@ class CorefDecoderWL(torch.nn.Module):
 
         # Cluster IDs: (num_words, ), [0, 0, 1, 0, 2 ... 0, 3, 1 ... ]
         cluster_ids = Utils.get_candidate_labels_wl(gold_spanhead_word, gold_label_values, n_words=n_words)
-        coref_y = self._get_ground_truth(cluster_ids, pred_indices, (pred_rough_scores > float("-inf")))
+        coref_gold = self._get_ground_truth(cluster_ids, pred_indices, (pred_rough_scores > float("-inf")))
         word_clusters = self._clusterize(n_words=n_words, scores=pred_scores, top_indices=pred_indices)
 
         return_dict = {
             'cluster_ids': cluster_ids,
-            'coref_y': coref_y,
+            'coref_gold': coref_gold,
             'word_clusters': word_clusters
         }
 
@@ -1170,3 +1172,39 @@ class CorefDecoderMangoes(torch.nn.Module):
             "coref_top_antecedents_mask": top_ante_mask,
             # "coref_top_span_cluster_ids": top_span_cluster_ids,
         }
+
+
+class CorefLoss(torch.nn.Module):
+    """ See the rationale for using NLML in Lee et al. 2017
+    https://www.aclweb.org/anthology/D17-1018/
+    The added weighted summand of BCE helps the model learn even after
+    converging on the NLML task.
+
+    Copied as-in from WL Coref.
+    """
+
+    def __init__(self, bce_weight: float):
+        assert 0 <= bce_weight <= 1
+        super().__init__()
+        self._bce_module = torch.nn.BCEWithLogitsLoss()
+        self._bce_weight = bce_weight
+
+    def forward(self,  # type: ignore  # pylint: disable=arguments-differ  #35566 in pytorch
+                input_: torch.Tensor,
+                target: torch.Tensor) -> torch.Tensor:
+        """ Returns a weighted sum of two losses as a torch.Tensor """
+        return (self._nlml(input_, target)
+                + self._bce(input_, target) * self._bce_weight)
+
+    def _bce(self,
+             input_: torch.Tensor,
+             target: torch.Tensor) -> torch.Tensor:
+        """ For numerical stability, clamps the input before passing it to BCE.
+        """
+        return self._bce_module(torch.clamp(input_, min=-50, max=50), target)
+
+    @staticmethod
+    def _nlml(input_: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        gold = torch.logsumexp(input_ + torch.log(target), dim=1)
+        input_ = torch.logsumexp(input_, dim=1)
+        return (input_ - gold).mean()

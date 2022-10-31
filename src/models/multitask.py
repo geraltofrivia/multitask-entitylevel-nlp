@@ -535,13 +535,19 @@ class MTLModelWordLevel(nn.Module):
                 n_words=n_words
             )
 
+            # Calculate coref loss
+            coref_loss = self.coref.loss_fn(predictions['coref_scores'], coref_stuff['coref_gold'])
+
             # Use the coref forward and post forward information to predict spans
             spanpred_scores = self.span_predictor(
                 sentence_map=sentence_map_word,
                 words=predictions['words'],
                 heads_ids=coref['gold_spanhead_word']
-            )
+            )  # (n_gold_spanheads, n_words, 2)
 
+            spanpred_gold = (pruner['gold_starts_word'], pruner['gold_ends_word'])
+            spanpred_loss = (self._span_criterion(spanpred_scores[:, :, 0], pruner['gold_starts_word'])
+                             + self._span_criterion(spanpred_scores[:, :, 1], pruner['gold_ends_word'])) / avg_spans / 2
             raise NotImplementedError
 
             gold_starts = coref["gold_starts_word"]
@@ -716,6 +722,11 @@ class MTLModelWordLevel(nn.Module):
 
         return outputs
 
+    def pred_without_labels(self, ):
+
+        # if not self.training:
+        #     res.span_clusters = self.sp.predict(doc, words, res.word_clusters)
+        raise NotImplementedError
 
 class MTLModel(nn.Module):
 
