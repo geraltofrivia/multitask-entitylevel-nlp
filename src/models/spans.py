@@ -274,7 +274,7 @@ class SpanPredictor(torch.nn.Module):
         return next(self.ffnn.parameters()).device
 
     def forward(self,  # type: ignore  # pylint: disable=arguments-differ  #35566 in pytorch
-                doc: Doc,
+                doc,  #: Doc,
                 words: torch.Tensor,
                 heads_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -335,7 +335,7 @@ class SpanPredictor(torch.nn.Module):
         return scores
 
     def pred_with_labels(self,
-                         doc: Doc,
+                         doc,  #: Doc,
                          words: torch.Tensor
                          ) -> Tuple[Optional[torch.Tensor], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
         """ Returns span starts/ends for gold mentions in the document. """
@@ -349,9 +349,9 @@ class SpanPredictor(torch.nn.Module):
         return self(doc, words, heads), (starts, ends)
 
     def predict(self,
-                doc: Doc,
+                doc,  #: Doc,
                 words: torch.Tensor,
-                clusters: List[List[int]]) -> List[List[Span]]:
+                clusters: List[List[int]]) -> List[list]:
         """
         Predicts span clusters based on the word clusters.
 

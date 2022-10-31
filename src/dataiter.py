@@ -410,30 +410,73 @@ class MultiTaskDataIter(Dataset):
             self,
             instance: Document,
             generic_processed_stuff: dict,
-            coref_processed_stuff: dict
+            coref_processed_stuff: dict,
+            ner_processed_stuff: Optional[dict] = None
     ):
         """
             Just create a 1/0 vec representing all valid candidates in gold candidate stuff.
+            Look at tasks.shared_ner and figure out which elements to add to the pruner
         """
         # unpack things
         # candidate_starts = generic_processed_stuff["candidate_starts"]
         # candidate_ends = generic_processed_stuff["candidate_ends"]
-        gold_starts = coref_processed_stuff["gold_starts"]
-        gold_ends = coref_processed_stuff["gold_ends"]
+        gold_starts_sw = coref_processed_stuff["gold_starts"]
+        gold_ends_sw = coref_processed_stuff["gold_ends"]
+
+        gold_starts_word = [span[0] for cluster in instance.coref.spans for span in cluster]
+        gold_starts_word = torch.tensor(gold_starts_word, dtype=torch.long, device='cpu')
+        gold_ends_word = [span[1] for cluster in instance.coref.spans for span in cluster]
+        gold_ends_word = torch.tensor(gold_ends_word, dtype=torch.long, device='cpu')
+        gold_spanheads = coref_processed_stuff["gold_spanhead_word"]
+
+        # To this, add NER stuff if required
+        if self.tasks.shared_ner:
+            # Subword Level
+            # Find the ones which NER spans are already in gold_starts and gold_ends
+            ner_starts_sw = ner_processed_stuff['gold_starts']
+            ner_ends_sw = ner_processed_stuff['gold_ends']
+            duplicates_sw = torch.logical_not(torch.logical_and(
+                torch.eq(gold_starts_sw.unsqueeze(1), ner_starts_sw.unsqueeze(0)),
+                torch.eq(gold_ends_sw.unsqueeze(1), ner_ends_sw.unsqueeze(0))
+            ).any(dim=0))  # num of elements in nerspans
+            unseen_starts_sw, unseen_ends_sw = ner_starts_sw[duplicates_sw], ner_ends_sw[duplicates_sw]
+
+            gold_starts_sw = torch.cat([gold_starts_sw, unseen_starts_sw])
+            gold_ends_sw = torch.cat([gold_ends_sw, unseen_ends_sw])
+
+            # Same for Word Level
+            ner_spanheads = ner_processed_stuff['gold_spanhead_word']
+            ner_starts_word = torch.tensor([span[0] for span in instance.ner.spans]).long()
+            ner_ends_word = torch.tensor([span[1] for span in instance.ner.spans]).long()
+
+            duplicates_word = torch.logical_not(torch.logical_and(
+                torch.eq(gold_starts_word.unsqueeze(1), ner_starts_word.unsqueeze(0)),
+                torch.eq(gold_ends_word.unsqueeze(1), ner_ends_word.unsqueeze(0))
+            ).any(dim=0))
+            unseen_starts_word = ner_starts_word[duplicates_word]
+            unseen_ends_word = ner_ends_word[duplicates_word]
+            unseen_spanheads = ner_spanheads[duplicates_word]
+
+            gold_starts_word = torch.cat([gold_starts_word, unseen_starts_word])
+            gold_ends_word = torch.cat([gold_ends_word, unseen_ends_word])
+            gold_spanheads = torch.cat([gold_spanheads, unseen_spanheads])
 
         # replace gold labels with all ones.
-        new_cluster_ids = torch.ones_like(gold_starts)
-
-        # gold_labels = self.get_candidate_labels_mangoes(
-        #     candidate_starts, candidate_ends, gold_starts, gold_ends, new_cluster_ids
-        # ).to(float)
+        new_cluster_ids_subword = torch.ones_like(gold_starts_sw)
+        new_cluster_ids_word = torch.ones_like(gold_spanheads)
 
         pruner_specific = {  # Pred stuff
             # "gold_labels": gold_labels,
-            "gold_starts": gold_starts,
-            "gold_ends": gold_ends,
-            "gold_label_values": new_cluster_ids,
-            "weights": self.task_weights['pruner']
+            "gold_starts": gold_starts_sw,
+            "gold_ends": gold_ends_sw,
+            "gold_label_values": new_cluster_ids_subword,
+            "weights": self.task_weights['pruner'],
+
+            # word level stuff
+            "gold_starts_word": gold_starts_word,
+            "gold_ends_word": gold_ends_word,
+            "gold_spanheads": gold_spanheads,
+            "gold_label_values_word": new_cluster_ids_word,
         }
 
         return pruner_specific
@@ -486,10 +529,6 @@ class MultiTaskDataIter(Dataset):
         # Here we also add gold_spanh (for word-level coref)
         gold_spanhead_word = [span_head[0] for cluster in instance.coref.spans_head for span_head in cluster]
         gold_spanhead_word = torch.tensor(gold_spanhead_word, dtype=torch.long, device='cpu')
-        gold_starts_word = [span[0] for cluster in instance.coref.spans for span in cluster]
-        gold_starts_word = torch.tensor(gold_starts_word, dtype=torch.long, device='cpu')
-        gold_ends_word = [span[1] for cluster in instance.coref.spans for span in cluster]
-        gold_ends_word = torch.tensor(gold_ends_word, dtype=torch.long, device='cpu')
 
         # noinspection PyDictCreation
         coref_specific = {  # Pred stuff
@@ -499,8 +538,6 @@ class MultiTaskDataIter(Dataset):
 
             # This is used for word-level coref stuff
             "gold_spanhead_word": gold_spanhead_word,
-            "gold_starts_word": gold_starts_word,
-            "gold_ends_word": gold_ends_word
         }
 
         return coref_specific
@@ -515,18 +552,22 @@ class MultiTaskDataIter(Dataset):
     ) -> dict:
         """ NOTE: NER could be multilabel or singlelabel."""
 
+        # TODO: handle shared NER stuff here
+
         if instance.ner.isempty:
             raise NoValidAnnotations("NER")
 
         """
             Work with generic processed stuff to also work with NER things
         """
-        gold_starts, gold_ends, gold_labels = [], [], []
-        for span, tags in zip(instance.ner.spans, instance.ner.tags):
+        gold_starts, gold_ends, gold_labels, gold_spanheads = [], [], [], []
+        for span, spanhead, tags in zip(instance.ner.spans, instance.ner.spans_head, instance.ner.tags):
 
             if span[0] < len(word2subword_starts) and span[1] - 1 < len(word2subword_ends):
                 gold_starts.append(word2subword_starts[span[0]])
                 gold_ends.append(word2subword_ends[span[1] - 1])
+                gold_spanheads.append(spanhead[0])
+
                 span_tags = [0] * (len(self.ner_tag_dict) + 1)
                 for tag in tags:
                     if tag not in self.ner_tag_dict:
@@ -542,6 +583,7 @@ class MultiTaskDataIter(Dataset):
 
         gold_starts = torch.tensor(gold_starts, dtype=torch.long, device='cpu')
         gold_ends = torch.tensor(gold_ends, dtype=torch.long, device='cpu')
+        gold_spanheads = torch.tensor(gold_spanheads, dtype=torch.long, device='cpu')
 
         if self._src_ in DOMAIN_HAS_NER_MULTILABEL:
             gold_labels = torch.tensor(gold_labels, dtype=torch.long, device='cpu')
@@ -553,6 +595,7 @@ class MultiTaskDataIter(Dataset):
             "gold_starts": gold_starts,
             "gold_ends": gold_ends,
             "gold_label_values": gold_labels,
+            "gold_spanhead_word": gold_spanheads,
             "weights": self.task_weights['ner']
         }
 
@@ -787,6 +830,16 @@ class MultiTaskDataIter(Dataset):
             "pos": {}
         }
 
+        if "ner" in self.tasks:
+            return_dict["ner"] = self.process_ner(
+                instance, return_dict, word2subword_starts, word2subword_ends
+            )
+
+        if "pos" in self.tasks:
+            return_dict["pos"] = self.process_pos(
+                instance, return_dict
+            )
+
         if "coref" in self.tasks or "pruner" in self.tasks:
 
             coref_op = self.process_coref(
@@ -798,18 +851,8 @@ class MultiTaskDataIter(Dataset):
 
             if "pruner" in self.tasks:
                 return_dict["pruner"] = self.process_pruner(
-                    instance, return_dict, coref_op
+                    instance, return_dict, coref_op, return_dict['ner'] if "ner" in self.tasks else None
                 )
-
-        if "ner" in self.tasks:
-            return_dict["ner"] = self.process_ner(
-                instance, return_dict, word2subword_starts, word2subword_ends
-            )
-
-        if "pos" in self.tasks:
-            return_dict["pos"] = self.process_pos(
-                instance, return_dict
-            )
 
         return return_dict
 

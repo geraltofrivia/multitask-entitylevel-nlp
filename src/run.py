@@ -248,6 +248,9 @@ def get_dataiter_partials(
                    "2. a float denoting loss weight. if its negative, we ignore the value "
                    "3. a bool signifying if the class should be weighted or not."
                    "Some example of correct: -t coref -1 True -t pruner 3.5 False")
+@click.option("--shared-ner", type=bool, default=False,
+              help="If enabled, for every task group, if NER is defined, it will be trained in a shared setting,"
+                   "i.e., the pruner will make the NER decisions as well.")
 # TODO: understand the semantics of sampling ratios
 @click.option("--sampling-ratio", "-sr", type=(float, float), default=(1.0, 1.0), multiple=False,
               help="A set of floats signifying sampling ratios. (1.0, 1.0) is normal (fully sample)."
@@ -329,6 +332,7 @@ def run(
         tasks: List[Tuple[str, float, bool]],
         dataset_2: str,
         tasks_2: List[Tuple[str, float, bool]],
+        shared_ner: bool,
         debug: bool,
         train_encoder: bool,
         use_wandb: bool,
@@ -375,8 +379,8 @@ def run(
     if dataset_2 not in list(KNOWN_SPLITS.keys()) + [None]:
         raise BadParameters(f"Unknown dataset: {dataset_2}")
 
-    tasks = Tasks.parse(dataset, tuples=tasks)
-    tasks_2 = Tasks.parse(dataset_2, tuples=tasks_2)
+    tasks = Tasks.parse(dataset, tuples=tasks, shared_ner=shared_ner)
+    tasks_2 = Tasks.parse(dataset_2, tuples=tasks_2, shared_ner=shared_ner)
 
     _is_multidomain: bool = not tasks_2.isempty()
 
