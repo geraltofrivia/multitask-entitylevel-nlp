@@ -388,6 +388,7 @@ class MTLModelWordLevel(nn.Module):
             word2subword_starts: torch.tensor,
             word2subword_ends: torch.tensor,
             sentence_map: List[int],
+            sentence_map_word: List[int],
             word_map: List[int],
             n_words: int,
             n_subwords: int,
@@ -536,7 +537,7 @@ class MTLModelWordLevel(nn.Module):
 
             # Use the coref forward and post forward information to predict spans
             spanpred_scores = self.span_predictor(
-                sentence_map=sentence_map,
+                sentence_map=sentence_map_word,
                 words=predictions['words'],
                 heads_ids=coref['gold_spanhead_word']
             )

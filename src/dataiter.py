@@ -694,9 +694,10 @@ class MultiTaskDataIter(Dataset):
             dtype=torch.long,
             device="cpu",
         )
+        sentid_for_word = torch.tensor(instance.sentence_map).long().cpu()
         speaker_ids = self._get_speaker_ids_(tokenized.attention_mask, sentid_for_subword, instance.speakers)
         # TODO: what shape should they have. right now its (n_words,) should it be (1, n_words)?
-        speaker_ids_wl = torch.tensor(instance.sentence_map, dtype=torch.long)[instance.sentence_map]
+        speaker_ids_wl = torch.tensor(instance.speakers, dtype=torch.long)[instance.sentence_map]
 
         # subwordid_for_word_start = torch.tensor([word2subword_starts[word_id]
         #                                          for word_id in range(len(word2subword_starts))],
@@ -812,6 +813,7 @@ class MultiTaskDataIter(Dataset):
             "speaker_ids": speaker_ids,
             "speaker_ids_wl": speaker_ids_wl,
             "sentence_map": sentid_for_subword,
+            "sentence_map_word": sentid_for_word,
             "genre": genre,
             "n_words": n_words,
             "n_subwords": n_subwords,
