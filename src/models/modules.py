@@ -15,6 +15,7 @@ import math
 from collections import Iterable
 from typing import Union, List, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.init as init
@@ -272,12 +273,17 @@ class Utils(object):
                     Utils.check_for_nans(v)
 
         elif isinstance(data, list):
+
+            # Check if its a list of literals
+            if len(data) > 0 and isinstance(data[0], (int, float, np.ndarray, str)):
+                return
+
             for item in data:
                 if isinstance(item, torch.Tensor) and item.isnan().any():
                     raise NANsFound
 
-                elif isinstance(data, list) or isinstance(data, dict):
-                    Utils.check_for_nans(data)
+                elif isinstance(item, list) or isinstance(item, dict):
+                    Utils.check_for_nans(item)
 
 
 class SharedDense(torch.nn.Module):

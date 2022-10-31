@@ -144,6 +144,7 @@ DEFAULTS: dict = FancyDict({
     'coref_a_scoring_batch_size': 512,  # Controls the number of spans for which anaphoricity can be scores in one
     # batch. Only affects final scoring; mention extraction and rough scoring
     # are less memory intensive, so they are always done in just one batch.
+    'coref_spanpred_featdim': 64,  # Controls the dimensionality of distance embeddings used by SpanPredictor
 
     'bias_in_last_layers': False,  # model's last lin layers will have bias set based on this flag
     'max_top_antecedents': 50,  # How many top antecedents to consider for a given anaphor (COREF specific)

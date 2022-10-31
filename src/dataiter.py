@@ -114,17 +114,12 @@ class MultiTaskDataIter(Dataset):
             self.genre_dict = json.load(f)
 
         (self.data, flag_successfully_pulled_from_disk) = self.load_from_disk(rebuild_cache)
-        self.task_weights = {}
+        self.task_weights = {task_nm: torch.ones(2, dtype=torch.float) / 2 for task_nm in ['ner', 'pruner', 'pos']}
 
         if not flag_successfully_pulled_from_disk:
 
             # Init the list of documents (pull it from disk)
             self.dataset = DocumentReader(src=src, split=split, tasks=self.tasks, shuffle=shuffle)
-
-            # Temporarily set class weights for all tasks as [0.5, 0.5]
-            for task_nm in self.tasks:
-                if task_nm in ['ner', 'pruner', 'pos']:
-                    self.task_weights[task_nm] = torch.ones(2, dtype=torch.float) / 2
 
             # Process the dataset
             self.process()
@@ -842,17 +837,16 @@ class MultiTaskDataIter(Dataset):
 
         if "coref" in self.tasks or "pruner" in self.tasks:
 
-            coref_op = self.process_coref(
-                instance, return_dict, word2subword_starts, word2subword_ends
-            )
+            coref_op = self.process_coref(instance, return_dict, word2subword_starts, word2subword_ends)
 
             if "coref" in self.tasks:
                 return_dict["coref"] = coref_op
 
-            if "pruner" in self.tasks:
-                return_dict["pruner"] = self.process_pruner(
-                    instance, return_dict, coref_op, return_dict['ner'] if "ner" in self.tasks else None
-                )
+            # We put the pruner gold labels every single time. For WL Coref, this isn't 'pruner' stuff
+            # as much as just regular stuff
+            return_dict["pruner"] = self.process_pruner(
+                instance, return_dict, coref_op, return_dict['ner'] if "ner" in self.tasks else None
+            )
 
         return return_dict
 

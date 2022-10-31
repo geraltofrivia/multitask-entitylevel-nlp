@@ -423,7 +423,6 @@ class CorefDecoderWL(torch.nn.Module):
             input: everything model_forward outputs.
             input: coref specific label information
         """
-        pred_words = pred_stuff['words']
         pred_scores = pred_stuff['coref_scores']
         pred_indices = pred_stuff['coref_indices']
         pred_rough_scores = pred_stuff['coref_rough_scores']
@@ -435,53 +434,14 @@ class CorefDecoderWL(torch.nn.Module):
         coref_y = self._get_ground_truth(cluster_ids, pred_indices, (pred_rough_scores > float("-inf")))
         word_clusters = self._clusterize(n_words=n_words, scores=pred_scores, top_indices=pred_indices)
 
-        print('potato')
+        return_dict = {
+            'cluster_ids': cluster_ids,
+            'coref_y': coref_y,
+            'word_clusters': word_clusters
+        }
 
-        gold_clusters = ...
-        # need to be something like (on word space)
-        # tensor([ 0,  0,  0,  0,  0,  0,  0,  0,  1,  0,  2,  0,  0,  0,  3,  0,  0,  4,
-        #          0,  0,  0,  5,  0,  0,  0,  0,  0,  0,  6,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  7,  0,  0,  0,  0,  0,  0,
-        #          8,  0,  0,  0,  0,  0,  7,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  6,  0,
-        #          0,  0,  0,  2,  0,  0,  0,  0,  1,  0,  0,  0,  6,  0,  0,  0,  0,  0,
-        #          1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  4,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  4,  0,  9,  0,  5,  0,  0,  6,  0,  0,  0,  9,
-        #          0,  0,  0,  0,  0,  9,  0,  0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  3,
-        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,
-        #          4,  0,  0,  0,  0,  0,  0,  0,  1,  0,  3,  0,  0,  1,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  6,  0,  0,  0,  0,  4,  0,  0,  0,  0,  0,  0,  0,  4,
-        #          0,  0,  3,  0,  0,  0,  0,  0,  0, 10,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  4,  0, 10,  0,  0,  3,  0, 10,  0,  3,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  3,  0,  0,  0,  3,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  3,  0,  0,  0,  0,  0,  0,
-        #          3,  0,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  6,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
-        #          0,  8,  0,  0,  0,  0,  0,  0,  0])
-
-        """
-            Some other stuff that needs to be done
-            res = CorefResult()
-    
-            # coref_scores  [n_spans, n_ants]
-            res.coref_scores = torch.cat(a_scores_lst, dim=0)
-    
-            res.coref_y = self._get_ground_truth(
-                cluster_ids, top_indices, (top_rough_scores > float("-inf")))
-            res.word_clusters = self._clusterize(doc, res.coref_scores,
-                                                 top_indices)
-            res.span_scores, res.span_y = self.sp.get_training_data(doc, words)
-    
-            if not self.training:
-                res.span_clusters = self.sp.predict(doc, words, res.word_clusters)
-    
-            return res
-
-        """
+        Utils.check_for_nans(return_dict)
+        return return_dict
 
 
 class CorefDecoderHOI(torch.nn.Module):

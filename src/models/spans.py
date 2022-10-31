@@ -3,7 +3,7 @@
     and span predictor for word level stuff
 """
 
-from typing import Optional, Tuple, List, Union
+from typing import List, Union
 
 import torch
 import torch.nn as nn
@@ -274,7 +274,7 @@ class SpanPredictor(torch.nn.Module):
         return next(self.ffnn.parameters()).device
 
     def forward(self,  # type: ignore  # pylint: disable=arguments-differ  #35566 in pytorch
-                doc,  #: Doc,
+                sentence_map: torch.Tensor,  #: Doc,
                 words: torch.Tensor,
                 heads_ids: torch.Tensor) -> torch.Tensor:
         """
@@ -296,7 +296,7 @@ class SpanPredictor(torch.nn.Module):
         emb_ids[(emb_ids < 0) + (emb_ids > 126)] = 127  # "too_far"
 
         # Obtain "same sentence" boolean mask, [n_heads, n_words]
-        sent_id = torch.tensor(doc["sent_id"], device=words.device)
+        sent_id = torch.tensor(sentence_map, device=words.device)
         same_sent = (sent_id[heads_ids].unsqueeze(1) == sent_id.unsqueeze(0))
 
         # To save memory, only pass candidates from one sentence for each head
@@ -334,24 +334,11 @@ class SpanPredictor(torch.nn.Module):
             return scores + valid_positions
         return scores
 
-    def pred_with_labels(self,
-                         doc,  #: Doc,
-                         words: torch.Tensor
-                         ) -> Tuple[Optional[torch.Tensor], Optional[Tuple[torch.Tensor, torch.Tensor]]]:
-        """ Returns span starts/ends for gold mentions in the document. """
-        head2span = sorted(doc["head2span"])
-        if not head2span:
-            return None, None
-        heads, starts, ends = zip(*head2span)
-        heads = torch.tensor(heads, device=self.device)
-        starts = torch.tensor(starts, device=self.device)
-        ends = torch.tensor(ends, device=self.device) - 1
-        return self(doc, words, heads), (starts, ends)
-
     def predict(self,
                 doc,  #: Doc,
                 words: torch.Tensor,
                 clusters: List[List[int]]) -> List[list]:
+        raise NotImplementedError
         """
         Predicts span clusters based on the word clusters.
 

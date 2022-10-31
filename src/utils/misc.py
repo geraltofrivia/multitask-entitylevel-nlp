@@ -350,6 +350,7 @@ def check_dumped_config(config: SerializedBertConfig, old: Union[dict, Path, Ser
         '_sampling_ratio',
         'wandb_name',
         'epochs_last_run',
+        'coref_spanpred_featdim',
         'cwd'
     ]
 

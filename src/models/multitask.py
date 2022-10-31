@@ -22,7 +22,7 @@ from utils.data import Tasks
 from config import _SEED_ as SEED, DOMAIN_HAS_NER_MULTILABEL
 from preproc.encode import Retriever
 from models.modules import SharedDense, Utils
-from models.spans import SpanPrunerHOI as SpanPruner
+from models.spans import SpanPrunerHOI as SpanPruner, SpanPredictor
 from models.coref import CorefDecoderHOI as CorefDecoder, CorefDecoderWL
 from utils.exceptions import AnticipateOutOfMemException, UnknownDomainException, NANsFound
 
@@ -66,6 +66,7 @@ class MTLModelWordLevel(nn.Module):
             coref_loss_type: str,
             coref_false_new_delta: float,
             coref_a_scoring_batch_size: int,
+            coref_spanpred_featdim: int,
 
             # NER specific Params
             ner_dropout: float,
@@ -132,6 +133,8 @@ class MTLModelWordLevel(nn.Module):
                 coref_spanemb_size=coref_spanemb_size,
                 coref_a_scoring_batch_size=coref_a_scoring_batch_size
             )
+
+            self.span_predictor = SpanPredictor(input_size=hidden_size, distance_emb_size=coref_spanpred_featdim)
 
         ner_span_embedding_dim = (hidden_size * 3) + coref_metadata_feature_size
 
@@ -525,10 +528,17 @@ class MTLModelWordLevel(nn.Module):
         if "coref" in tasks:
 
             # Just send everything to post forward for now
-            self.coref.post_forward(
+            coref_stuff: dict = self.coref.post_forward(
                 pred_stuff=predictions,
                 gold_stuff=coref,
                 n_words=n_words
+            )
+
+            # Use the coref forward and post forward information to predict spans
+            spanpred_scores = self.span_predictor(
+                sentence_map=sentence_map,
+                words=predictions['words'],
+                heads_ids=coref['gold_spanhead_word']
             )
 
             raise NotImplementedError
