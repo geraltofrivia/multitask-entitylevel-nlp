@@ -126,20 +126,17 @@ class MultiTaskDataIter(Dataset):
 
             # Calculate actual class weights
             if not unalias_split(self._split_) == 'test':
-                for task_nm in self.tasks:
-                    if (task_nm == 'ner' and not self.tasks.ner_unweighted()) or \
-                            (task_nm == 'pruner' and not self.tasks.pruner_unweighted()) or \
-                            (task_nm == 'pos' and not self.tasks.pos_unweighted()):
-                        self.task_weights[task_nm] = torch.tensor(self.estimate_class_weights(task_nm),
-                                                                  dtype=torch.float)
-            # Update self.data with these class weights
-            for i, item in enumerate(self.data):
-                if item['ner']:
-                    self.data[i]['ner']['weights'] = self.task_weights['ner']
-                if item['pruner']:
-                    self.data[i]['pruner']['weights'] = self.task_weights['pruner']
-                if item['pos']:
-                    self.data[i]['pos']['weights'] = self.task_weights['pos']
+                if 'pruner' in self.tasks and self.tasks.pruner_weights is None \
+                        and self.tasks.is_task_unweighted('pruner'):
+                    self.tasks.pruner_weights = torch.tensor(self.estimate_class_weights('pruner')).float()
+
+                if 'pos' in self.tasks and self.tasks.pos_weights is None \
+                        and self.tasks.is_task_unweighted('pruner'):
+                    self.tasks.pos_weights = torch.tensor(self.estimate_class_weights('pos')).float()
+
+                if 'ner' in self.tasks and self.tasks.ner_weights is None \
+                        and self.tasks.is_task_unweighted('pruner'):
+                    self.tasks.ner_weights = torch.tensor(self.estimate_class_weights('ner')).float()
 
             # Write this to disk
             self.write_to_disk()
@@ -465,7 +462,6 @@ class MultiTaskDataIter(Dataset):
             "gold_starts": gold_starts_sw,
             "gold_ends": gold_ends_sw,
             "gold_label_values": new_cluster_ids_subword,
-            "weights": self.task_weights['pruner'],
 
             # word level stuff
             "gold_starts_word": gold_starts_word,
@@ -591,7 +587,6 @@ class MultiTaskDataIter(Dataset):
             "gold_ends": gold_ends,
             "gold_label_values": gold_labels,
             "gold_spanhead_word": gold_spanheads,
-            "weights": self.task_weights['ner']
         }
 
         # Finally, check if gold_labels are empty (maybe all spans are larger than max span width or something)
@@ -616,7 +611,6 @@ class MultiTaskDataIter(Dataset):
 
         return {
             'gold_label_values': pos_tensor,
-            "weights": self.task_weights['pos']
         }
 
     def process_document_generic(self, instance: Document) -> dict:
@@ -1044,13 +1038,13 @@ class MultiDomainDataCombiner(Dataset):
         self.sampling_ratio = [1] * len(self.dataiters) if not sampling_ratio else sampling_ratio
 
         # Normalise sampling_ratios, weighted by aggregate length of all dataiters
-        weights = [len(dataiter) for dataiter in self.dataiters]
-        self.weights = [int(weight * ratio) for weight, ratio in zip(weights, self.sampling_ratio)]
+        domain_weights = [len(dataiter) for dataiter in self.dataiters]
+        self.domain_weights = [int(weight * ratio) for weight, ratio in zip(domain_weights, self.sampling_ratio)]
 
         # Create a list of ints based on these weights which dictate which iter to choose the next sample from
 
-        for i, dataset_specific_weight in enumerate(self.weights):
-            self.source_indices += [i] * dataset_specific_weight
+        for i, domain_weight in enumerate(self.domain_weights):
+            self.source_indices += [i] * domain_weight
 
         # Now shuffle these
         np.random.shuffle(self.source_indices)
@@ -1063,7 +1057,7 @@ class MultiDomainDataCombiner(Dataset):
         self.history: Dict[int, Tuple[int, int]] = {}
 
     def __len__(self):
-        return sum(self.weights)
+        return sum(self.domain_weights)
 
     # def __iter__(self):
     #     for dataiter_index in self.source_indices:
