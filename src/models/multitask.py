@@ -184,7 +184,7 @@ class MTLModelWordLevel(nn.Module):
         self.clip_grad_norm_ = self.separate_max_norm_base_task
 
     # noinspection PyProtectedMember
-    def is_unweighted(self, task, domain):
+    def _disambiguate_domain_(self, domain: str) -> Tasks:
         task_obj = None
         for stored_task_obj in self._tasks_:
             if stored_task_obj.dataset == domain:
@@ -193,7 +193,7 @@ class MTLModelWordLevel(nn.Module):
         if task_obj is None:
             raise UnknownDomainException(f"Domain {domain} was probably not passed to this model.")
 
-        return task_obj._task_unweighted_(task)
+        return task_obj
 
     def separate_max_norm_base_task(self, max_norm):
         base_params = [p for n, p in self.named_parameters() if "bert" in n]
@@ -434,6 +434,7 @@ class MTLModelWordLevel(nn.Module):
 
         candidate_starts = predictions['candidate_starts']
         candidate_ends = predictions['candidate_ends']
+        task_obj = self._disambiguate_domain_(domain=domain)
 
         outputs = {
             "loss": {},
@@ -546,8 +547,9 @@ class MTLModelWordLevel(nn.Module):
             )  # (n_gold_spanheads, n_words, 2)
 
             spanpred_gold = (pruner['gold_starts_word'], pruner['gold_ends_word'])
-            spanpred_loss = (self._span_criterion(spanpred_scores[:, :, 0], pruner['gold_starts_word'])
-                             + self._span_criterion(spanpred_scores[:, :, 1], pruner['gold_ends_word'])) / avg_spans / 2
+            spanpred_loss = (self.span_predictor.loss_fn(spanpred_scores[:, :, 0], pruner['gold_starts_word'])
+                             + self.span_predictor.loss_fn(spanpred_scores[:, :, 1],
+                                                           pruner['gold_ends_word'])) / task_obj.n_avg_spans / 2
             raise NotImplementedError
 
             gold_starts = coref["gold_starts_word"]
@@ -659,10 +661,10 @@ class MTLModelWordLevel(nn.Module):
         if "pos" in tasks:
             pos_logits = predictions["pos_logits"]
             pos_labels = pos["gold_label_values"]
-            if self.is_unweighted(task="pos", domain=domain):
+            if task_obj.is_task_unweighted("pos"):
                 pos_loss = self.pos_loss(pos_logits, pos_labels)
             else:
-                pos_loss = self.pos_loss(pos_logits, pos_labels, weight=pos["weights"])
+                pos_loss = self.pos_loss(pos_logits, pos_labels, weight=task_obj.pos_weights)
 
             if torch.isnan(pos_loss):
                 raise NANsFound(
@@ -698,11 +700,12 @@ class MTLModelWordLevel(nn.Module):
 
             # Calculating the loss
             # if self.ner_unweighted:
-            if self.is_unweighted(task='ner', domain=domain):
+
+            if task_obj.is_task_unweighted("ner"):
                 ner_loss = self.ner_loss[domain](ner_logits, ner_labels)
             else:
                 try:
-                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner["weights"])
+                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=task_obj.ner_weights)
                 except IndexError as e:
                     print(ner_logits)
                     print(ner_logits.shape)
@@ -911,7 +914,7 @@ class MTLModel(nn.Module):
         # noinspection PyAttributeOutsideInit
         self.clip_grad_norm_ = self.separate_max_norm_base_task
 
-    def _disambiguate_domain_(self, domain):
+    def _disambiguate_domain_(self, domain: str) -> Tasks:
         task_obj = None
         for stored_task_obj in self._tasks_:
             if stored_task_obj.dataset == domain:

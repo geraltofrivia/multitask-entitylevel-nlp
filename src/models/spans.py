@@ -266,7 +266,7 @@ class SpanPredictor(torch.nn.Module):
             torch.nn.Conv1d(4, 2, 3, 1, 1)
         )
         self.emb = torch.nn.Embedding(128, distance_emb_size)  # [-63, 63] + too_far
-        self._loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
+        self.loss_fn = torch.nn.CrossEntropyLoss(reduction="sum")
 
     @property
     def device(self) -> torch.device:

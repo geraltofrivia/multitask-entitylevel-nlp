@@ -579,13 +579,16 @@ class Document:
 @dataclass
 class Tasks:
     """
-        A nice object which notes down which tasks we're dealing with, given a dataset.
+        A nice config-like object which notes down which tasks we're dealing with, given a dataset.
         Its rather powerful but also easy to use.
 
         The best way to use it would be to
             tasks = Tasks.parse('ontonotes', ['pruner', 1.0, True], ['pos', 10.4, False])
 
         After which it would be able to tell you how many POS tags does this dataset (ontonotes here) contain.
+
+        NOTE: THIS DOES NOT CONTAIN ANY ACTUAL DATA BUT IS A TEMPLATE FOR WHAT DATASET, WHAT TASKS, and other
+            dataset-task specific metadata collected from argv or config or from disk
     """
 
     names: List[str]
@@ -593,14 +596,15 @@ class Tasks:
     use_class_weights: List[bool]
     dataset: str
 
+    shared_ner: bool = field(default_factory=bool)
+
+    # Metadata
     n_classes_ner: Optional[int] = field(default_factory=int)
     n_classes_pruner: Optional[int] = field(default_factory=int)
     n_classes_pos: Optional[int] = field(default_factory=int)
     n_speakers: Optional[int] = field(default_factory=int)
     n_genres = 0
-
-    shared_ner: bool = field(default_factory=bool)
-
+    _n_avg_spans_: Optional[float] = None
     _ner_weight_: Optional[List[float]] = None
     _pos_weight_: Optional[List[float]] = None
     _pruner_weight_: Optional[List[float]] = None
@@ -646,10 +650,11 @@ class Tasks:
         n_classes_pruner = 0
         n_classes_pos = 0
         n_speakers = 0
+        n_avg_spans = 0.0
 
         return cls(names=names, loss_scales=loss_scales, use_class_weights=use_class_weights, dataset=dataset,
                    n_classes_ner=n_classes_ner, n_classes_pruner=n_classes_pruner, n_classes_pos=n_classes_pos,
-                   n_speakers=n_speakers, shared_ner=shared_ner)
+                   n_speakers=n_speakers, shared_ner=shared_ner, _n_avg_spans_=n_avg_spans)
 
     def __post_init__(self, *args, **kwargs):
 
@@ -678,16 +683,16 @@ class Tasks:
             warnings.warn(f"No genre dict found for {self.dataset}. Setting to one.")
             self.n_genres = 1
 
-    def _pull_weights_from_disk_(self, task):
+    def _pull_from_disk_(self, task, objnm: str):
         try:
-            with (LOC.manual / f"{self.dataset}_{task}_taskweights.json").open('r') as f:
-                return [float(x) for x in json.load(f)]
+            with (LOC.manual / f"{self.dataset}_{task}_{objnm}.json").open('r') as f:
+                return json.load(f)
         except FileNotFoundError:
             return None
 
-    def _write_weights_to_disk_(self, task, val):
+    def _write_to_disk_(self, task, val, objnm: str):
         val = val.cpu().tolist() if isinstance(val, torch.Tensor) else val
-        with (LOC.manual / f"{self.dataset}_{task}_taskweights.json").open('w+') as f:
+        with (LOC.manual / f"{self.dataset}_{task}_{objnm}.json").open('w+') as f:
             json.dump(val, f)
 
     @property
@@ -697,7 +702,7 @@ class Tasks:
             if self.is_task_unweighted('pruner'):
                 return torch.zeros(self.n_classes_pruner)
             # Or we need to pull it from disk
-            self._pruner_weight_ = self._pull_weights_from_disk_('pruner')
+            self._pruner_weight_ = self._pull_from_disk_('pruner', 'taskweights')
         return self._pruner_weight_
 
     @property
@@ -707,7 +712,7 @@ class Tasks:
             if self.is_task_unweighted('ner'):
                 return torch.zeros(self.n_classes_ner)
             # Or we need to pull it from disk
-            self._ner_weight_ = self._pull_weights_from_disk_('ner')
+            self._ner_weight_ = self._pull_from_disk_('ner', 'taskweights')
         return self._ner_weight_
 
     @property
@@ -717,26 +722,38 @@ class Tasks:
             if self.is_task_unweighted('pos'):
                 return torch.zeros(self.n_classes_pos)
             # Or we need to pull it from disk
-            self._pos_weight_ = self._pull_weights_from_disk_('pos')
+            self._pos_weight_ = self._pull_from_disk_('pos', 'taskweights')
         return self._pos_weight_
+
+    @property
+    def n_avg_spans(self):
+        if not self._n_avg_spans_:
+            self._n_avg_spans_ = self._pull_from_disk_(''.join(sorted(self.names)), 'avgspans')
+        return self._n_avg_spans_
 
     @pruner_weights.setter
     def pruner_weights(self, val):
         # Write it to disk
-        self._write_weights_to_disk_('pruner', val)
+        self._write_to_disk_('pruner', val, 'taskweights')
         self._pruner_weight_ = val
 
     @ner_weights.setter
     def ner_weights(self, val):
         # Write it to disk
-        self._write_weights_to_disk_('ner', val)
+        self._write_to_disk_('ner', val, 'taskweights')
         self._ner_weight_ = val
 
     @pos_weights.setter
     def pos_weights(self, val):
         # Write it to disk
-        self._write_weights_to_disk_('pos', val)
+        self._write_to_disk_('pos', val, 'taskweights')
         self._pos_weight_ = val
+
+    @n_avg_spans.setter
+    def n_avg_spans(self, val):
+        # Write to disk
+        self._write_to_disk_(''.join(sorted(self.names)), val, 'avgspans')
+        self._n_avg_spans_ = val
 
     def is_task_unweighted(self, task_nm: str) -> bool:
         if task_nm not in self:

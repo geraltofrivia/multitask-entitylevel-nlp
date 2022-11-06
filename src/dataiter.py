@@ -117,29 +117,34 @@ class MultiTaskDataIter(Dataset):
         self.task_weights = {task_nm: torch.ones(2, dtype=torch.float) / 2 for task_nm in ['ner', 'pruner', 'pos']}
 
         if not flag_successfully_pulled_from_disk:
-
             # Init the list of documents (pull it from disk)
             self.dataset = DocumentReader(src=src, split=split, tasks=self.tasks, shuffle=shuffle)
-
             # Process the dataset
             self.process()
-
-            # Calculate actual class weights
-            if not unalias_split(self._split_) == 'test':
-                if 'pruner' in self.tasks and self.tasks.pruner_weights is None \
-                        and self.tasks.is_task_unweighted('pruner'):
-                    self.tasks.pruner_weights = torch.tensor(self.estimate_class_weights('pruner')).float()
-
-                if 'pos' in self.tasks and self.tasks.pos_weights is None \
-                        and self.tasks.is_task_unweighted('pruner'):
-                    self.tasks.pos_weights = torch.tensor(self.estimate_class_weights('pos')).float()
-
-                if 'ner' in self.tasks and self.tasks.ner_weights is None \
-                        and self.tasks.is_task_unweighted('pruner'):
-                    self.tasks.ner_weights = torch.tensor(self.estimate_class_weights('ner')).float()
-
             # Write this to disk
             self.write_to_disk()
+
+        """
+            Metadata calculation
+
+            1. Calculate actual class weights
+            2. Calculate average number of spans, depending on how many instances are here.
+        """
+        if not unalias_split(self._split_) == 'test':
+            if 'pruner' in self.tasks and self.tasks.pruner_weights is None \
+                    and self.tasks.is_task_unweighted('pruner'):
+                self.tasks.pruner_weights = self.metadata_estimate_class_weights('pruner')
+
+            if 'pos' in self.tasks and self.tasks.pos_weights is None \
+                    and self.tasks.is_task_unweighted('pruner'):
+                self.tasks.pos_weights = self.metadata_estimate_class_weights('pos')
+
+            if 'ner' in self.tasks and self.tasks.ner_weights is None \
+                    and self.tasks.is_task_unweighted('pruner'):
+                self.tasks.ner_weights = self.metadata_estimate_class_weights('ner')
+
+            if not self.tasks.n_avg_spans:
+                self.tasks.n_avg_spans = self.metadata_estimate_avg_spans()
 
         if 0 < self.config.trim < len(self.data):
             warnings.warn(f"The dataset has been trimmed to only {self.config.trim} instances. "
@@ -154,7 +159,7 @@ class MultiTaskDataIter(Dataset):
                 np.random.shuffle(data)
                 self.data = data
 
-    def estimate_class_weights(self, task: str) -> List[float]:
+    def metadata_estimate_class_weights(self, task: str) -> List[float]:
         """
             A sense of prior prob of predicting a class, based on the data available.
             Expect them to be extremely heavily twisted in the case of __na__ of course.
@@ -180,6 +185,17 @@ class MultiTaskDataIter(Dataset):
         weights = weights.clip(self.config.weights_clip_min, self.config.weights_clip_max)
         return weights
         # return compute_class_weight('balanced', np.unique(you), y.numpy()).tolist()
+
+    def metadata_estimate_avg_spans(self) -> float:
+        """ Count the number of spans; depending on the tasks at hand. Expects data to be processed already """
+        nspans = []
+        for datum in self.data:
+            spans_this_doc = 0
+            spans_this_doc += datum['ner']['gold_starts'].shape[0] if 'ner' in self.tasks else 0
+            spans_this_doc += datum['coref']['gold_starts'].shape[0] if 'coref' in self.tasks else 0
+            nspans.append(spans_this_doc)
+
+        return sum(nspans) / len(nspans)
 
     def write_to_disk(self):
         """
