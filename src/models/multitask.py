@@ -217,8 +217,7 @@ class MTLModel(nn.Module):
         # noinspection PyAttributeOutsideInit
         self.clip_grad_norm_ = self.separate_max_norm_base_task
 
-    # noinspection PyProtectedMember
-    def is_unweighted(self, task, domain):
+    def _disambiguate_domain_(self, domain):
         task_obj = None
         for stored_task_obj in self._tasks_:
             if stored_task_obj.dataset == domain:
@@ -227,7 +226,7 @@ class MTLModel(nn.Module):
         if task_obj is None:
             raise UnknownDomainException(f"Domain {domain} was probably not passed to this model.")
 
-        return task_obj._task_unweighted_(task)
+        return task_obj
 
     def separate_max_norm_base_task(self, max_norm):
         base_params = [p for n, p in self.named_parameters() if "bert" in n]
@@ -556,7 +555,7 @@ class MTLModel(nn.Module):
             gold_mention_scores = pred_scores[pruned_space_cluster_ids > 0]
             non_gold_mention_scores = pred_scores[pruned_space_cluster_ids == 0]
 
-            if self.is_unweighted(task='pruner', domain=domain):
+            if self._disambiguate_domain_(domain=domain).is_task_unweighted('pruner'):
                 # TODO: if sigmoid is negative, log of it becomes NaN. Prevent sigmoid from ever being negative?
                 if gold_mention_scores.nelement() != 0:
                     pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores)))
@@ -575,7 +574,7 @@ class MTLModel(nn.Module):
 
             if torch.isnan(pruner_loss):
                 print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
-                print(f"Weighted or Unweighted: {self.is_unweighted(task='pruner', domain=domain)}")
+                print(f"Weighted or Unweighted: {self._disambiguate_domain_(domain).is_task_unweighted('pruner')}")
                 print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
                 print(f"**Gold Mention Stuff:")
                 print(f"\t shape             : {gold_mention_scores.shape}")
@@ -735,10 +734,11 @@ class MTLModel(nn.Module):
         if "pos" in tasks:
             pos_logits = predictions["pos_logits"]
             pos_labels = pos["gold_label_values"]
-            if self.is_unweighted(task="pos", domain=domain):
+            pos_task_obj = self._disambiguate_domain_(domain)
+            if pos_task_obj.is_task_unweighted("pos"):
                 pos_loss = self.pos_loss(pos_logits, pos_labels)
             else:
-                pos_loss = self.pos_loss(pos_logits, pos_labels, weight=pos["weights"])
+                pos_loss = self.pos_loss(pos_logits, pos_labels, weight=pos_task_obj.pos_weights)
 
             if torch.isnan(pos_loss):
                 raise NANsFound(
@@ -774,11 +774,12 @@ class MTLModel(nn.Module):
 
             # Calculating the loss
             # if self.ner_unweighted:
-            if self.is_unweighted(task='ner', domain=domain):
+            ner_task_obj = self._disambiguate_domain_(domain)
+            if ner_task_obj.is_task_unweighted("ner"):
                 ner_loss = self.ner_loss[domain](ner_logits, ner_labels)
             else:
                 try:
-                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner["weights"])
+                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner_task_obj.ner_weights)
                 except IndexError as e:
                     print(ner_logits)
                     print(ner_logits.shape)

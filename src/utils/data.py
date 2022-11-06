@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from functools import cached_property
 from typing import List, Optional, Tuple, Union
 
+import torch
+
 from config import KNOWN_TASKS, LOSS_SCALES, LOCATIONS as LOC, KNOWN_HAS_SPEAKERS
 from utils.exceptions import UnknownTaskException, BadParameters, LabelDictNotFound
 from utils.misc import argsort, load_speaker_tag_dict, get_duplicates_format_listoflist as get_duplicates, \
@@ -597,6 +599,10 @@ class Tasks:
     n_speakers: Optional[int] = field(default_factory=int)
     n_genres = 0
 
+    _ner_weight_: Optional[torch.Tensor] = None
+    _pos_weight_: Optional[torch.Tensor] = None
+    _pruner_weight_: Optional[torch.Tensor] = None
+
     @classmethod
     def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]],
               use_speakers: bool = False, faux: bool = False):
@@ -654,13 +660,10 @@ class Tasks:
         """
         if 'ner' in self.names:
             self.n_classes_ner = self._get_n_classes_(task='ner', dataset=self.dataset)
-
         if 'pos' in self.names:
             self.n_classes_pos = self._get_n_classes_(task='pos', dataset=self.dataset)
-
         if 'pruner' in self.names:
             self.n_classes_pruner = 2
-
         if self.dataset in KNOWN_HAS_SPEAKERS:
             self.n_speakers = self._get_n_speakers_(dataset=self.dataset)
 
@@ -669,6 +672,72 @@ class Tasks:
         except FileNotFoundError:
             warnings.warn(f"No genre dict found for {self.dataset}. Setting to one.")
             self.n_genres = 1
+
+    def _pull_weights_from_disk_(self, task):
+        try:
+            with (LOC.manual / f"{self.dataset}_{task}_taskweights.json").open('r') as f:
+                return torch.tensor(json.load(f)).float()
+        except FileNotFoundError:
+            return None
+
+    def _write_weights_to_disk_(self, task, val):
+        val = val.cpu().tolist() if isinstance(val, torch.Tensor) else val
+        with (LOC.manual / f"{self.dataset}_{task}_taskweights.json").open('w+') as f:
+            json.dump(val, f)
+
+    @property
+    def pruner_weights(self):
+        if self._pruner_weight_ is None:
+            # Either the task is unweighted
+            if self.is_task_unweighted('pruner'):
+                return torch.zeros(self.n_classes_pruner)
+            # Or we need to pull it from disk
+            self._pruner_weight_ = self._pull_weights_from_disk_('pruner')
+        return self._pruner_weight_
+
+    @property
+    def ner_weights(self):
+        if self._ner_weight_ is None:
+            # Either the task is unweighted
+            if self.is_task_unweighted('ner'):
+                return torch.zeros(self.n_classes_ner)
+            # Or we need to pull it from disk
+            self._ner_weight_ = self._pull_weights_from_disk_('ner')
+        return self._ner_weight_
+
+    @property
+    def pos_weights(self):
+        if self._pos_weight_ is None:
+            # Either the task is unweighted
+            if self.is_task_unweighted('pos'):
+                return torch.zeros(self.n_classes_pos)
+            # Or we need to pull it from disk
+            self._pos_weight_ = self._pull_weights_from_disk_('pos')
+        return self._pos_weight_
+
+    @pruner_weights.setter
+    def pruner_weights(self, val):
+        # Write it to disk
+        self._write_weights_to_disk_('pruner', val)
+        self._pruner_weight_ = val
+
+    @ner_weights.setter
+    def ner_weights(self, val):
+        # Write it to disk
+        self._write_weights_to_disk_('ner', val)
+        self._ner_weight_ = val
+
+    @pos_weights.setter
+    def pos_weights(self, val):
+        # Write it to disk
+        self._write_weights_to_disk_('pos', val)
+        self._pos_weight_ = val
+
+    def is_task_unweighted(self, task_nm: str) -> bool:
+        if task_nm not in self:
+            raise UnknownTaskException(f"Asked for {task_nm} but task does not exist.")
+        task_index = self.names.index(task_nm)
+        return not self.use_class_weights[task_index]
 
     def sort(self):
         """ Rearranges all artefacts to sort them in the right order """
@@ -680,25 +749,6 @@ class Tasks:
         self.names = [self.names[i] for i in sorted_ind]
         self.loss_scales = [self.loss_scales[i] for i in sorted_ind]
         self.use_class_weights = [self.use_class_weights[i] for i in sorted_ind]
-
-    def _task_unweighted_(self, task_nm: str) -> bool:
-        if task_nm not in self:
-            raise UnknownTaskException(f"Asked for {task_nm} but task does not exist.")
-
-        task_index = self.names.index(task_nm)
-        return not self.use_class_weights[task_index]
-
-    def ner_unweighted(self) -> bool:
-        return self._task_unweighted_('ner')
-
-    def coref_unweighted(self) -> bool:
-        return self._task_unweighted_('coref')
-
-    def pos_unweighted(self) -> bool:
-        return self._task_unweighted_('pos')
-
-    def pruner_unweighted(self) -> bool:
-        return self._task_unweighted_('pruner')
 
     @staticmethod
     def _get_n_classes_(task: str, dataset: str) -> int:
@@ -739,16 +789,13 @@ class Tasks:
 
         all_neg = all([val < 0 for val in scales])
         if all_neg:
-
             key = '_'.join(sorted(names))
             return LOSS_SCALES[key]
-
         else:
             # There is at least one positive value
             for i, val in enumerate(scales):
                 if val < 0:
                     scales[i] = LOSS_SCALES[names[i]][0]
-
             return scales
 
     def __len__(self):
