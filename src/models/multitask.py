@@ -564,18 +564,20 @@ class MTLModel(nn.Module):
                 if non_gold_mention_scores.nelement() != 0:
                     pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores)))
             else:
+                pruner_weights = torch.tensor(self._disambiguate_domain_(domain=domain).pruner_weights,
+                                              device=input_ids.device, dtype=torch.float)
                 if gold_mention_scores.nelement() != 0:
-                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner['weights'][1]
+                    pruner_loss = -torch.sum(torch.log(torch.sigmoid(gold_mention_scores))) * pruner_weights[1]
                 else:
                     pruner_loss = 0
                 if non_gold_mention_scores.nelement() != 0:
                     pruner_loss += -torch.sum(torch.log(1 - torch.sigmoid(non_gold_mention_scores))) * \
-                                   pruner['weights'][0]
+                                   pruner_weights[0]
 
             if torch.isnan(pruner_loss):
                 print(colored(f"Found nan in pruner loss. Here are some details - ", "red", attrs=['bold']))
                 print(f"Weighted or Unweighted: {self._disambiguate_domain_(domain).is_task_unweighted('pruner')}")
-                print(f"\t Weights (ignore if unweighted): {pruner['weights']}")
+                print(f"\t Weights (ignore if unweighted): {self._disambiguate_domain_(domain=domain).pruner_weights}")
                 print(f"**Gold Mention Stuff:")
                 print(f"\t shape             : {gold_mention_scores.shape}")
                 print(f"\t min               : {gold_mention_scores.min()}")
@@ -738,7 +740,8 @@ class MTLModel(nn.Module):
             if pos_task_obj.is_task_unweighted("pos"):
                 pos_loss = self.pos_loss(pos_logits, pos_labels)
             else:
-                pos_loss = self.pos_loss(pos_logits, pos_labels, weight=pos_task_obj.pos_weights)
+                pos_loss = self.pos_loss(pos_logits, pos_labels,
+                                         weight=torch.tensor(pos_task_obj.pos_weights, device=input_ids.device))
 
             if torch.isnan(pos_loss):
                 raise NANsFound(
@@ -779,7 +782,9 @@ class MTLModel(nn.Module):
                 ner_loss = self.ner_loss[domain](ner_logits, ner_labels)
             else:
                 try:
-                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels, weight=ner_task_obj.ner_weights)
+                    ner_loss = self.ner_loss[domain](ner_logits, ner_labels,
+                                                     weight=torch.tensor(ner_task_obj.pos_weights,
+                                                                         device=input_ids.device))
                 except IndexError as e:
                     print(ner_logits)
                     print(ner_logits.shape)

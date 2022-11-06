@@ -599,9 +599,9 @@ class Tasks:
     n_speakers: Optional[int] = field(default_factory=int)
     n_genres = 0
 
-    _ner_weight_: Optional[torch.Tensor] = None
-    _pos_weight_: Optional[torch.Tensor] = None
-    _pruner_weight_: Optional[torch.Tensor] = None
+    _ner_weight_: Optional[List[float]] = None
+    _pos_weight_: Optional[List[float]] = None
+    _pruner_weight_: Optional[List[float]] = None
 
     @classmethod
     def parse(cls, datasrc: Optional[str], tuples: List[Tuple[str, float, bool]],
@@ -676,7 +676,7 @@ class Tasks:
     def _pull_weights_from_disk_(self, task):
         try:
             with (LOC.manual / f"{self.dataset}_{task}_taskweights.json").open('r') as f:
-                return torch.tensor(json.load(f)).float()
+                return [float(x) for x in json.load(f)]
         except FileNotFoundError:
             return None
 
