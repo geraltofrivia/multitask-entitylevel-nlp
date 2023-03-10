@@ -1,3 +1,11 @@
+# Intro
+
+In this repository, we experiment with Transformers based approaches for entity-level NLP tasks. For now, we have approaches for coreference resolution, named entity recognition, relation extraction, and simpler token-level tasks like pos tagging. 
+
+Crucially, I've implemented them in a multi-task and a multi-domain setting. So we can train one model on two datasets simultaneously (multi-domain) where one dataset may contain NER annotations, and other may contain Corference Annotations. 
+
+It's a rather configurable and transparent (black box averse) codebase. 
+
 ## Set Up
 
 ### Directory Tree:
